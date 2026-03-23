@@ -2,9 +2,11 @@
 
 use std::{marker::PhantomData, ptr::NonNull};
 
-use crate::alloc::Allocator;
-use crate::error::{Error, from_result};
-use crate::{alloc, ffi};
+use crate::{
+    alloc::Allocator,
+    error::{Error, from_result},
+    ffi,
+};
 
 /// Complete terminal emulator state and rendering.
 ///
@@ -15,14 +17,14 @@ pub struct Terminal<'alloc> {
     _alloc: PhantomData<&'alloc ffi::GhosttyAllocator>,
 }
 
-pub struct TerminalOptions {
+pub struct Options {
     pub cols: u16,
     pub rows: u16,
     pub max_scrollback: usize,
 }
 
-impl From<TerminalOptions> for ffi::GhosttyTerminalOptions {
-    fn from(value: TerminalOptions) -> Self {
+impl From<Options> for ffi::GhosttyTerminalOptions {
+    fn from(value: Options) -> Self {
         Self {
             cols: value.cols,
             rows: value.rows,
@@ -33,8 +35,9 @@ impl From<TerminalOptions> for ffi::GhosttyTerminalOptions {
 
 impl<'alloc> Terminal<'alloc> {
     /// Create a new terminal instance.
-    pub fn new(opts: TerminalOptions) -> Result<Self, Error> {
-        Self::new_with_alloc::<()>(None, opts)
+    pub fn new(opts: Options) -> Result<Self, Error> {
+        // SAFETY: A NULL allocator is always valid
+        unsafe { Self::new_inner(std::ptr::null(), opts) }
     }
 
     /// Create a new terminal instance with a custom allocator.
@@ -42,12 +45,16 @@ impl<'alloc> Terminal<'alloc> {
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
     pub fn new_with_alloc<'ctx: 'alloc, Ctx>(
-        alloc: Option<&'alloc Allocator<'ctx, Ctx>>,
-        opts: TerminalOptions,
+        alloc: &'alloc Allocator<'ctx, Ctx>,
+        opts: Options,
     ) -> Result<Self, Error> {
+        // SAFETY: Borrow checking should forbid invalid allocators
+        unsafe { Self::new_inner(alloc.to_raw(), opts) }
+    }
+
+    unsafe fn new_inner(alloc: *const ffi::GhosttyAllocator, opts: Options) -> Result<Self, Error> {
         let mut raw: ffi::GhosttyTerminal_ptr = std::ptr::null_mut();
-        let result =
-            unsafe { ffi::ghostty_terminal_new(Allocator::to_c_ptr(alloc), &mut raw, opts.into()) };
+        let result = unsafe { ffi::ghostty_terminal_new(alloc, &mut raw, opts.into()) };
         from_result(result)?;
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         Ok(Self {

@@ -1,5 +1,7 @@
 use crate::ffi;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug)]
 pub enum Error {
     OutOfMemory,
@@ -21,7 +23,7 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-pub(crate) fn from_result(code: ffi::GhosttyResult) -> Result<(), Error> {
+pub(crate) fn from_result(code: ffi::GhosttyResult) -> Result<()> {
     match code {
         ffi::GhosttyResult_GHOSTTY_SUCCESS => Ok(()),
         ffi::GhosttyResult_GHOSTTY_OUT_OF_MEMORY => Err(Error::OutOfMemory),
@@ -31,7 +33,7 @@ pub(crate) fn from_result(code: ffi::GhosttyResult) -> Result<(), Error> {
     }
 }
 
-pub(crate) fn from_result_with_len(code: ffi::GhosttyResult, len: usize) -> Result<usize, Error> {
+pub(crate) fn from_result_with_len(code: ffi::GhosttyResult, len: usize) -> Result<usize> {
     match code {
         ffi::GhosttyResult_GHOSTTY_SUCCESS => Ok(len),
         ffi::GhosttyResult_GHOSTTY_OUT_OF_MEMORY => Err(Error::OutOfMemory),

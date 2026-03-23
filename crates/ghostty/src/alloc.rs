@@ -1,5 +1,5 @@
 //! Adapting custom allocators to work with libghostty.
-use std::{ffi::c_void, marker::PhantomData, ptr::NonNull};
+use std::{ffi::c_void, marker::PhantomData};
 
 #[cfg(feature = "allocator_api")]
 use allocator_api2::alloc;
@@ -21,12 +21,8 @@ pub struct Allocator<'ctx, Ctx: 'ctx = ()> {
 }
 
 impl<'alloc, 'ctx: 'alloc, Ctx> Allocator<'ctx, Ctx> {
-    pub(crate) fn to_c_ptr(alloc: Option<&'alloc Allocator<'ctx, Ctx>>) -> *const GhosttyAllocator {
-        if let Some(alloc) = alloc {
-            std::ptr::from_ref(&alloc.inner)
-        } else {
-            std::ptr::null()
-        }
+    pub(crate) fn to_raw(&self) -> *const GhosttyAllocator {
+        std::ptr::from_ref(&self.inner)
     }
 }
 

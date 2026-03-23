@@ -1,9 +1,12 @@
+//! Parsing and handling SGR (Select Graphic Rendition) escape sequences.
+
 use std::{marker::PhantomData, ptr::NonNull};
 
 use crate::{
     alloc::Allocator,
-    error::{Error, from_result},
+    error::{Error, Result, from_result},
     ffi,
+    style::{PaletteIndex, RgbColor, Underline},
 };
 
 /// SGR (Select Graphic Rendition) attribute parser.
@@ -24,10 +27,10 @@ use crate::{
 /// let mut parser = Parser::new().unwrap();
 /// parser.set_params(&[1, 31], None).unwrap();
 ///
-/// while let Some(attr) = parser.next() {
+/// while let Some(attr) = parser.next().unwrap() {
 ///     match attr {
 ///         Attribute::Bold => println!("Bold enabled"),
-///         Attribute::Fg8(color) => println!("Foreground color: {color}"),
+///         Attribute::Fg8(color) => println!("Foreground color: {color:?}"),
 ///         _ => {},
 ///     }
 /// }
@@ -39,19 +42,23 @@ pub struct Parser<'alloc> {
 
 impl<'alloc> Parser<'alloc> {
     /// Create a new SGR parser.
-    pub fn new() -> Result<Self, Error> {
-        Self::new_with_alloc::<()>(None)
+    pub fn new() -> Result<Self> {
+        // SAFETY: A NULL allocator is always valid
+        unsafe { Self::new_inner(std::ptr::null()) }
     }
 
     /// Create a new SGR parser with a custom allocator.
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc, Ctx>(
-        alloc: Option<&'alloc Allocator<'ctx, Ctx>>,
-    ) -> Result<Self, Error> {
+    pub fn new_with_alloc<'ctx: 'alloc, Ctx>(alloc: &'alloc Allocator<'ctx, Ctx>) -> Result<Self> {
+        // SAFETY: Borrow checking should forbid invalid allocators
+        unsafe { Self::new_inner(alloc.to_raw()) }
+    }
+
+    unsafe fn new_inner(alloc: *const ffi::GhosttyAllocator) -> Result<Self> {
         let mut raw: ffi::GhosttySgrParser_ptr = std::ptr::null_mut();
-        let result = unsafe { ffi::ghostty_sgr_new(Allocator::to_c_ptr(alloc), &mut raw) };
+        let result = unsafe { ffi::ghostty_sgr_new(alloc, &mut raw) };
         from_result(result)?;
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         Ok(Self {
@@ -78,7 +85,7 @@ impl<'alloc> Parser<'alloc> {
     /// # Panics
     ///
     /// **Panics** if `separators` is not `None` and is not the same length as `params`.
-    pub fn set_params(&mut self, params: &[u16], separators: Option<&[u8]>) -> Result<(), Error> {
+    pub fn set_params(&mut self, params: &[u16], separators: Option<&[u8]>) -> Result<()> {
         let sep_ptr = match separators {
             Some(seps) => {
                 assert!(
@@ -103,15 +110,15 @@ impl<'alloc> Parser<'alloc> {
     ///
     /// This cannot be expressed as a regular iterator since the returned
     /// attribute borrows memory from the parser directly.
-    pub fn next<'p>(&'p mut self) -> Option<Attribute<'p>> {
+    pub fn next<'p>(&'p mut self) -> Result<Option<Attribute<'p>>> {
         let mut raw_attr = ffi::GhosttySgrAttribute::default();
         let has_next = unsafe { ffi::ghostty_sgr_next(self.ptr.as_ptr(), &mut raw_attr) };
         if has_next {
             // This shouldn't really *ever* fail, so the fact it failed
             // suggests we should stop anyways.
-            Attribute::from_raw(raw_attr)
+            Ok(Some(Attribute::from_raw(raw_attr)?))
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -169,8 +176,8 @@ pub enum Attribute<'p> {
 
 impl Attribute<'_> {
     /// This should never return None, but just to be safe.
-    fn from_raw(value: ffi::GhosttySgrAttribute) -> Option<Self> {
-        Some(match value.tag {
+    fn from_raw(value: ffi::GhosttySgrAttribute) -> Result<Self> {
+        Ok(match value.tag {
             0 => Self::Unset,
             1 => Self::Unknown(unsafe { value.value.unknown }.into()),
             2 => Self::Bold,
@@ -202,33 +209,7 @@ impl Attribute<'_> {
             28 => Self::BrightFg8(PaletteIndex(unsafe { value.value.bright_fg_8 })),
             29 => Self::Bg256(PaletteIndex(unsafe { value.value.bg_256 })),
             30 => Self::Fg256(PaletteIndex(unsafe { value.value.fg_256 })),
-            _ => return None,
-        })
-    }
-}
-
-/// Underline style types.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Underline {
-    None = 0,
-    Single = 1,
-    Double = 2,
-    Curly = 3,
-    Dotted = 4,
-    Dashed = 5,
-}
-
-impl Underline {
-    /// This should never return None, but just to be safe.
-    fn from_raw(value: ffi::GhosttySgrUnderline) -> Option<Self> {
-        Some(match value {
-            0 => Self::None,
-            1 => Self::Single,
-            2 => Self::Double,
-            3 => Self::Curly,
-            4 => Self::Dotted,
-            5 => Self::Dashed,
-            _ => return None,
+            _ => return Err(Error::InvalidValue),
         })
     }
 }
@@ -250,46 +231,4 @@ impl From<ffi::GhosttySgrUnknown> for Unknown<'_> {
         let partial = unsafe { std::slice::from_raw_parts(value.partial_ptr, value.partial_len) };
         Self { full, partial }
     }
-}
-
-/// RGB color value.
-#[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct RgbColor {
-    /// Red color component (0-255)
-    pub r: u8,
-    /// Green color component (0-255)
-    pub g: u8,
-    /// Blue color component (0-255)
-    pub b: u8,
-}
-
-impl From<ffi::GhosttyColorRgb> for RgbColor {
-    fn from(value: ffi::GhosttyColorRgb) -> Self {
-        let ffi::GhosttyColorRgb { r, g, b } = value;
-        Self { r, g, b }
-    }
-}
-
-/// Palette color index (0-255).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct PaletteIndex(pub u8);
-
-impl PaletteIndex {
-    pub const BLACK: PaletteIndex = PaletteIndex(0);
-    pub const RED: PaletteIndex = PaletteIndex(1);
-    pub const GREEN: PaletteIndex = PaletteIndex(2);
-    pub const YELLOW: PaletteIndex = PaletteIndex(3);
-    pub const BLUE: PaletteIndex = PaletteIndex(4);
-    pub const MAGENTA: PaletteIndex = PaletteIndex(5);
-    pub const CYAN: PaletteIndex = PaletteIndex(6);
-    pub const WHITE: PaletteIndex = PaletteIndex(7);
-    pub const BRIGHT_BLACK: PaletteIndex = PaletteIndex(8);
-    pub const BRIGHT_RED: PaletteIndex = PaletteIndex(9);
-    pub const BRIGHT_GREEN: PaletteIndex = PaletteIndex(10);
-    pub const BRIGHT_YELLOW: PaletteIndex = PaletteIndex(11);
-    pub const BRIGHT_BLUE: PaletteIndex = PaletteIndex(12);
-    pub const BRIGHT_MAGENTA: PaletteIndex = PaletteIndex(13);
-    pub const BRIGHT_CYAN: PaletteIndex = PaletteIndex(14);
-    pub const BRIGHT_WHITE: PaletteIndex = PaletteIndex(15);
 }

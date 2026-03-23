@@ -7,6 +7,16 @@ mod bindings;
 
 pub use bindings::*;
 
+/// Initialize a "sized" FFI object.
+#[macro_export]
+macro_rules! sized {
+    ($ty:ty) => {{
+        let mut t = <$ty as ::std::default::Default>::default();
+        t.size = ::std::mem::size_of::<$ty>();
+        t
+    }};
+}
+
 /// Canonical list of exported `libghostty-vt` C functions represented by checked-in bindings.
 pub const EXPORTED_API_SYMBOLS: &[&str] = &[
     "ghostty_build_info",
