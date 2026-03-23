@@ -7,10 +7,101 @@ use allocator_api2::alloc;
 use crate::ffi::{GhosttyAllocator, GhosttyAllocatorVtable};
 
 /// A custom allocator that libghostty uses for its memory allocations.
-pub struct Allocator<'ctx, Ctx> {
+///
+/// The allocator may depend on some external state `Ctx` for the
+/// duration of lifetime `'ctx`. This is useful for adapting external,
+/// stateful allocators that may not have a `'static` lifetime.
+///
+/// One example of a custom allocator that *does* have a `'static`
+/// lifetime is Rust's own default allocator, which can also be used
+/// within libghostty as `Self::GLOBAL`.
+pub struct Allocator<'ctx, Ctx: 'ctx = ()> {
     pub(crate) inner: GhosttyAllocator,
     _phan: PhantomData<&'ctx Ctx>,
 }
+
+impl<'alloc, 'ctx: 'alloc, Ctx> Allocator<'ctx, Ctx> {
+    pub(crate) fn to_c_ptr(alloc: Option<&'alloc Allocator<'ctx, Ctx>>) -> *const GhosttyAllocator {
+        if let Some(alloc) = alloc {
+            std::ptr::from_ref(&alloc.inner)
+        } else {
+            std::ptr::null()
+        }
+    }
+}
+
+//------------------------------------
+// GlobalAlloc
+//------------------------------------
+
+impl Allocator<'static> {
+    /// A custom allocator based on Rust's built-in
+    /// [global allocator](std::alloc::GlobalAlloc).
+    pub const GLOBAL: Self = Self {
+        inner: GhosttyAllocator {
+            ctx: std::ptr::null_mut(),
+            vtable: &GhosttyAllocatorVtable {
+                alloc: Some(_global_alloc),
+                free: Some(_global_free),
+                resize: Some(_global_resize),
+                remap: Some(_global_remap),
+            },
+        },
+        _phan: PhantomData,
+    };
+}
+
+unsafe extern "C" fn _global_alloc(
+    _allocator: *mut c_void,
+    len: usize,
+    alignment: u8,
+    _ret_addr: usize,
+) -> *mut c_void {
+    let Ok(layout) = std::alloc::Layout::from_size_align(len, 1 << alignment) else {
+        return std::ptr::null_mut();
+    };
+    unsafe { std::alloc::alloc(layout).cast::<c_void>() }
+}
+
+unsafe extern "C" fn _global_free(
+    _allocator: *mut c_void,
+    mem: *mut c_void,
+    len: usize,
+    alignment: u8,
+    _ret_addr: usize,
+) {
+    let Ok(layout) = std::alloc::Layout::from_size_align(len, 1 << alignment) else {
+        return;
+    };
+    unsafe { std::alloc::dealloc(mem.cast::<u8>(), layout) }
+}
+unsafe extern "C" fn _global_resize(
+    _allocator: *mut c_void,
+    _mem: *mut c_void,
+    _old_len: usize,
+    _alignment: u8,
+    _new_len: usize,
+    _ret_addr: usize,
+) -> bool {
+    false
+}
+unsafe extern "C" fn _global_remap(
+    _allocator: *mut c_void,
+    mem: *mut c_void,
+    old_len: usize,
+    alignment: u8,
+    new_len: usize,
+    _ret_addr: usize,
+) -> *mut c_void {
+    let Ok(layout) = std::alloc::Layout::from_size_align(old_len, 1 << alignment) else {
+        return std::ptr::null_mut();
+    };
+    unsafe { std::alloc::realloc(mem.cast::<u8>(), layout, new_len).cast::<c_void>() }
+}
+
+//------------------------------------
+// Allocator API
+//------------------------------------
 
 /// Adapt a Rust Allocator into a libghostty Allocator.
 #[cfg(feature = "allocator_api")]
@@ -38,7 +129,7 @@ unsafe extern "C" fn _alloc<A: alloc::Allocator>(
     alignment: u8,
     _ret_addr: usize,
 ) -> *mut c_void {
-    let layout = alloc::Layout::from_size_align(len, alignment as usize).ok();
+    let layout = alloc::Layout::from_size_align(len, 1 << alignment).ok();
 
     unsafe { get_allocator::<A>(allocator) }
         .and_then(|alloc| alloc.allocate(layout?).ok())
@@ -57,7 +148,7 @@ unsafe extern "C" fn _free<A: alloc::Allocator>(
     let Some(mem) = NonNull::new(mem.cast::<u8>()) else {
         return;
     };
-    let Some(layout) = alloc::Layout::from_size_align(len, alignment as usize).ok() else {
+    let Some(layout) = alloc::Layout::from_size_align(len, 1 << alignment).ok() else {
         return;
     };
     if let Some(alloc) = unsafe { get_allocator::<A>(allocator) } {
@@ -96,8 +187,8 @@ unsafe extern "C" fn _remap<A: alloc::Allocator>(
     _ret_addr: usize,
 ) -> *mut c_void {
     let mem = NonNull::new(mem.cast::<u8>());
-    let old_layout = alloc::Layout::from_size_align(old_len, alignment as usize).ok();
-    let new_layout = alloc::Layout::from_size_align(new_len, alignment as usize).ok();
+    let old_layout = alloc::Layout::from_size_align(old_len, 1 << alignment).ok();
+    let new_layout = alloc::Layout::from_size_align(new_len, 1 << alignment).ok();
 
     unsafe { get_allocator::<A>(allocator) }
         .and_then(|alloc| {
