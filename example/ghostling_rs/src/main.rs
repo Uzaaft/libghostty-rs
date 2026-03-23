@@ -6,13 +6,22 @@
 //! simple: single-threaded, 2D software rendering, one file.
 
 use std::io;
-use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::AsFd;
+use std::os::unix::io::{AsRawFd, OwnedFd};
+use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
+use std::process::Command;
 
 use ghostty::ffi;
 use ghostty::{
     KeyEncoder, KeyEvent, MouseEncoder, MouseEvent, RenderState, RenderStateRowCells,
     RenderStateRowIterator, Terminal,
 };
+use nix::errno::Errno;
+use nix::fcntl::{self, OFlag};
+use nix::pty::ForkptyResult;
+use nix::sys::{signal, wait};
+use nix::unistd::{self, Pid};
 use raylib::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -29,8 +38,8 @@ use raylib::prelude::*;
 ///   1. $SHELL environment variable
 ///   2. The pw_shell field from the passwd database
 ///   3. /bin/sh as a last resort
-fn pty_spawn(cols: u16, rows: u16) -> io::Result<(OwnedFd, libc::pid_t)> {
-    let mut ws = libc::winsize {
+unsafe fn pty_spawn(cols: u16, rows: u16) -> io::Result<(OwnedFd, Pid)> {
+    let ws = nix::pty::Winsize {
         ws_row: rows,
         ws_col: cols,
         ws_xpixel: 0,
@@ -39,84 +48,42 @@ fn pty_spawn(cols: u16, rows: u16) -> io::Result<(OwnedFd, libc::pid_t)> {
 
     // forkpty() combines openpty + fork + login_tty into one call.
     // In the child it sets up the slave side as stdin/stdout/stderr.
-    let mut master_fd: RawFd = -1;
-    let child = unsafe {
-        libc::forkpty(
-            &mut master_fd,
-            std::ptr::null_mut(),
-            std::ptr::null_mut(),
-            &mut ws,
-        )
-    };
-
-    if child < 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    if child == 0 {
-        // Determine the user's preferred shell. We try $SHELL first (the
-        // standard convention), then fall back to the passwd entry, and
-        // finally to /bin/sh if nothing else is available.
-        let shell = std::env::var("SHELL").ok().and_then(|s| {
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        });
-
-        let shell = shell.unwrap_or_else(|| {
-            unsafe {
-                let pw = libc::getpwuid(libc::getuid());
-                if !pw.is_null() {
-                    let shell_ptr = (*pw).pw_shell;
-                    if !shell_ptr.is_null() {
-                        let c_str = std::ffi::CStr::from_ptr(shell_ptr);
-                        if let Ok(s) = c_str.to_str() {
-                            if !s.is_empty() {
-                                return s.to_owned();
-                            }
-                        }
-                    }
-                }
-            }
-            "/bin/sh".to_owned()
-        });
-
-        // Extract just the program name for argv[0] (e.g. "/bin/zsh" -> "zsh").
-        let shell_name = shell.rsplit('/').next().unwrap_or(&shell);
-
+    match unsafe { nix::pty::forkpty(&ws, None)? } {
         // Child process -- replace ourselves with the shell.
         // TERM tells programs what escape sequences we understand.
-        unsafe {
-            let term = std::ffi::CString::new("TERM").unwrap();
-            let term_val = std::ffi::CString::new("xterm-256color").unwrap();
-            libc::setenv(term.as_ptr(), term_val.as_ptr(), 1);
+        ForkptyResult::Child => {
+            // Determine the user's preferred shell. We try $SHELL first (the
+            // standard convention), then fall back to the passwd entry, and
+            // finally to /bin/sh if nothing else is available.
+            let shell = match std::env::var_os("SHELL") {
+                Some(shell) if !shell.is_empty() => PathBuf::from(shell),
+                _ => match unistd::User::from_uid(unistd::getuid()) {
+                    Ok(Some(user)) => user.shell,
+                    _ => PathBuf::from("/bin/sh"),
+                },
+            };
 
-            let c_shell = std::ffi::CString::new(shell.clone()).unwrap();
-            let c_name = std::ffi::CString::new(shell_name).unwrap();
-            libc::execl(
-                c_shell.as_ptr(),
-                c_name.as_ptr(),
-                std::ptr::null::<libc::c_char>(),
-            );
-            libc::_exit(127); // execl only returns on error
+            // Extract just the program name for argv[0] (e.g. "/bin/zsh" -> "zsh").
+            let arg0 = shell.file_name().unwrap_or(shell.as_os_str());
+
+            _ = Command::new(&shell)
+                .env("TERM", "xterm-256color")
+                .arg0(arg0)
+                .exec();
+
+            // `exec` only returns on error.
+            std::process::exit(127);
+        }
+
+        // Parent -- make the master fd non-blocking so read() returns EAGAIN
+        // instead of blocking when there's no data, letting us poll each frame.
+        ForkptyResult::Parent { child, master } => {
+            let raw_flags = fcntl::fcntl(&master, fcntl::F_GETFL)?;
+            let flags = OFlag::from_bits_retain(raw_flags).union(OFlag::O_NONBLOCK);
+            _ = fcntl::fcntl(&master, fcntl::F_SETFL(flags))?;
+            Ok((master, child))
         }
     }
-
-    // Parent -- make the master fd non-blocking so read() returns EAGAIN
-    // instead of blocking when there's no data, letting us poll each frame.
-    let flags = unsafe { libc::fcntl(master_fd, libc::F_GETFL) };
-    if flags < 0 {
-        return Err(io::Error::last_os_error());
-    }
-    let rc = unsafe { libc::fcntl(master_fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
-    if rc < 0 {
-        return Err(io::Error::last_os_error());
-    }
-
-    let owned = unsafe { OwnedFd::from_raw_fd(master_fd) };
-    Ok((owned, child))
 }
 
 /// Result of draining the pty master fd.
@@ -134,32 +101,26 @@ enum PtyReadResult {
 /// ghostty terminal. The terminal's VT parser will process any escape
 /// sequences and update its internal screen/cursor/style state.
 ///
-/// Because the fd is non-blocking, read() returns -1 with EAGAIN once
-/// the kernel buffer is empty, at which point we stop.
-fn pty_read(fd: &OwnedFd, terminal: &mut Terminal) -> PtyReadResult {
-    let raw_fd = fd.as_raw_fd();
+/// Because the fd is non-blocking, read() returns an error with
+/// EAGAIN once the kernel buffer is empty, at which point we stop.
+fn pty_read<Fd: AsFd>(fd: Fd, terminal: &mut Terminal) -> PtyReadResult {
     let mut buf = [0u8; 4096];
 
     loop {
-        let n = unsafe { libc::read(raw_fd, buf.as_mut_ptr().cast(), buf.len()) };
-        if n > 0 {
-            terminal.vt_write(&buf[..n as usize]);
-        } else if n == 0 {
+        match nix::unistd::read(&fd, &mut buf) {
             // EOF -- the child closed its side of the pty.
-            return PtyReadResult::Eof;
-        } else {
-            // n == -1: distinguish "no data right now" from real errors.
-            let err = io::Error::last_os_error();
-            match err.raw_os_error() {
-                Some(libc::EAGAIN) => return PtyReadResult::Ok,
-                Some(libc::EINTR) => continue, // retry the read
-                // On Linux, the slave closing often produces EIO rather
-                // than a clean EOF (read returning 0). Treat it the same.
-                Some(libc::EIO) => return PtyReadResult::Eof,
-                _ => {
-                    eprintln!("pty read: {err}");
-                    return PtyReadResult::Error;
-                }
+            Ok(0) => return PtyReadResult::Eof,
+            Ok(len) => terminal.vt_write(&buf[..len]),
+
+            // Distinguish "no data right now" from real errors.
+            Err(Errno::EAGAIN) => return PtyReadResult::Ok,
+            Err(Errno::EINTR) => continue, // retry the read
+            // On Linux, the slave closing often produces EIO rather
+            // than a clean EOF (read returning 0). Treat it the same.
+            Err(Errno::EIO) => return PtyReadResult::Eof,
+            Err(err) => {
+                eprintln!("pty read: {err}");
+                return PtyReadResult::Error;
             }
         }
     }
@@ -169,21 +130,15 @@ fn pty_read(fd: &OwnedFd, terminal: &mut Terminal) -> PtyReadResult {
 /// write() may return short or fail with EAGAIN. We retry on EINTR, advance
 /// past partial writes, and silently drop data if the kernel buffer is full
 /// -- this matches what most terminal emulators do under back-pressure.
-fn pty_write(fd: &OwnedFd, data: &[u8]) {
-    let raw_fd = fd.as_raw_fd();
+fn pty_write<Fd: AsFd>(fd: Fd, data: &[u8]) {
     let mut remaining = data;
 
     while !remaining.is_empty() {
-        let n = unsafe { libc::write(raw_fd, remaining.as_ptr().cast(), remaining.len()) };
-        if n > 0 {
-            remaining = &remaining[n as usize..];
-        } else if n < 0 {
-            let err = io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EINTR) {
-                continue;
-            }
+        match nix::unistd::write(&fd, remaining) {
+            Ok(len) => remaining = &remaining[len..],
+            Err(Errno::EINTR) => continue,
             // EAGAIN or real error -- drop the remainder.
-            break;
+            Err(_) => break,
         }
     }
 }
@@ -290,9 +245,7 @@ fn raylib_key_unshifted_codepoint(rl_key: KeyboardKey) -> u32 {
 /// Build a GhosttyMods bitmask from the current raylib modifier key state.
 fn get_ghostty_mods(rl: &RaylibHandle) -> ffi::GhosttyMods {
     let mut mods: ffi::GhosttyMods = 0;
-    if rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
-        || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT)
-    {
+    if rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT) {
         mods |= ffi::GHOSTTY_MODS_SHIFT as u16;
     }
     if rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
@@ -300,14 +253,10 @@ fn get_ghostty_mods(rl: &RaylibHandle) -> ffi::GhosttyMods {
     {
         mods |= ffi::GHOSTTY_MODS_CTRL as u16;
     }
-    if rl.is_key_down(KeyboardKey::KEY_LEFT_ALT)
-        || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT)
-    {
+    if rl.is_key_down(KeyboardKey::KEY_LEFT_ALT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT) {
         mods |= ffi::GHOSTTY_MODS_ALT as u16;
     }
-    if rl.is_key_down(KeyboardKey::KEY_LEFT_SUPER)
-        || rl.is_key_down(KeyboardKey::KEY_RIGHT_SUPER)
-    {
+    if rl.is_key_down(KeyboardKey::KEY_LEFT_SUPER) || rl.is_key_down(KeyboardKey::KEY_RIGHT_SUPER) {
         mods |= ffi::GHOSTTY_MODS_SUPER as u16;
     }
     mods
@@ -391,9 +340,9 @@ fn num_to_keyboard_key(n: u32) -> KeyboardKey {
 /// to the pty. The encoder respects terminal modes (cursor key
 /// application mode, Kitty keyboard protocol, etc.) so we don't need
 /// to maintain our own escape-sequence tables.
-fn handle_input(
-    rl: &RaylibHandle,
-    pty_fd: &OwnedFd,
+fn handle_input<Fd: AsFd>(
+    rl: &mut RaylibHandle,
+    pty_fd: Fd,
     encoder: &mut KeyEncoder,
     event: &mut KeyEvent,
     terminal: &Terminal,
@@ -407,16 +356,10 @@ fn handle_input(
     // to the key event.
     let mut char_utf8 = [0u8; 64];
     let mut char_utf8_len: usize = 0;
-    loop {
-        let ch = unsafe { raylib::ffi::GetCharPressed() };
-        if ch == 0 {
-            break;
-        }
-        let mut u8_buf = [0u8; 4];
-        let n = ghostty::utf8_encode(ch as u32, &mut u8_buf);
-        if char_utf8_len + n < char_utf8.len() {
-            char_utf8[char_utf8_len..char_utf8_len + n].copy_from_slice(&u8_buf[..n]);
-            char_utf8_len += n;
+
+    while let Some(ch) = rl.get_char_pressed() {
+        if char_utf8_len + ch.len_utf8() < char_utf8.len() {
+            _ = ch.encode_utf8(&mut char_utf8[char_utf8_len..]);
         }
     }
 
@@ -466,7 +409,7 @@ fn handle_input(
 
         let mut buf = [0u8; 128];
         match encoder.encode(event, &mut buf) {
-            Ok(written) if written > 0 => pty_write(pty_fd, &buf[..written]),
+            Ok(written) if written > 0 => pty_write(&pty_fd, &buf[..written]),
             _ => {}
         }
     }
@@ -479,11 +422,7 @@ fn handle_input(
 /// Encode a mouse event and write the resulting escape sequence to the pty.
 /// If the encoder produces no output (e.g. tracking is disabled), this is
 /// a no-op.
-fn mouse_encode_and_write(
-    pty_fd: &OwnedFd,
-    encoder: &mut MouseEncoder,
-    event: &MouseEvent,
-) {
+fn mouse_encode_and_write<Fd: AsFd>(pty_fd: Fd, encoder: &mut MouseEncoder, event: &MouseEvent) {
     let mut buf = [0u8; 128];
     match encoder.encode(event, &mut buf) {
         Ok(written) if written > 0 => pty_write(pty_fd, &buf[..written]),
@@ -496,9 +435,9 @@ fn mouse_encode_and_write(
 /// to the pty. The encoder handles tracking mode (X10, normal, button,
 /// any-event) and output format (X10, UTF8, SGR, URxvt, SGR-Pixels)
 /// based on what the terminal application has requested.
-fn handle_mouse(
+fn handle_mouse<Fd: AsFd>(
     rl: &RaylibHandle,
-    pty_fd: &OwnedFd,
+    pty_fd: &Fd,
     encoder: &mut MouseEncoder,
     event: &mut MouseEvent,
     terminal: &mut Terminal,
@@ -572,11 +511,11 @@ fn handle_mouse(
         if rl.is_mouse_button_pressed(rl_btn) {
             event.set_action(ffi::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_PRESS);
             event.set_button(gbtn);
-            mouse_encode_and_write(pty_fd, encoder, event);
+            mouse_encode_and_write(&pty_fd, encoder, event);
         } else if rl.is_mouse_button_released(rl_btn) {
             event.set_action(ffi::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_RELEASE);
             event.set_button(gbtn);
-            mouse_encode_and_write(pty_fd, encoder, event);
+            mouse_encode_and_write(&pty_fd, encoder, event);
         }
     }
 
@@ -748,7 +687,9 @@ fn render_terminal(
     // If both fg and bg are black (no palette loaded yet), use white
     // foreground so text is visible on the default black background.
     let mut fg_default = colors.foreground;
-    if fg_default.r == 0 && fg_default.g == 0 && fg_default.b == 0
+    if fg_default.r == 0
+        && fg_default.g == 0
+        && fg_default.b == 0
         && colors.background.r == 0
         && colors.background.g == 0
         && colors.background.b == 0
@@ -782,27 +723,31 @@ fn render_terminal(
                 // Empty cell -- check for background-only content (palette
                 // or direct RGB background without text).
                 if let Ok(raw_cell) = cells.raw_cell() {
-                    if let Ok(content_tag) = ghostty::cell_get_content_tag(raw_cell) {
-                        if content_tag
-                            == ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE
-                        {
+                    match ghostty::cell_get_content_tag(raw_cell) {
+                        Ok(ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE) => {
                             if let Ok(palette_idx) = ghostty::cell_get_color_palette(raw_cell) {
                                 let bg = colors.palette[palette_idx as usize];
                                 d.draw_rectangle(
-                                    x, y, cell_width, cell_height,
-                                    Color::new(bg.r, bg.g, bg.b, 255),
-                                );
-                            }
-                        } else if content_tag
-                            == ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_RGB
-                        {
-                            if let Ok(bg) = ghostty::cell_get_color_rgb(raw_cell) {
-                                d.draw_rectangle(
-                                    x, y, cell_width, cell_height,
+                                    x,
+                                    y,
+                                    cell_width,
+                                    cell_height,
                                     Color::new(bg.r, bg.g, bg.b, 255),
                                 );
                             }
                         }
+                        Ok(ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_RGB) => {
+                            if let Ok(bg) = ghostty::cell_get_color_rgb(raw_cell) {
+                                d.draw_rectangle(
+                                    x,
+                                    y,
+                                    cell_width,
+                                    cell_height,
+                                    Color::new(bg.r, bg.g, bg.b, 255),
+                                );
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 x += cell_width;
@@ -810,20 +755,18 @@ fn render_terminal(
             }
 
             // Read grapheme codepoints and encode to a UTF-8 string.
-            let mut codepoints = [0u32; 16];
+            let mut codepoints = ['\0'; 16];
             let len = grapheme_len.min(16) as usize;
-            let _ = cells.graphemes_buf(&mut codepoints[..len]);
+            _ = cells.graphemes_buf(&mut codepoints[..len]);
 
             let mut text_buf = [0u8; 64];
             let mut pos: usize = 0;
-            for &cp in &codepoints[..len] {
+            for cp in &codepoints[..len] {
                 if pos >= 60 {
                     break;
                 }
-                let mut u8_buf = [0u8; 4];
-                let n = ghostty::utf8_encode(cp, &mut u8_buf);
-                text_buf[pos..pos + n].copy_from_slice(&u8_buf[..n]);
-                pos += n;
+                _ = cp.encode_utf8(&mut text_buf[pos..]);
+                pos += cp.len_utf8();
             }
             text_buf[pos] = 0; // null-terminate for CStr
 
@@ -848,7 +791,10 @@ fn render_terminal(
                 || style.inverse
             {
                 d.draw_rectangle(
-                    x, y, cell_width, cell_height,
+                    x,
+                    y,
+                    cell_width,
+                    cell_height,
                     Color::new(bg_rgb.r, bg_rgb.g, bg_rgb.b, 255),
                 );
             }
@@ -856,22 +802,26 @@ fn render_terminal(
             // Fake italic by shifting the text right slightly.
             let italic_offset = if style.italic { font_size / 6 } else { 0 };
 
-            let text_cstr = unsafe {
-                std::ffi::CStr::from_ptr(text_buf.as_ptr().cast())
-            };
+            let text_cstr = unsafe { std::ffi::CStr::from_ptr(text_buf.as_ptr().cast()) };
             if let Ok(text_str) = text_cstr.to_str() {
                 d.draw_text_ex(
-                    font, text_str,
+                    font,
+                    text_str,
                     Vector2::new((x + italic_offset) as f32, y as f32),
-                    font_size as f32, 0.0, ray_fg,
+                    font_size as f32,
+                    0.0,
+                    ray_fg,
                 );
 
                 // Fake bold by drawing the text again offset by 1px.
                 if style.bold {
                     d.draw_text_ex(
-                        font, text_str,
+                        font,
+                        text_str,
                         Vector2::new((x + italic_offset + 1) as f32, y as f32),
-                        font_size as f32, 0.0, ray_fg,
+                        font_size as f32,
+                        0.0,
+                        ray_fg,
                     );
                 }
             }
@@ -902,7 +852,10 @@ fn render_terminal(
         let cur_x = pad + cx as i32 * cell_width;
         let cur_y = pad + cy as i32 * cell_height;
         d.draw_rectangle(
-            cur_x, cur_y, cell_width, cell_height,
+            cur_x,
+            cur_y,
+            cell_width,
+            cell_height,
             Color::new(cur_rgb.r, cur_rgb.g, cur_rgb.b, 128),
         );
     }
@@ -927,7 +880,10 @@ fn render_terminal(
             let thumb_y = (scroll_frac * (scr_h - thumb_height) as f64) as i32;
 
             d.draw_rectangle(
-                bar_x, thumb_y, bar_width, thumb_height,
+                bar_x,
+                thumb_y,
+                bar_width,
+                thumb_height,
                 Color::new(200, 200, 200, 128),
             );
         }
@@ -935,9 +891,7 @@ fn render_terminal(
 
     // Clear the global dirty flag so we know when the next update
     // actually changes something.
-    let _ = render_state.set_dirty(
-        ffi::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE,
-    );
+    let _ = render_state.set_dirty(ffi::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE);
 }
 
 // ---------------------------------------------------------------------------
@@ -947,8 +901,8 @@ fn render_terminal(
 /// Log libghostty-vt build configuration (SIMD, optimization level).
 fn log_build_info() {
     let simd = ghostty::build_info_simd().unwrap_or(false);
-    let opt = ghostty::build_info_optimize()
-        .unwrap_or(ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG);
+    let opt =
+        ghostty::build_info_optimize().unwrap_or(ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG);
 
     let opt_str = match opt {
         ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG => "Debug",
@@ -963,6 +917,9 @@ fn log_build_info() {
         if simd { "enabled" } else { "disabled" }
     );
 }
+
+// ioctl wrapper
+nix::ioctl_write_ptr_bad!(tiocswinsz, libc::TIOCSWINSZ, nix::pty::Winsize);
 
 // ---------------------------------------------------------------------------
 // Main
@@ -1004,8 +961,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut terminal = Terminal::new(term_cols, term_rows, 1000)?;
 
-    let (pty_fd, child) = pty_spawn(term_cols, term_rows)
-        .map_err(|e| format!("forkpty failed: {e}"))?;
+    let (pty_fd, child) =
+        unsafe { pty_spawn(term_cols, term_rows) }.map_err(|e| format!("forkpty failed: {e}"))?;
 
     let mut key_encoder = KeyEncoder::new()?;
     let mut key_event = KeyEvent::new()?;
@@ -1035,14 +992,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Notify the pty of the new window size so the shell
                 // and child programs can reflow their output.
-                let new_ws = libc::winsize {
+                let new_ws = nix::pty::Winsize {
                     ws_row: rows,
                     ws_col: cols,
                     ws_xpixel: 0,
                     ws_ypixel: 0,
                 };
-                unsafe { libc::ioctl(pty_fd.as_raw_fd(), libc::TIOCSWINSZ, &new_ws) };
 
+                _ = unsafe { tiocswinsz(pty_fd.as_raw_fd(), &new_ws) };
                 prev_width = w;
                 prev_height = h;
             }
@@ -1082,30 +1039,43 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // --- Reap child ------------------------------------------------------
         if child_exited && !child_reaped {
-            let mut wstatus: libc::c_int = 0;
-            let wp = unsafe { libc::waitpid(child, &mut wstatus, libc::WNOHANG) };
-            if wp > 0 {
+            if let Ok(wp) = wait::waitpid(child, Some(wait::WaitPidFlag::WNOHANG)) {
                 child_reaped = true;
-                if libc::WIFEXITED(wstatus) {
-                    child_exit_status = libc::WEXITSTATUS(wstatus);
-                } else if libc::WIFSIGNALED(wstatus) {
-                    child_exit_status = 128 + libc::WTERMSIG(wstatus);
+                match wp {
+                    wait::WaitStatus::Exited(_, status) => child_exit_status = status,
+                    wait::WaitStatus::Signaled(_, sig, _) => child_exit_status = 128 + sig as i32,
+                    _ => {}
                 }
             }
         }
 
         // --- Scrollbar -------------------------------------------------------
         let scrollbar_consumed = handle_scrollbar(
-            &rl, &mut terminal, &mut render_state, &mut scrollbar_dragging,
+            &rl,
+            &mut terminal,
+            &mut render_state,
+            &mut scrollbar_dragging,
         );
 
         // --- Input -----------------------------------------------------------
         if !child_exited {
-            handle_input(&rl, &pty_fd, &mut key_encoder, &mut key_event, &terminal);
+            handle_input(
+                &mut rl,
+                &pty_fd,
+                &mut key_encoder,
+                &mut key_event,
+                &terminal,
+            );
             if !scrollbar_consumed {
                 handle_mouse(
-                    &rl, &pty_fd, &mut mouse_encoder, &mut mouse_event,
-                    &mut terminal, cell_width, cell_height, pad,
+                    &rl,
+                    &pty_fd,
+                    &mut mouse_encoder,
+                    &mut mouse_event,
+                    &mut terminal,
+                    cell_width,
+                    cell_height,
+                    pad,
                 );
             }
         }
@@ -1118,8 +1088,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .colors_get()
             .unwrap_or_else(|_| ffi::GhosttyRenderStateColors::default());
         let win_bg = Color::new(
-            bg_colors.background.r, bg_colors.background.g,
-            bg_colors.background.b, 255,
+            bg_colors.background.r,
+            bg_colors.background.g,
+            bg_colors.background.b,
+            255,
         );
 
         let scrollbar = terminal.scrollbar().ok();
@@ -1128,8 +1100,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         d.clear_background(win_bg);
 
         render_terminal(
-            &mut d, &mut render_state, &mut row_iter, &mut row_cells,
-            &mono_font, cell_width, cell_height, font_size,
+            &mut d,
+            &mut render_state,
+            &mut row_iter,
+            &mut row_cells,
+            &mono_font,
+            cell_width,
+            cell_height,
+            font_size,
             scrollbar.as_ref(),
         );
 
@@ -1147,16 +1125,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let banner_h = msg_size.y as i32 + 8;
 
             d.draw_rectangle(
-                0, screen_h - banner_h, screen_w, banner_h,
+                0,
+                screen_h - banner_h,
+                screen_w,
+                banner_h,
                 Color::new(0, 0, 0, 180),
             );
             d.draw_text_ex(
-                &mono_font, &exit_msg,
+                &mono_font,
+                &exit_msg,
                 Vector2::new(
                     (screen_w as f32 - msg_size.x) / 2.0,
                     (screen_h - banner_h + 4) as f32,
                 ),
-                font_size as f32, 0.0, Color::WHITE,
+                font_size as f32,
+                0.0,
+                Color::WHITE,
             );
         }
     }
@@ -1165,9 +1149,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     drop(pty_fd);
     if !child_reaped {
         if !child_exited {
-            unsafe { libc::kill(child, libc::SIGHUP) };
+            _ = signal::kill(child, signal::SIGHUP);
         }
-        unsafe { libc::waitpid(child, std::ptr::null_mut(), 0) };
+        _ = wait::waitpid(child, None)
     }
 
     Ok(())

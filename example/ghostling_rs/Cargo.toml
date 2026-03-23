@@ -8,5 +8,5 @@ rust-version.workspace = true
 [dependencies]
 ghostty.workspace = true
 libc = "0.2.183"
-nix = { version = "0.31.2", features = ["term", "fs", "signal", "process"] }
+nix = { version = "0.31.2", features = ["term", "fs", "signal", "process", "user", "ioctl"] }
 raylib = "5.5.1"
