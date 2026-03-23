@@ -1,7 +1,32 @@
+//! Idiomatic, safe Rust bindings for `libghostty-vt`, a terminal emulation library.
+//!
+//! # Memory management and lifetimes
+//!
+//! When creating the terminal and various other objects, you can control their
+//! memory management via a **custom allocator**, usually specified with
+//! methods like [`Terminal::new_with_alloc`]. Objects that accept allocators
+//! are also bound by the `'alloc` lifetime, since they internally contain
+//! a reference to the allocator. If you do not use a custom allocator,
+//! feel free to always set the lifetime to `'static`.
+//!
+//! ## Using the unstable `Allocator` API
+//!
+//! You can adapt the existing, unstable `Allocator` API into a
+//! [libghostty-friendly allocator](alloc::Allocator) via its `From`
+//! implementation. Note that the `'alloc` lifetime must live longer
+//! than the `Allocator` instance itself.
+//!
+//! # Thread safety
+//!
+//! All `libghostty-vt` objects are **not** thread-safe, and have been marked
+//! `!Send + !Sync` accordingly. The expectation is for them to be managed
+//! by a single thread, that may communicate with other threads via channels.
+pub use ghostty_sys as ffi;
+
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
-pub use ghostty_sys as ffi;
+pub mod alloc;
 
 pub const EXPORTED_API_SYMBOLS: &[&str] = ffi::EXPORTED_API_SYMBOLS;
 
@@ -75,25 +100,61 @@ impl FormatterFormat {
 // Terminal
 // ---------------------------------------------------------------------------
 
-pub struct Terminal {
+/// Complete terminal emulator state and rendering.
+///
+/// A terminal instance manages the full emulator state including the screen,
+/// scrollback, cursor, styles, modes, and VT stream processing.
+pub struct Terminal<'alloc> {
     ptr: NonNull<ffi::GhosttyTerminal>,
     _not_send_sync: PhantomData<*mut ()>,
+    // The inner Terminal state takes a reference to the allocator,
+    // so the allocator *must* live longer than the terminal itself.
+    _alloc: PhantomData<&'alloc ffi::GhosttyAllocator>,
 }
 
-impl Terminal {
-    pub fn new(cols: u16, rows: u16, max_scrollback: usize) -> Result<Self, Error> {
-        let opts = ffi::GhosttyTerminalOptions {
-            cols,
-            rows,
-            max_scrollback,
+pub struct TerminalOptions {
+    cols: u16,
+    rows: u16,
+    max_scrollback: usize,
+}
+
+impl From<TerminalOptions> for ffi::GhosttyTerminalOptions {
+    fn from(value: TerminalOptions) -> Self {
+        Self {
+            cols: value.cols,
+            rows: value.rows,
+            max_scrollback: value.max_scrollback,
+        }
+    }
+}
+
+impl<'alloc> Terminal<'alloc> {
+    /// Create a new terminal instance.
+    pub fn new(opts: TerminalOptions) -> Result<Self, Error> {
+        Self::new_with_alloc::<()>(None, opts)
+    }
+
+    pub fn new_with_alloc<'ctx, Ctx>(
+        alloc: Option<&'alloc alloc::Allocator<'ctx, Ctx>>,
+        opts: TerminalOptions,
+    ) -> Result<Self, Error>
+    where
+        'alloc: 'ctx,
+    {
+        let alloc_c = if let Some(alloc) = alloc {
+            std::ptr::from_ref(&alloc.inner)
+        } else {
+            std::ptr::null()
         };
+
         let mut raw: ffi::GhosttyTerminal_ptr = std::ptr::null_mut();
-        let result = unsafe { ffi::ghostty_terminal_new(std::ptr::null(), &mut raw, opts) };
+        let result = unsafe { ffi::ghostty_terminal_new(alloc_c, &mut raw, opts.into()) };
         from_result(result)?;
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         Ok(Self {
             ptr,
             _not_send_sync: PhantomData,
+            _alloc: PhantomData,
         })
     }
 
@@ -114,40 +175,36 @@ impl Terminal {
         unsafe { ffi::ghostty_terminal_reset(self.ptr.as_ptr()) }
     }
 
-    pub fn scroll_viewport_top(&mut self) {
-        let behavior = ffi::GhosttyTerminalScrollViewport {
-            tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_TOP,
-            value: ffi::GhosttyTerminalScrollViewportValue::default(),
+    pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
+        let behavior = match scroll {
+            ScrollViewport::Top => ffi::GhosttyTerminalScrollViewport {
+                tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_TOP,
+                value: ffi::GhosttyTerminalScrollViewportValue::default(),
+            },
+            ScrollViewport::Bottom => ffi::GhosttyTerminalScrollViewport {
+                tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_TOP,
+                value: ffi::GhosttyTerminalScrollViewportValue::default(),
+            },
+            ScrollViewport::Delta(delta) => ffi::GhosttyTerminalScrollViewport {
+                tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_TOP,
+                value: {
+                    let mut v = ffi::GhosttyTerminalScrollViewportValue::default();
+                    v.delta = delta;
+                    v
+                },
+            },
         };
         unsafe { ffi::ghostty_terminal_scroll_viewport(self.ptr.as_ptr(), behavior) }
     }
 
-    pub fn scroll_viewport_bottom(&mut self) {
-        let behavior = ffi::GhosttyTerminalScrollViewport {
-            tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_BOTTOM,
-            value: ffi::GhosttyTerminalScrollViewportValue::default(),
-        };
-        unsafe { ffi::ghostty_terminal_scroll_viewport(self.ptr.as_ptr(), behavior) }
-    }
-
-    pub fn scroll_viewport_delta(&mut self, delta: isize) {
-        let mut value = ffi::GhosttyTerminalScrollViewportValue::default();
-        value.delta = delta;
-        let behavior = ffi::GhosttyTerminalScrollViewport {
-            tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_DELTA,
-            value,
-        };
-        unsafe { ffi::ghostty_terminal_scroll_viewport(self.ptr.as_ptr(), behavior) }
-    }
-
-    pub fn mode_get(&self, mode: ffi::GhosttyMode) -> Result<bool, Error> {
+    pub fn mode(&self, mode: ffi::GhosttyMode) -> Result<bool, Error> {
         let mut value = false;
         let result = unsafe { ffi::ghostty_terminal_mode_get(self.ptr.as_ptr(), mode, &mut value) };
         from_result(result)?;
         Ok(value)
     }
 
-    pub fn mode_set(&mut self, mode: ffi::GhosttyMode, value: bool) -> Result<(), Error> {
+    pub fn set_mode(&mut self, mode: ffi::GhosttyMode, value: bool) -> Result<(), Error> {
         let result = unsafe { ffi::ghostty_terminal_mode_set(self.ptr.as_ptr(), mode, value) };
         from_result(result)
     }
@@ -218,23 +275,44 @@ impl Terminal {
     }
 }
 
-impl Drop for Terminal {
+impl<'alloc> Drop for Terminal<'alloc> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_terminal_free(self.ptr.as_ptr()) }
     }
+}
+
+pub enum ScrollViewport {
+    Top,
+    Bottom,
+    Delta(isize),
 }
 
 // ---------------------------------------------------------------------------
 // Formatter
 // ---------------------------------------------------------------------------
 
-pub struct Formatter<'t> {
+pub struct Formatter<'t, 'alloc> {
     ptr: NonNull<ffi::GhosttyFormatter>,
-    _terminal: PhantomData<&'t Terminal>,
+    _terminal: PhantomData<&'t Terminal<'alloc>>,
 }
 
-impl<'t> Formatter<'t> {
-    pub fn new(terminal: &'t Terminal, format: FormatterFormat, trim: bool) -> Result<Self, Error> {
+pub struct FormatterOptions {
+    /// Extra terminal state to include in styled output.
+    extra: FormatterFormat,
+
+    /// Whether to trim trailing whitespace on non-blank lines.
+    trim: bool,
+
+    /// Whether to unwrap soft-wrapped lines.
+    unwrap: bool,
+}
+
+impl<'t, 'alloc> Formatter<'t, 'alloc> {
+    pub fn new(
+        terminal: &'t Terminal<'alloc>,
+        format: FormatterFormat,
+        trim: bool,
+    ) -> Result<Self, Error> {
         let mut opts = ffi::GhosttyFormatterTerminalOptions::default();
         opts.size = std::mem::size_of::<ffi::GhosttyFormatterTerminalOptions>();
         opts.emit = format.to_raw();
@@ -275,7 +353,7 @@ impl<'t> Formatter<'t> {
     }
 }
 
-impl Drop for Formatter<'_> {
+impl<'t, 'alloc> Drop for Formatter<'t, 'alloc> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_formatter_free(self.ptr.as_ptr()) }
     }
