@@ -16,6 +16,51 @@ pub const GHOSTTY_COLOR_NAMED_BRIGHT_BLUE: u32 = 12;
 pub const GHOSTTY_COLOR_NAMED_BRIGHT_MAGENTA: u32 = 13;
 pub const GHOSTTY_COLOR_NAMED_BRIGHT_CYAN: u32 = 14;
 pub const GHOSTTY_COLOR_NAMED_BRIGHT_WHITE: u32 = 15;
+pub const GHOSTTY_DA_CONFORMANCE_VT100: u32 = 1;
+pub const GHOSTTY_DA_CONFORMANCE_VT101: u32 = 1;
+pub const GHOSTTY_DA_CONFORMANCE_VT102: u32 = 6;
+pub const GHOSTTY_DA_CONFORMANCE_VT125: u32 = 12;
+pub const GHOSTTY_DA_CONFORMANCE_VT131: u32 = 7;
+pub const GHOSTTY_DA_CONFORMANCE_VT132: u32 = 4;
+pub const GHOSTTY_DA_CONFORMANCE_VT220: u32 = 62;
+pub const GHOSTTY_DA_CONFORMANCE_VT240: u32 = 62;
+pub const GHOSTTY_DA_CONFORMANCE_VT320: u32 = 63;
+pub const GHOSTTY_DA_CONFORMANCE_VT340: u32 = 63;
+pub const GHOSTTY_DA_CONFORMANCE_VT420: u32 = 64;
+pub const GHOSTTY_DA_CONFORMANCE_VT510: u32 = 65;
+pub const GHOSTTY_DA_CONFORMANCE_VT520: u32 = 65;
+pub const GHOSTTY_DA_CONFORMANCE_VT525: u32 = 65;
+pub const GHOSTTY_DA_CONFORMANCE_LEVEL_2: u32 = 62;
+pub const GHOSTTY_DA_CONFORMANCE_LEVEL_3: u32 = 63;
+pub const GHOSTTY_DA_CONFORMANCE_LEVEL_4: u32 = 64;
+pub const GHOSTTY_DA_CONFORMANCE_LEVEL_5: u32 = 65;
+pub const GHOSTTY_DA_FEATURE_COLUMNS_132: u32 = 1;
+pub const GHOSTTY_DA_FEATURE_PRINTER: u32 = 2;
+pub const GHOSTTY_DA_FEATURE_REGIS: u32 = 3;
+pub const GHOSTTY_DA_FEATURE_SIXEL: u32 = 4;
+pub const GHOSTTY_DA_FEATURE_SELECTIVE_ERASE: u32 = 6;
+pub const GHOSTTY_DA_FEATURE_USER_DEFINED_KEYS: u32 = 8;
+pub const GHOSTTY_DA_FEATURE_NATIONAL_REPLACEMENT: u32 = 9;
+pub const GHOSTTY_DA_FEATURE_TECHNICAL_CHARACTERS: u32 = 15;
+pub const GHOSTTY_DA_FEATURE_LOCATOR: u32 = 16;
+pub const GHOSTTY_DA_FEATURE_TERMINAL_STATE: u32 = 17;
+pub const GHOSTTY_DA_FEATURE_WINDOWING: u32 = 18;
+pub const GHOSTTY_DA_FEATURE_HORIZONTAL_SCROLLING: u32 = 21;
+pub const GHOSTTY_DA_FEATURE_ANSI_COLOR: u32 = 22;
+pub const GHOSTTY_DA_FEATURE_RECTANGULAR_EDITING: u32 = 28;
+pub const GHOSTTY_DA_FEATURE_ANSI_TEXT_LOCATOR: u32 = 29;
+pub const GHOSTTY_DA_FEATURE_CLIPBOARD: u32 = 52;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT100: u32 = 0;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT220: u32 = 1;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT240: u32 = 2;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT330: u32 = 18;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT340: u32 = 19;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT320: u32 = 24;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT382: u32 = 32;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT420: u32 = 41;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT510: u32 = 61;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT520: u32 = 64;
+pub const GHOSTTY_DA_DEVICE_TYPE_VT525: u32 = 65;
 pub const GHOSTTY_MODS_SHIFT: u32 = 1;
 pub const GHOSTTY_MODS_CTRL: u32 = 2;
 pub const GHOSTTY_MODS_ALT: u32 = 4;
@@ -43,6 +88,31 @@ pub const GhosttyResult_GHOSTTY_INVALID_VALUE: GhosttyResult = -2;
 pub const GhosttyResult_GHOSTTY_OUT_OF_SPACE: GhosttyResult = -3;
 #[doc = " Result codes for libghostty-vt operations."]
 pub type GhosttyResult = ::std::os::raw::c_int;
+#[doc = " A borrowed byte string (pointer + length).\n\n The memory is not owned by this struct. The pointer is only valid\n for the lifetime documented by the API that produces or consumes it."]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttyString {
+    #[doc = " Pointer to the string bytes."]
+    pub ptr: *const u8,
+    #[doc = " Length of the string in bytes."]
+    pub len: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyString"][::std::mem::size_of::<GhosttyString>() - 16usize];
+    ["Alignment of GhosttyString"][::std::mem::align_of::<GhosttyString>() - 8usize];
+    ["Offset of field: GhosttyString::ptr"][::std::mem::offset_of!(GhosttyString, ptr) - 0usize];
+    ["Offset of field: GhosttyString::len"][::std::mem::offset_of!(GhosttyString, len) - 8usize];
+};
+impl Default for GhosttyString {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
 #[doc = " Function table for custom memory allocator operations.\n\n This vtable defines the interface for a custom memory allocator. All\n function pointers must be valid and non-NULL.\n\n @ingroup allocator\n\n If you're not going to use a custom allocator, you can ignore all of\n this. All functions that take an allocator pointer allow NULL to use a\n default allocator.\n\n The interface is based on the Zig allocator interface. I'll say up front\n that it is easy to look at this interface and think \"wow, this is really\n overcomplicated\". The reason for this complexity is well thought out by\n the Zig folks, and it enables a diverse set of allocation strategies\n as shown by the Zig ecosystem. As a consolation, please note that many\n of the arguments are only needed for advanced use cases and can be\n safely ignored in simple implementations. For example, if you look at\n the Zig implementation of the libc allocator in `lib/std/heap.zig`\n (search for CAllocator), you'll see it is very simple.\n\n We chose to align with the Zig allocator interface because:\n\n   1. It is a proven interface that serves a wide variety of use cases\n      in the real world via the Zig ecosystem. It's shown to work.\n\n   2. Our core implementation itself is Zig, and this lets us very\n      cheaply and easily convert between C and Zig allocators.\n\n NOTE(mitchellh): In the future, we can have default implementations of\n resize/remap and allow those to be null."]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -130,6 +200,14 @@ impl Default for GhosttyAllocator {
         }
     }
 }
+unsafe extern "C" {
+    #[doc = " Allocate a buffer of `len` bytes.\n\n Uses the provided allocator, or the default allocator if NULL is passed.\n The returned buffer must be freed with ghostty_free() using the same\n allocator.\n\n @param allocator Pointer to the allocator to use, or NULL for the default\n @param len Number of bytes to allocate\n @return Pointer to the allocated buffer, or NULL if allocation failed\n\n @ingroup allocator"]
+    pub fn ghostty_alloc(allocator: *const GhosttyAllocator, len: usize) -> *mut u8;
+}
+unsafe extern "C" {
+    #[doc = " Free memory that was allocated by a libghostty-vt function.\n\n Use this to free buffers returned by functions such as\n ghostty_formatter_format_alloc(). Pass the same allocator that was\n used for the allocation, or NULL if the default allocator was used.\n\n On platforms where the library's internal allocator differs from the\n consumer's C runtime (e.g. Windows, where Zig's libc and MSVC's CRT\n maintain separate heaps), calling the standard C free() on memory\n allocated by the library causes undefined behavior. This function\n guarantees the correct allocator is used regardless of platform.\n\n It is safe to pass a NULL pointer; the call is a no-op in that case.\n\n @param allocator Pointer to the allocator that was used to allocate the\n   memory, or NULL if the default allocator was used\n @param ptr Pointer to the memory to free (may be NULL)\n @param len Length of the allocation in bytes (must match the original\n   allocation size)\n\n @ingroup allocator"]
+    pub fn ghostty_free(allocator: *const GhosttyAllocator, ptr: *mut u8, len: usize);
+}
 pub const GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG: GhosttyOptimizeMode = 0;
 pub const GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_RELEASE_SAFE: GhosttyOptimizeMode = 1;
 pub const GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_RELEASE_SMALL: GhosttyOptimizeMode = 2;
@@ -180,6 +258,113 @@ unsafe extern "C" {
     #[doc = " Get the RGB color components.\n\n This function extracts the individual red, green, and blue components\n from a GhosttyColorRgb value. Primarily useful in WebAssembly environments\n where accessing struct fields directly is difficult.\n\n @param color The RGB color value\n @param r Pointer to store the red component (0-255)\n @param g Pointer to store the green component (0-255)\n @param b Pointer to store the blue component (0-255)\n\n @ingroup sgr"]
     pub fn ghostty_color_rgb_get(color: GhosttyColorRgb, r: *mut u8, g: *mut u8, b: *mut u8);
 }
+pub const GhosttyColorScheme_GHOSTTY_COLOR_SCHEME_LIGHT: GhosttyColorScheme = 0;
+pub const GhosttyColorScheme_GHOSTTY_COLOR_SCHEME_DARK: GhosttyColorScheme = 1;
+#[doc = " Color scheme reported in response to a CSI ? 996 n query.\n\n @ingroup terminal"]
+pub type GhosttyColorScheme = ::std::os::raw::c_uint;
+#[doc = " Primary device attributes (DA1) response data.\n\n Returned as part of GhosttyDeviceAttributes in response to a CSI c query.\n The conformance_level is the Pp parameter and features contains the Ps\n feature codes.\n\n @ingroup terminal"]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttyDeviceAttributesPrimary {
+    #[doc = " Conformance level (Pp parameter). E.g. 62 for VT220."]
+    pub conformance_level: u16,
+    #[doc = " DA1 feature codes. Only the first num_features entries are valid."]
+    pub features: [u16; 64usize],
+    #[doc = " Number of valid entries in the features array."]
+    pub num_features: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyDeviceAttributesPrimary"]
+        [::std::mem::size_of::<GhosttyDeviceAttributesPrimary>() - 144usize];
+    ["Alignment of GhosttyDeviceAttributesPrimary"]
+        [::std::mem::align_of::<GhosttyDeviceAttributesPrimary>() - 8usize];
+    ["Offset of field: GhosttyDeviceAttributesPrimary::conformance_level"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributesPrimary, conformance_level) - 0usize];
+    ["Offset of field: GhosttyDeviceAttributesPrimary::features"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributesPrimary, features) - 2usize];
+    ["Offset of field: GhosttyDeviceAttributesPrimary::num_features"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributesPrimary, num_features) - 136usize];
+};
+impl Default for GhosttyDeviceAttributesPrimary {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[doc = " Secondary device attributes (DA2) response data.\n\n Returned as part of GhosttyDeviceAttributes in response to a CSI > c query.\n Response format: CSI > Pp ; Pv ; Pc c\n\n @ingroup terminal"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct GhosttyDeviceAttributesSecondary {
+    #[doc = " Terminal type identifier (Pp). E.g. 1 for VT220."]
+    pub device_type: u16,
+    #[doc = " Firmware/patch version number (Pv)."]
+    pub firmware_version: u16,
+    #[doc = " ROM cartridge registration number (Pc). Always 0 for emulators."]
+    pub rom_cartridge: u16,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyDeviceAttributesSecondary"]
+        [::std::mem::size_of::<GhosttyDeviceAttributesSecondary>() - 6usize];
+    ["Alignment of GhosttyDeviceAttributesSecondary"]
+        [::std::mem::align_of::<GhosttyDeviceAttributesSecondary>() - 2usize];
+    ["Offset of field: GhosttyDeviceAttributesSecondary::device_type"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributesSecondary, device_type) - 0usize];
+    ["Offset of field: GhosttyDeviceAttributesSecondary::firmware_version"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributesSecondary, firmware_version) - 2usize];
+    ["Offset of field: GhosttyDeviceAttributesSecondary::rom_cartridge"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributesSecondary, rom_cartridge) - 4usize];
+};
+#[doc = " Tertiary device attributes (DA3) response data.\n\n Returned as part of GhosttyDeviceAttributes in response to a CSI = c query.\n Response format: DCS ! | D...D ST (DECRPTUI).\n\n @ingroup terminal"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct GhosttyDeviceAttributesTertiary {
+    #[doc = " Unit ID encoded as 8 uppercase hex digits in the response."]
+    pub unit_id: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyDeviceAttributesTertiary"]
+        [::std::mem::size_of::<GhosttyDeviceAttributesTertiary>() - 4usize];
+    ["Alignment of GhosttyDeviceAttributesTertiary"]
+        [::std::mem::align_of::<GhosttyDeviceAttributesTertiary>() - 4usize];
+    ["Offset of field: GhosttyDeviceAttributesTertiary::unit_id"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributesTertiary, unit_id) - 0usize];
+};
+#[doc = " Device attributes response data for all three DA levels.\n\n Filled by the device_attributes callback in response to CSI c,\n CSI > c, or CSI = c queries. The terminal uses whichever sub-struct\n matches the request type.\n\n @ingroup terminal"]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct GhosttyDeviceAttributes {
+    pub primary: GhosttyDeviceAttributesPrimary,
+    pub secondary: GhosttyDeviceAttributesSecondary,
+    pub tertiary: GhosttyDeviceAttributesTertiary,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttyDeviceAttributes"]
+        [::std::mem::size_of::<GhosttyDeviceAttributes>() - 160usize];
+    ["Alignment of GhosttyDeviceAttributes"]
+        [::std::mem::align_of::<GhosttyDeviceAttributes>() - 8usize];
+    ["Offset of field: GhosttyDeviceAttributes::primary"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributes, primary) - 0usize];
+    ["Offset of field: GhosttyDeviceAttributes::secondary"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributes, secondary) - 144usize];
+    ["Offset of field: GhosttyDeviceAttributes::tertiary"]
+        [::std::mem::offset_of!(GhosttyDeviceAttributes, tertiary) - 152usize];
+};
+impl Default for GhosttyDeviceAttributes {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
 #[doc = " Terminal window gained focus"]
 pub const GhosttyFocusEvent_GHOSTTY_FOCUS_GAINED: GhosttyFocusEvent = 0;
 #[doc = " Terminal window lost focus"]
@@ -214,6 +399,53 @@ unsafe extern "C" {
     pub fn ghostty_mode_report_encode(
         mode: GhosttyMode,
         state: GhosttyModeReportState,
+        buf: *mut ::std::os::raw::c_char,
+        buf_len: usize,
+        out_written: *mut usize,
+    ) -> GhosttyResult;
+}
+#[doc = " In-band size report (mode 2048): ESC [ 48 ; rows ; cols ; height ; width t"]
+pub const GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_MODE_2048: GhosttySizeReportStyle = 0;
+#[doc = " XTWINOPS text area size in pixels: ESC [ 4 ; height ; width t"]
+pub const GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_14_T: GhosttySizeReportStyle = 1;
+#[doc = " XTWINOPS cell size in pixels: ESC [ 6 ; height ; width t"]
+pub const GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_16_T: GhosttySizeReportStyle = 2;
+#[doc = " XTWINOPS text area size in characters: ESC [ 8 ; rows ; cols t"]
+pub const GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_18_T: GhosttySizeReportStyle = 3;
+#[doc = " Size report style.\n\n Determines the output format for the terminal size report."]
+pub type GhosttySizeReportStyle = ::std::os::raw::c_uint;
+#[doc = " Terminal size information for encoding size reports."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct GhosttySizeReportSize {
+    #[doc = " Terminal row count in cells."]
+    pub rows: u16,
+    #[doc = " Terminal column count in cells."]
+    pub columns: u16,
+    #[doc = " Width of a single terminal cell in pixels."]
+    pub cell_width: u32,
+    #[doc = " Height of a single terminal cell in pixels."]
+    pub cell_height: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of GhosttySizeReportSize"][::std::mem::size_of::<GhosttySizeReportSize>() - 12usize];
+    ["Alignment of GhosttySizeReportSize"]
+        [::std::mem::align_of::<GhosttySizeReportSize>() - 4usize];
+    ["Offset of field: GhosttySizeReportSize::rows"]
+        [::std::mem::offset_of!(GhosttySizeReportSize, rows) - 0usize];
+    ["Offset of field: GhosttySizeReportSize::columns"]
+        [::std::mem::offset_of!(GhosttySizeReportSize, columns) - 2usize];
+    ["Offset of field: GhosttySizeReportSize::cell_width"]
+        [::std::mem::offset_of!(GhosttySizeReportSize, cell_width) - 4usize];
+    ["Offset of field: GhosttySizeReportSize::cell_height"]
+        [::std::mem::offset_of!(GhosttySizeReportSize, cell_height) - 8usize];
+};
+unsafe extern "C" {
+    #[doc = " Encode a terminal size report into an escape sequence.\n\n Encodes a size report in the format specified by @p style into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n @param style The size report format to encode\n @param size Terminal size information\n @param buf Output buffer to write the encoded sequence into (may be NULL)\n @param buf_len Size of the output buffer in bytes\n @param[out] out_written On success, the number of bytes written. On\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n @return GHOSTTY_SUCCESS on success, GHOSTTY_OUT_OF_SPACE if the buffer\n         is too small"]
+    pub fn ghostty_size_report_encode(
+        style: GhosttySizeReportStyle,
+        size: GhosttySizeReportSize,
         buf: *mut ::std::os::raw::c_char,
         buf_len: usize,
         out_written: *mut usize,
@@ -711,6 +943,85 @@ const _: () = {
     ["Offset of field: GhosttyTerminalScrollbar::len"]
         [::std::mem::offset_of!(GhosttyTerminalScrollbar, len) - 16usize];
 };
+#[doc = " Callback function type for bell.\n\n Called when the terminal receives a BEL character (0x07).\n\n @param terminal The terminal handle\n @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA\n\n @ingroup terminal"]
+pub type GhosttyTerminalBellFn = ::std::option::Option<
+    unsafe extern "C" fn(terminal: GhosttyTerminal_ptr, userdata: *mut ::std::os::raw::c_void),
+>;
+#[doc = " Callback function type for color scheme queries (CSI ? 996 n).\n\n Called when the terminal receives a color scheme device status report\n query. Return true and fill *out_scheme with the current color scheme,\n or return false to silently ignore the query.\n\n @param terminal The terminal handle\n @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA\n @param[out] out_scheme Pointer to store the current color scheme\n @return true if the color scheme was filled, false to ignore the query\n\n @ingroup terminal"]
+pub type GhosttyTerminalColorSchemeFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: GhosttyTerminal_ptr,
+        userdata: *mut ::std::os::raw::c_void,
+        out_scheme: *mut GhosttyColorScheme,
+    ) -> bool,
+>;
+#[doc = " Callback function type for device attributes queries (DA1/DA2/DA3).\n\n Called when the terminal receives a device attributes query (CSI c,\n CSI > c, or CSI = c). Return true and fill *out_attrs with the\n response data, or return false to silently ignore the query.\n\n The terminal uses whichever sub-struct (primary, secondary, tertiary)\n matches the request type, but all three should be filled for simplicity.\n\n @param terminal The terminal handle\n @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA\n @param[out] out_attrs Pointer to store the device attributes response\n @return true if attributes were filled, false to ignore the query\n\n @ingroup terminal"]
+pub type GhosttyTerminalDeviceAttributesFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: GhosttyTerminal_ptr,
+        userdata: *mut ::std::os::raw::c_void,
+        out_attrs: *mut GhosttyDeviceAttributes,
+    ) -> bool,
+>;
+#[doc = " Callback function type for enquiry (ENQ, 0x05).\n\n Called when the terminal receives an ENQ character. Return the\n response bytes as a GhosttyString. The memory must remain valid\n until the callback returns. Return a zero-length string to send\n no response.\n\n @param terminal The terminal handle\n @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA\n @return The response bytes to write back to the pty\n\n @ingroup terminal"]
+pub type GhosttyTerminalEnquiryFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: GhosttyTerminal_ptr,
+        userdata: *mut ::std::os::raw::c_void,
+    ) -> GhosttyString,
+>;
+#[doc = " Callback function type for size queries (XTWINOPS).\n\n Called in response to XTWINOPS size queries (CSI 14/16/18 t).\n Return true and fill *out_size with the current terminal geometry,\n or return false to silently ignore the query.\n\n @param terminal The terminal handle\n @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA\n @param[out] out_size Pointer to store the terminal size information\n @return true if size was filled, false to ignore the query\n\n @ingroup terminal"]
+pub type GhosttyTerminalSizeFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: GhosttyTerminal_ptr,
+        userdata: *mut ::std::os::raw::c_void,
+        out_size: *mut GhosttySizeReportSize,
+    ) -> bool,
+>;
+#[doc = " Callback function type for title_changed.\n\n Called when the terminal title changes via escape sequences\n (e.g. OSC 0 or OSC 2). The new title can be queried from the\n terminal after the callback returns.\n\n @param terminal The terminal handle\n @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA\n\n @ingroup terminal"]
+pub type GhosttyTerminalTitleChangedFn = ::std::option::Option<
+    unsafe extern "C" fn(terminal: GhosttyTerminal_ptr, userdata: *mut ::std::os::raw::c_void),
+>;
+#[doc = " Callback function type for write_pty.\n\n Called when the terminal needs to write data back to the pty, for\n example in response to a device status report or mode query. The\n data is only valid for the duration of the call; callers must copy\n it if it needs to persist.\n\n @param terminal The terminal handle\n @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA\n @param data Pointer to the response bytes\n @param len Length of the response in bytes\n\n @ingroup terminal"]
+pub type GhosttyTerminalWritePtyFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: GhosttyTerminal_ptr,
+        userdata: *mut ::std::os::raw::c_void,
+        data: *const u8,
+        len: usize,
+    ),
+>;
+#[doc = " Callback function type for XTVERSION.\n\n Called when the terminal receives an XTVERSION query (CSI > q).\n Return the version string (e.g. \"myterm 1.0\") as a GhosttyString.\n The memory must remain valid until the callback returns. Return a\n zero-length string to report the default \"libghostty\" version.\n\n @param terminal The terminal handle\n @param userdata The userdata pointer set via GHOSTTY_TERMINAL_OPT_USERDATA\n @return The version string to report\n\n @ingroup terminal"]
+pub type GhosttyTerminalXtversionFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: GhosttyTerminal_ptr,
+        userdata: *mut ::std::os::raw::c_void,
+    ) -> GhosttyString,
+>;
+#[doc = " Opaque userdata pointer passed to all callbacks.\n\n Input type: void*"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_USERDATA: GhosttyTerminalOption = 0;
+#[doc = " Callback invoked when the terminal needs to write data back\n to the pty (e.g. in response to a DECRQM query or device\n status report). Set to NULL to ignore such sequences.\n\n Input type: GhosttyTerminalWritePtyFn"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_WRITE_PTY: GhosttyTerminalOption = 1;
+#[doc = " Callback invoked when the terminal receives a BEL character\n (0x07). Set to NULL to ignore bell events.\n\n Input type: GhosttyTerminalBellFn"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_BELL: GhosttyTerminalOption = 2;
+#[doc = " Callback invoked when the terminal receives an ENQ character\n (0x05). Set to NULL to send no response.\n\n Input type: GhosttyTerminalEnquiryFn"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_ENQUIRY: GhosttyTerminalOption = 3;
+#[doc = " Callback invoked when the terminal receives an XTVERSION query\n (CSI > q). Set to NULL to report the default \"libghostty\" string.\n\n Input type: GhosttyTerminalXtversionFn"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_XTVERSION: GhosttyTerminalOption = 4;
+#[doc = " Callback invoked when the terminal title changes via escape\n sequences (e.g. OSC 0 or OSC 2). Set to NULL to ignore title\n change events.\n\n Input type: GhosttyTerminalTitleChangedFn"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_TITLE_CHANGED: GhosttyTerminalOption = 5;
+#[doc = " Callback invoked in response to XTWINOPS size queries\n (CSI 14/16/18 t). Set to NULL to silently ignore size queries.\n\n Input type: GhosttyTerminalSizeFn"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_SIZE: GhosttyTerminalOption = 6;
+#[doc = " Callback invoked in response to a color scheme device status\n report query (CSI ? 996 n). Return true and fill the out pointer\n to report the current scheme, or return false to silently ignore.\n Set to NULL to ignore color scheme queries.\n\n Input type: GhosttyTerminalColorSchemeFn"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_SCHEME: GhosttyTerminalOption = 7;
+#[doc = " Callback invoked in response to a device attributes query\n (CSI c, CSI > c, or CSI = c). Return true and fill the out\n pointer with response data, or return false to silently ignore.\n Set to NULL to ignore device attributes queries.\n\n Input type: GhosttyTerminalDeviceAttributesFn"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES: GhosttyTerminalOption = 8;
+#[doc = " Set the terminal title manually.\n\n The string data is copied into the terminal. A NULL value pointer\n clears the title (equivalent to setting an empty string).\n\n Input type: GhosttyString*"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_TITLE: GhosttyTerminalOption = 9;
+#[doc = " Set the terminal working directory manually.\n\n The string data is copied into the terminal. A NULL value pointer\n clears the pwd (equivalent to setting an empty string).\n\n Input type: GhosttyString*"]
+pub const GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_PWD: GhosttyTerminalOption = 10;
+#[doc = " Terminal option identifiers.\n\n These values are used with ghostty_terminal_set() to configure\n terminal callbacks and associated state.\n\n @ingroup terminal"]
+pub type GhosttyTerminalOption = ::std::os::raw::c_uint;
 #[doc = " Invalid data type. Never results in any data extraction."]
 pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_INVALID: GhosttyTerminalData = 0;
 #[doc = " Terminal width in cells.\n\n Output type: uint16_t *"]
@@ -733,6 +1044,20 @@ pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS: Ghostt
 pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBAR: GhosttyTerminalData = 9;
 #[doc = " The current SGR style of the cursor.\n\n This is the style that will be applied to newly printed characters.\n\n Output type: GhosttyStyle *"]
 pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_STYLE: GhosttyTerminalData = 10;
+#[doc = " Whether any mouse tracking mode is active.\n\n Returns true if any of the mouse tracking modes (X10, normal, button,\n or any-event) are enabled.\n\n Output type: bool *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING: GhosttyTerminalData = 11;
+#[doc = " The terminal title as set by escape sequences (e.g. OSC 0/2).\n\n Returns a borrowed string. The pointer is valid until the next call\n to ghostty_terminal_vt_write() or ghostty_terminal_reset(). An empty\n string (len=0) is returned when no title has been set.\n\n Output type: GhosttyString *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_TITLE: GhosttyTerminalData = 12;
+#[doc = " The terminal's current working directory as set by escape sequences\n (e.g. OSC 7).\n\n Returns a borrowed string. The pointer is valid until the next call\n to ghostty_terminal_vt_write() or ghostty_terminal_reset(). An empty\n string (len=0) is returned when no pwd has been set.\n\n Output type: GhosttyString *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_PWD: GhosttyTerminalData = 13;
+#[doc = " The total number of rows in the active screen including scrollback.\n\n Output type: size_t *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_TOTAL_ROWS: GhosttyTerminalData = 14;
+#[doc = " The number of scrollback rows (total rows minus viewport rows).\n\n Output type: size_t *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS: GhosttyTerminalData = 15;
+#[doc = " The total width of the terminal in pixels.\n\n This is cols * cell_width_px as set by ghostty_terminal_resize().\n\n Output type: uint32_t *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_WIDTH_PX: GhosttyTerminalData = 16;
+#[doc = " The total height of the terminal in pixels.\n\n This is rows * cell_height_px as set by ghostty_terminal_resize().\n\n Output type: uint32_t *"]
+pub const GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_HEIGHT_PX: GhosttyTerminalData = 17;
 #[doc = " Terminal data types.\n\n These values specify what type of data to extract from a terminal\n using `ghostty_terminal_get`.\n\n @ingroup terminal"]
 pub type GhosttyTerminalData = ::std::os::raw::c_uint;
 unsafe extern "C" {
@@ -752,15 +1077,25 @@ unsafe extern "C" {
     pub fn ghostty_terminal_reset(terminal: GhosttyTerminal_ptr);
 }
 unsafe extern "C" {
-    #[doc = " Resize the terminal to the given dimensions.\n\n Changes the number of columns and rows in the terminal. The primary\n screen will reflow content if wraparound mode is enabled; the alternate\n screen does not reflow. If the dimensions are unchanged, this is a no-op.\n\n @param terminal The terminal handle (NULL returns GHOSTTY_INVALID_VALUE)\n @param cols New width in cells (must be greater than zero)\n @param rows New height in cells (must be greater than zero)\n @return GHOSTTY_SUCCESS on success, or an error code on failure\n\n @ingroup terminal"]
+    #[doc = " Resize the terminal to the given dimensions.\n\n Changes the number of columns and rows in the terminal. The primary\n screen will reflow content if wraparound mode is enabled; the alternate\n screen does not reflow. If the dimensions are unchanged, this is a no-op.\n\n This also updates the terminal's pixel dimensions (used for image\n protocols and size reports), disables synchronized output mode (allowed\n by the spec so that resize results are shown immediately), and sends an\n in-band size report if mode 2048 is enabled.\n\n @param terminal The terminal handle (NULL returns GHOSTTY_INVALID_VALUE)\n @param cols New width in cells (must be greater than zero)\n @param rows New height in cells (must be greater than zero)\n @param cell_width_px Width of a single cell in pixels\n @param cell_height_px Height of a single cell in pixels\n @return GHOSTTY_SUCCESS on success, or an error code on failure\n\n @ingroup terminal"]
     pub fn ghostty_terminal_resize(
         terminal: GhosttyTerminal_ptr,
         cols: u16,
         rows: u16,
+        cell_width_px: u32,
+        cell_height_px: u32,
     ) -> GhosttyResult;
 }
 unsafe extern "C" {
-    #[doc = " Write VT-encoded data to the terminal for processing.\n\n Feeds raw bytes through the terminal's VT stream parser, updating\n terminal state accordingly. Only read-only sequences are processed;\n sequences that require output (queries) are ignored.\n\n In the future, a callback-based API will be added to allow handling\n of output or side effect sequences.\n\n This never fails. Any erroneous input or errors in processing the\n input are logged internally but do not cause this function to fail\n because this input is assumed to be untrusted and from an external\n source; so the primary goal is to keep the terminal state consistent and\n not allow malformed input to corrupt or crash.\n\n @param terminal The terminal handle\n @param data Pointer to the data to write\n @param len Length of the data in bytes\n\n @ingroup terminal"]
+    #[doc = " Set an option on the terminal.\n\n Configures terminal callbacks and associated state such as the\n write_pty callback and userdata pointer. The value is passed\n directly for pointer types (callbacks, userdata) or as a pointer\n to the value for non-pointer types (e.g. GhosttyString*).\n NULL clears the option to its default.\n\n Callbacks are invoked synchronously during ghostty_terminal_vt_write().\n Callbacks must not call ghostty_terminal_vt_write() on the same\n terminal (no reentrancy).\n\n @param terminal The terminal handle (may be NULL, in which case this is a no-op)\n @param option The option to set\n @param value Pointer to the value to set (type depends on the option),\n              or NULL to clear the option\n\n @ingroup terminal"]
+    pub fn ghostty_terminal_set(
+        terminal: GhosttyTerminal_ptr,
+        option: GhosttyTerminalOption,
+        value: *const ::std::os::raw::c_void,
+    ) -> GhosttyResult;
+}
+unsafe extern "C" {
+    #[doc = " Write VT-encoded data to the terminal for processing.\n\n Feeds raw bytes through the terminal's VT stream parser, updating\n terminal state accordingly. By default, sequences that require output\n (queries, device status reports) are silently ignored. Use\n ghostty_terminal_set() with GHOSTTY_TERMINAL_OPT_WRITE_PTY to install\n a callback that receives response data.\n\n This never fails. Any erroneous input or errors in processing the\n input are logged internally but do not cause this function to fail\n because this input is assumed to be untrusted and from an external\n source; so the primary goal is to keep the terminal state consistent and\n not allow malformed input to corrupt or crash.\n\n @param terminal The terminal handle\n @param data Pointer to the data to write\n @param len Length of the data in bytes\n\n @ingroup terminal"]
     pub fn ghostty_terminal_vt_write(terminal: GhosttyTerminal_ptr, data: *const u8, len: usize);
 }
 unsafe extern "C" {
@@ -961,7 +1296,7 @@ unsafe extern "C" {
     ) -> GhosttyResult;
 }
 unsafe extern "C" {
-    #[doc = " Run the formatter and return an allocated buffer with the output.\n\n Each call formats the current terminal state. The buffer is allocated\n using the provided allocator (or the default allocator if NULL).\n The caller is responsible for freeing the returned buffer. When using\n the default allocator (NULL), the buffer can be freed with `free()`.\n When using a custom allocator, the buffer must be freed using the\n same allocator.\n\n @param formatter The formatter handle (must not be NULL)\n @param allocator Pointer to allocator, or NULL to use the default allocator\n @param out_ptr Pointer to receive the allocated buffer\n @param out_len Pointer to receive the length of the output in bytes\n @return GHOSTTY_SUCCESS on success, GHOSTTY_OUT_OF_MEMORY on allocation\n         failure\n\n @ingroup formatter"]
+    #[doc = " Run the formatter and return an allocated buffer with the output.\n\n Each call formats the current terminal state. The buffer is allocated\n using the provided allocator (or the default allocator if NULL).\n The caller is responsible for freeing the returned buffer with\n ghostty_free(), passing the same allocator (or NULL for the default)\n that was used for the allocation.\n\n @param formatter The formatter handle (must not be NULL)\n @param allocator Pointer to allocator, or NULL to use the default allocator\n @param out_ptr Pointer to receive the allocated buffer\n @param out_len Pointer to receive the length of the output in bytes\n @return GHOSTTY_SUCCESS on success, GHOSTTY_OUT_OF_MEMORY on allocation\n         failure\n\n @ingroup formatter"]
     pub fn ghostty_formatter_format_alloc(
         formatter: GhosttyFormatter_ptr,
         allocator: *const GhosttyAllocator,
@@ -1229,6 +1564,12 @@ pub const GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRA
 #[doc = " Write grapheme codepoints into a caller-provided buffer (uint32_t*).\n  The buffer must be at least graphemes_len elements. The base codepoint\n  is written first, followed by any extra codepoints."]
 pub const GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF:
     GhosttyRenderStateRowCellsData = 4;
+#[doc = " The resolved background color of the cell (GhosttyColorRgb).\n  Flattens the three possible sources: content-tag bg_color_rgb,\n  content-tag bg_color_palette (looked up in the palette), or the\n  style's bg_color. Returns GHOSTTY_INVALID_VALUE if the cell has\n  no background color, in which case the caller should use whatever\n  default background color it wants (e.g. the terminal background)."]
+pub const GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR:
+    GhosttyRenderStateRowCellsData = 5;
+#[doc = " The resolved foreground color of the cell (GhosttyColorRgb).\n  Resolves palette indices through the palette. Bold color handling\n  is not applied; the caller should handle bold styling separately.\n  Returns GHOSTTY_INVALID_VALUE if the cell has no explicit foreground\n  color, in which case the caller should use whatever default foreground\n  color it wants (e.g. the terminal foreground)."]
+pub const GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR:
+    GhosttyRenderStateRowCellsData = 6;
 #[doc = " Queryable data kinds for ghostty_render_state_row_cells_get().\n\n @ingroup render"]
 pub type GhosttyRenderStateRowCellsData = ::std::os::raw::c_uint;
 unsafe extern "C" {
@@ -2128,51 +2469,4 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Check if paste data is safe to paste into the terminal.\n\n Data is considered unsafe if it contains:\n - Newlines (`\\n`) which can inject commands\n - The bracketed paste end sequence (`\\x1b[201~`) which can be used\n   to exit bracketed paste mode and inject commands\n\n This check is conservative and considers data unsafe regardless of\n current terminal state.\n\n @param data The paste data to check (must not be NULL)\n @param len The length of the data in bytes\n @return true if the data is safe to paste, false otherwise"]
     pub fn ghostty_paste_is_safe(data: *const ::std::os::raw::c_char, len: usize) -> bool;
-}
-#[doc = " In-band size report (mode 2048): ESC [ 48 ; rows ; cols ; height ; width t"]
-pub const GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_MODE_2048: GhosttySizeReportStyle = 0;
-#[doc = " XTWINOPS text area size in pixels: ESC [ 4 ; height ; width t"]
-pub const GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_14_T: GhosttySizeReportStyle = 1;
-#[doc = " XTWINOPS cell size in pixels: ESC [ 6 ; height ; width t"]
-pub const GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_16_T: GhosttySizeReportStyle = 2;
-#[doc = " XTWINOPS text area size in characters: ESC [ 8 ; rows ; cols t"]
-pub const GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_18_T: GhosttySizeReportStyle = 3;
-#[doc = " Size report style.\n\n Determines the output format for the terminal size report."]
-pub type GhosttySizeReportStyle = ::std::os::raw::c_uint;
-#[doc = " Terminal size information for encoding size reports."]
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct GhosttySizeReportSize {
-    #[doc = " Terminal row count in cells."]
-    pub rows: u16,
-    #[doc = " Terminal column count in cells."]
-    pub columns: u16,
-    #[doc = " Width of a single terminal cell in pixels."]
-    pub cell_width: u32,
-    #[doc = " Height of a single terminal cell in pixels."]
-    pub cell_height: u32,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of GhosttySizeReportSize"][::std::mem::size_of::<GhosttySizeReportSize>() - 12usize];
-    ["Alignment of GhosttySizeReportSize"]
-        [::std::mem::align_of::<GhosttySizeReportSize>() - 4usize];
-    ["Offset of field: GhosttySizeReportSize::rows"]
-        [::std::mem::offset_of!(GhosttySizeReportSize, rows) - 0usize];
-    ["Offset of field: GhosttySizeReportSize::columns"]
-        [::std::mem::offset_of!(GhosttySizeReportSize, columns) - 2usize];
-    ["Offset of field: GhosttySizeReportSize::cell_width"]
-        [::std::mem::offset_of!(GhosttySizeReportSize, cell_width) - 4usize];
-    ["Offset of field: GhosttySizeReportSize::cell_height"]
-        [::std::mem::offset_of!(GhosttySizeReportSize, cell_height) - 8usize];
-};
-unsafe extern "C" {
-    #[doc = " Encode a terminal size report into an escape sequence.\n\n Encodes a size report in the format specified by @p style into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n @param style The size report format to encode\n @param size Terminal size information\n @param buf Output buffer to write the encoded sequence into (may be NULL)\n @param buf_len Size of the output buffer in bytes\n @param[out] out_written On success, the number of bytes written. On\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n @return GHOSTTY_SUCCESS on success, GHOSTTY_OUT_OF_SPACE if the buffer\n         is too small"]
-    pub fn ghostty_size_report_encode(
-        style: GhosttySizeReportStyle,
-        size: GhosttySizeReportSize,
-        buf: *mut ::std::os::raw::c_char,
-        buf_len: usize,
-        out_written: *mut usize,
-    ) -> GhosttyResult;
 }

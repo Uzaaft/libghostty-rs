@@ -35,6 +35,7 @@ use crate::{
 ///     }
 /// }
 /// ```
+#[derive(Debug)]
 pub struct Parser<'alloc> {
     ptr: NonNull<ffi::GhosttySgrParser>,
     _phan: PhantomData<&'alloc ffi::GhosttyAllocator>,
@@ -140,6 +141,7 @@ impl Drop for Parser<'_> {
 
 /// An SGR attribute.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Attribute<'p> {
     Unset,
     Unknown(Unknown<'p>),
@@ -185,7 +187,10 @@ impl Attribute<'_> {
             4 => Self::Italic,
             5 => Self::ResetItalic,
             6 => Self::Faint,
-            7 => Self::Underline(Underline::from_raw(unsafe { value.value.underline })?),
+            7 => Self::Underline(
+                Underline::try_from(unsafe { value.value.underline })
+                    .map_err(|_| Error::InvalidValue)?,
+            ),
             8 => Self::UnderlineColor(unsafe { value.value.underline_color }.into()),
             9 => Self::UnderlineColor256(PaletteIndex(unsafe { value.value.underline_color_256 })),
             10 => Self::ResetUnderlineColor,

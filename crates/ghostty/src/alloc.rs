@@ -1,10 +1,19 @@
 //! Adapting custom allocators to work with libghostty.
-use std::{ffi::c_void, marker::PhantomData};
+use std::{
+    borrow::Borrow,
+    ffi::c_void,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+    ptr::NonNull,
+};
 
 #[cfg(feature = "allocator_api")]
 use allocator_api2::alloc;
 
-use crate::ffi::{GhosttyAllocator, GhosttyAllocatorVtable};
+use crate::{
+    error::{Error, Result, from_result},
+    ffi::{self, GhosttyAllocator, GhosttyAllocatorVtable},
+};
 
 /// A custom allocator that libghostty uses for its memory allocations.
 ///
@@ -20,9 +29,124 @@ pub struct Allocator<'ctx, Ctx: 'ctx = ()> {
     _phan: PhantomData<&'ctx Ctx>,
 }
 
-impl<'alloc, 'ctx: 'alloc, Ctx> Allocator<'ctx, Ctx> {
+impl<'ctx, Ctx> Allocator<'ctx, Ctx> {
     pub(crate) fn to_raw(&self) -> *const GhosttyAllocator {
         std::ptr::from_ref(&self.inner)
+    }
+}
+
+/// An internal helper struct for dealing with the common allocation
+/// pattern of allowing custom allocators for libghostty's opaque objects.
+#[derive(Debug)]
+pub(crate) struct Object<'alloc, T> {
+    pub(crate) ptr: NonNull<T>,
+    _phan: PhantomData<&'alloc GhosttyAllocator>,
+}
+
+impl<'alloc, T> Object<'alloc, T> {
+    pub(crate) fn new(raw: *mut T) -> Result<Self> {
+        let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
+        Ok(Self {
+            ptr,
+            _phan: PhantomData,
+        })
+    }
+    pub(crate) fn as_raw(&self) -> *mut T {
+        self.ptr.as_ptr()
+    }
+}
+
+/// Bytes allocated by libghostty, possibly using a custom allocator.
+pub struct Bytes<'alloc> {
+    ptr: NonNull<u8>,
+    len: usize,
+    alloc: *const GhosttyAllocator,
+    _phan: PhantomData<&'alloc GhosttyAllocator>,
+}
+impl<'alloc> Bytes<'alloc> {
+    /// Allocate `len` bytes with libghostty's default allocator.
+    ///
+    /// Not really useful except in very niche cases.
+    pub fn new(len: usize) -> Result<Self> {
+        // SAFETY: A NULL allocator is always valid
+        unsafe { Self::new_inner(std::ptr::null(), len) }
+    }
+
+    /// Allocate `len` bytes with a custom allocator.
+    ///
+    /// Not really useful except in very niche cases.
+    pub fn new_with_alloc<'ctx: 'alloc, Ctx>(
+        alloc: &'alloc Allocator<'ctx, Ctx>,
+        len: usize,
+    ) -> Result<Self> {
+        // SAFETY: Borrow checking should forbid invalid allocators
+        unsafe { Self::new_inner(alloc.to_raw(), len) }
+    }
+
+    unsafe fn new_inner(alloc: *const ffi::GhosttyAllocator, len: usize) -> Result<Self> {
+        let raw = unsafe { ffi::ghostty_alloc(alloc, len) };
+        let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
+        Ok(unsafe { Self::from_raw_parts(ptr, len, alloc) })
+    }
+
+    pub(crate) unsafe fn from_raw_parts(
+        ptr: NonNull<u8>,
+        len: usize,
+        alloc: *const GhosttyAllocator,
+    ) -> Self {
+        Self {
+            ptr,
+            len,
+            alloc,
+            _phan: PhantomData,
+        }
+    }
+}
+impl Drop for Bytes<'_> {
+    fn drop(&mut self) {
+        // SAFETY: The lifetime dictates that the allocator must
+        // remain valid through here. We retain ownership of the bytes
+        // memory itself so it should not be freed beforehand.
+        unsafe { ffi::ghostty_free(self.alloc, self.ptr.as_ptr(), self.len) };
+    }
+}
+impl Deref for Bytes<'_> {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: See Drop
+        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
+    }
+}
+impl DerefMut for Bytes<'_> {
+    #[inline]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: See Drop
+        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
+    }
+}
+impl AsRef<[u8]> for Bytes<'_> {
+    fn as_ref(&self) -> &[u8] {
+        self.deref()
+    }
+}
+impl AsMut<[u8]> for Bytes<'_> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.deref_mut()
+    }
+}
+impl Borrow<[u8]> for Bytes<'_> {
+    fn borrow(&self) -> &[u8] {
+        self.deref()
+    }
+}
+impl<'a> IntoIterator for &'a Bytes<'_> {
+    type Item = &'a u8;
+    type IntoIter = std::slice::Iter<'a, u8>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.deref().iter()
     }
 }
 

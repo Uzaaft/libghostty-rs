@@ -1,25 +1,26 @@
 //! Types and functions around terminal state management.
 
-use std::{marker::PhantomData, ptr::NonNull};
+use std::mem::MaybeUninit;
 
 use crate::{
-    alloc::Allocator,
-    error::{Error, from_result},
-    ffi,
+    alloc::{Allocator, Object},
+    error::{Error, Result, from_result},
+    ffi, key, style,
 };
 
 /// Complete terminal emulator state and rendering.
 ///
 /// A terminal instance manages the full emulator state including the screen,
 /// scrollback, cursor, styles, modes, and VT stream processing.
-pub struct Terminal<'alloc> {
-    ptr: NonNull<ffi::GhosttyTerminal>,
-    _alloc: PhantomData<&'alloc ffi::GhosttyAllocator>,
-}
+pub struct Terminal<'alloc>(pub(crate) Object<'alloc, ffi::GhosttyTerminal>);
 
+/// Terminal initialization options.
 pub struct Options {
+    /// Terminal width in cells. Must be greater than zero.
     pub cols: u16,
+    /// Terminal height in cells. Must be greater than zero.
     pub rows: u16,
+    /// Maximum number of lines to keep in scrollback history.
     pub max_scrollback: usize,
 }
 
@@ -35,7 +36,7 @@ impl From<Options> for ffi::GhosttyTerminalOptions {
 
 impl<'alloc> Terminal<'alloc> {
     /// Create a new terminal instance.
-    pub fn new(opts: Options) -> Result<Self, Error> {
+    pub fn new(opts: Options) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_inner(std::ptr::null(), opts) }
     }
@@ -47,134 +48,196 @@ impl<'alloc> Terminal<'alloc> {
     pub fn new_with_alloc<'ctx: 'alloc, Ctx>(
         alloc: &'alloc Allocator<'ctx, Ctx>,
         opts: Options,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw(), opts) }
     }
 
-    unsafe fn new_inner(alloc: *const ffi::GhosttyAllocator, opts: Options) -> Result<Self, Error> {
+    unsafe fn new_inner(alloc: *const ffi::GhosttyAllocator, opts: Options) -> Result<Self> {
         let mut raw: ffi::GhosttyTerminal_ptr = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_terminal_new(alloc, &mut raw, opts.into()) };
         from_result(result)?;
-        let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
-        Ok(Self {
-            ptr,
-            _alloc: PhantomData,
-        })
+        Ok(Self(Object::new(raw)?))
     }
 
-    pub fn as_raw(&self) -> ffi::GhosttyTerminal_ptr {
-        self.ptr.as_ptr()
-    }
-
+    /// Write VT-encoded data to the terminal for processing.
+    ///
+    /// Feeds raw bytes through the terminal's VT stream parser, updating
+    /// terminal state accordingly. By default, sequences that require output
+    /// (queries, device status reports) are silently ignored.
+    /// Use [`Terminal::set_write_pty_fn`] to install a callback that receives
+    /// response data.
+    ///
+    /// This never fails. Any erroneous input or errors in processing the input
+    /// are logged internally but do not cause this function to fail because
+    /// this input is assumed to be untrusted and from an external source; so
+    /// the primary goal is to keep the terminal state consistent and not allow
+    /// malformed input to corrupt or crash.    
     pub fn vt_write(&mut self, data: &[u8]) {
-        // SAFETY: `self.ptr` stays valid before and after this operation.
-        // `data` is guaranteed to contain valid, in-bounds data per Rust's
-        // safety guarantees.
-        unsafe { ffi::ghostty_terminal_vt_write(self.ptr.as_ptr(), data.as_ptr(), data.len()) }
+        unsafe { ffi::ghostty_terminal_vt_write(self.0.as_raw(), data.as_ptr(), data.len()) }
     }
 
-    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), Error> {
-        // SAFETY: `self.ptr` stays valid before and after this operation.
-        let result = unsafe { ffi::ghostty_terminal_resize(self.ptr.as_ptr(), cols, rows) };
+    /// Resize the terminal to the given dimensions.
+    ///
+    /// Changes the number of columns and rows in the terminal. The primary
+    /// screen will reflow content if wraparound mode is enabled; the alternate
+    /// screen does not reflow. If the dimensions are unchanged, this is a no-op.
+    ///
+    /// This also updates the terminal's pixel dimensions (used for image
+    /// protocols and size reports), disables synchronized output mode (allowed
+    /// by the spec so that resize results are shown immediately), and sends an
+    /// in-band size report if mode 2048 is enabled.
+    pub fn resize(
+        &mut self,
+        cols: u16,
+        rows: u16,
+        cell_width_px: u32,
+        cell_height_px: u32,
+    ) -> Result<()> {
+        let result = unsafe {
+            ffi::ghostty_terminal_resize(self.0.as_raw(), cols, rows, cell_width_px, cell_height_px)
+        };
         from_result(result)
     }
 
+    /// Perform a full reset of the terminal (RIS).
+    ///
+    /// Resets all terminal state back to its initial configuration,
+    /// including modes, scrollback, scrolling region, and screen contents.
+    /// The terminal dimensions are preserved.
     pub fn reset(&mut self) {
-        // SAFETY: `self.ptr` stays valid before and after this operation.
-        unsafe { ffi::ghostty_terminal_reset(self.ptr.as_ptr()) }
+        unsafe { ffi::ghostty_terminal_reset(self.0.as_raw()) }
     }
 
+    /// Scroll the terminal viewport.
     pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
-        // SAFETY: `self.ptr` stays valid before and after this operation.
-        unsafe { ffi::ghostty_terminal_scroll_viewport(self.ptr.as_ptr(), scroll.into()) }
+        unsafe { ffi::ghostty_terminal_scroll_viewport(self.0.as_raw(), scroll.into()) }
     }
 
-    pub fn mode(&self, mode: Mode) -> Result<bool, Error> {
+    /// Get the current value of a terminal mode.
+    pub fn mode(&self, mode: Mode) -> Result<bool> {
         let mut value = false;
-        // SAFETY: `self.ptr` stays valid before and after this operation.
         let result =
-            unsafe { ffi::ghostty_terminal_mode_get(self.ptr.as_ptr(), mode.into(), &mut value) };
+            unsafe { ffi::ghostty_terminal_mode_get(self.0.as_raw(), mode.into(), &mut value) };
         from_result(result)?;
         Ok(value)
     }
 
-    pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<(), Error> {
-        // SAFETY: `self.ptr` stays valid before and after this operation.
-        let result =
-            unsafe { ffi::ghostty_terminal_mode_set(self.ptr.as_ptr(), mode.into(), value) };
+    /// Set the value of a terminal mode.
+    pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<()> {
+        let result = unsafe { ffi::ghostty_terminal_mode_set(self.0.as_raw(), mode.into(), value) };
         from_result(result)
     }
 
-    pub fn cols(&self) -> Result<u16, Error> {
-        let mut value: u16 = 0;
-        let result = unsafe {
-            ffi::ghostty_terminal_get(
-                self.ptr.as_ptr(),
-                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_COLS,
-                std::ptr::from_mut(&mut value).cast(),
-            )
-        };
+    fn get<T>(&self, tag: ffi::GhosttyTerminalData) -> Result<T> {
+        let mut value = MaybeUninit::<T>::zeroed();
+        let result =
+            unsafe { ffi::ghostty_terminal_get(self.0.as_raw(), tag, value.as_mut_ptr().cast()) };
+        // Since we manually model every possible query, this should never fail.
         from_result(result)?;
-        Ok(value)
+        // SAFETY: Value should be initialized after successful call.
+        Ok(unsafe { value.assume_init() })
     }
 
-    pub fn rows(&self) -> Result<u16, Error> {
-        let mut value: u16 = 0;
-        let result = unsafe {
-            ffi::ghostty_terminal_get(
-                self.ptr.as_ptr(),
-                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_ROWS,
-                std::ptr::from_mut(&mut value).cast(),
-            )
-        };
-        from_result(result)?;
-        Ok(value)
+    /// Get the terminal width in cells.
+    pub fn cols(&self) -> Result<u16> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_COLS)
+    }
+    /// Get the terminal height in cells.
+    pub fn rows(&self) -> Result<u16> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_ROWS)
+    }
+    /// Get the cursor column position (0-indexed).
+    pub fn cursor_x(&self) -> Result<u16> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_X)
+    }
+    /// Get the cursor row position within the active area (0-indexed).
+    pub fn cursor_y(&self) -> Result<u16> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_Y)
+    }
+    /// Get whether the cursor has a pending wrap (next print will soft-wrap).
+    pub fn is_cursor_pending_wrap(&self) -> Result<bool> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP)
+    }
+    /// Get whether the cursor is visible (DEC mode 25).
+    pub fn is_cursor_visible(&self) -> Result<bool> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE)
+    }
+    /// Get the current SGR style of the cursor.
+    ///
+    /// This is the style that will be applied to newly printed characters.
+    pub fn cursor_style(&self) -> Result<style::Style> {
+        self.get::<ffi::GhosttyStyle>(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_STYLE)
+            .and_then(|v| v.try_into())
+    }
+    /// Get the current Kitty keyboard protocol flags.
+    pub fn kitty_keyboard_flags(&self) -> Result<key::KittyKeyFlags> {
+        self.get::<ffi::GhosttyKittyKeyFlags>(
+            ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS,
+        )
+        .map(key::KittyKeyFlags::from_bits_retain)
     }
 
-    pub fn cursor_x(&self) -> Result<u16, Error> {
-        let mut value: u16 = 0;
-        let result = unsafe {
-            ffi::ghostty_terminal_get(
-                self.ptr.as_ptr(),
-                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_X,
-                std::ptr::from_mut(&mut value).cast(),
-            )
-        };
-        from_result(result)?;
-        Ok(value)
+    /// Get the scrollbar state for the terminal viewport.
+    ///
+    /// This may be expensive to calculate depending on where the viewport is
+    /// (arbitrary pins are expensive). The caller should take care to only call
+    /// this as needed and not too frequently.
+    pub fn scrollbar(&self) -> Result<ffi::GhosttyTerminalScrollbar> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBAR)
+    }
+    /// Get the currently active screen.
+    pub fn active_screen(&self) -> Result<ffi::GhosttyTerminalScreen> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN)
+    }
+    /// Get whether any mouse tracking mode is active.
+    ///
+    /// Returns true if any of the mouse tracking modes (X10, normal, button,
+    /// or any-event) are enabled.
+    pub fn is_mouse_tracking(&self) -> Result<bool> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING)
+    }
+    /// Get the terminal title as set by escape sequences (e.g. OSC 0/2).
+    ///
+    /// Returns a borrowed string, valid until the next call to
+    /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
+    /// returned when no title has been set.
+    pub fn title(&self) -> Result<&str> {
+        let str = self.get::<ffi::GhosttyString>(
+            ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING,
+        )?;
+        // SAFETY: We trust libghostty to return a valid borrowed string,
+        // while we uphold that no mutation could happen during its lifetime.
+        let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
+        std::str::from_utf8(str).map_err(|_| Error::InvalidValue)
     }
 
-    pub fn cursor_y(&self) -> Result<u16, Error> {
-        let mut value: u16 = 0;
-        let result = unsafe {
-            ffi::ghostty_terminal_get(
-                self.ptr.as_ptr(),
-                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_Y,
-                std::ptr::from_mut(&mut value).cast(),
-            )
-        };
-        from_result(result)?;
-        Ok(value)
+    /// Get the current working directory as set by escape sequences (e.g. OSC 7).
+    ///
+    /// Returns a borrowed string, valid until the next call to
+    /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
+    /// returned when no title has been set.
+    pub fn pwd(&self) -> Result<&str> {
+        let str =
+            self.get::<ffi::GhosttyString>(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_PWD)?;
+        // SAFETY: We trust libghostty to return a valid borrowed string,
+        // while we uphold that no mutation could happen during its lifetime.
+        let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
+        std::str::from_utf8(str).map_err(|_| Error::InvalidValue)
     }
-
-    pub fn scrollbar(&self) -> Result<ffi::GhosttyTerminalScrollbar, Error> {
-        let mut value = ffi::GhosttyTerminalScrollbar::default();
-        let result = unsafe {
-            ffi::ghostty_terminal_get(
-                self.ptr.as_ptr(),
-                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBAR,
-                std::ptr::from_mut(&mut value).cast(),
-            )
-        };
-        from_result(result)?;
-        Ok(value)
+    /// The total number of rows in the active screen including scrollback.
+    pub fn total_rows(&self) -> Result<usize> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_TOTAL_ROWS)
+    }
+    ///  The number of scrollback rows (total rows minus viewport rows).
+    pub fn scrollback_rows(&self) -> Result<usize> {
+        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS)
     }
 }
 
 impl<'alloc> Drop for Terminal<'alloc> {
     fn drop(&mut self) {
-        unsafe { ffi::ghostty_terminal_free(self.ptr.as_ptr()) }
+        unsafe { ffi::ghostty_terminal_free(self.0.as_raw()) }
     }
 }
 
