@@ -499,6 +499,148 @@ pub fn focus_encode(
 }
 
 // ---------------------------------------------------------------------------
+// Mode report encode
+// ---------------------------------------------------------------------------
+
+/// Encode a DECRPM (DEC Private Mode Report) response sequence.
+///
+/// Generates the escape sequence `CSI ? Ps1 ; Ps2 $ y` that reports whether
+/// a given terminal mode is set, reset, or unrecognized. This is the standard
+/// response to a DECRQM (DEC Request Mode) query.
+pub fn mode_report_encode(
+    mode: ffi::GhosttyMode,
+    state: ModeReportState,
+    buf: &mut [u8],
+) -> Result<usize, Error> {
+    let mut written: usize = 0;
+    let result = unsafe {
+        ffi::ghostty_mode_report_encode(
+            mode,
+            state.into(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &mut written,
+        )
+    };
+    from_result_with_len(result, written)
+}
+
+/// DECRPM report state values.
+///
+/// Corresponds to the Ps2 parameter in a DECRPM response sequence
+/// (`CSI ? Ps1 ; Ps2 $ y`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ModeReportState {
+    /// Mode is not recognized.
+    NotRecognized,
+    /// Mode is set (enabled).
+    Set,
+    /// Mode is reset (disabled).
+    Reset,
+    /// Mode is permanently set.
+    PermanentlySet,
+    /// Mode is permanently reset.
+    PermanentlyReset,
+}
+
+impl From<ModeReportState> for ffi::GhosttyModeReportState {
+    fn from(value: ModeReportState) -> Self {
+        match value {
+            ModeReportState::NotRecognized => {
+                ffi::GhosttyModeReportState_GHOSTTY_MODE_REPORT_NOT_RECOGNIZED
+            }
+            ModeReportState::Set => ffi::GhosttyModeReportState_GHOSTTY_MODE_REPORT_SET,
+            ModeReportState::Reset => ffi::GhosttyModeReportState_GHOSTTY_MODE_REPORT_RESET,
+            ModeReportState::PermanentlySet => {
+                ffi::GhosttyModeReportState_GHOSTTY_MODE_REPORT_PERMANENTLY_SET
+            }
+            ModeReportState::PermanentlyReset => {
+                ffi::GhosttyModeReportState_GHOSTTY_MODE_REPORT_PERMANENTLY_RESET
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Size report encode
+// ---------------------------------------------------------------------------
+
+/// Encode a terminal size report escape sequence.
+///
+/// Generates different size report formats depending on the style:
+/// - Mode 2048 (in-band resize): `ESC [ 48 ; rows ; cols ; height ; width t`
+/// - CSI 14 t: text area size in pixels
+/// - CSI 16 t: cell size in pixels
+/// - CSI 18 t: text area size in characters
+pub fn size_report_encode(
+    style: SizeReportStyle,
+    size: SizeReportSize,
+    buf: &mut [u8],
+) -> Result<usize, Error> {
+    let mut written: usize = 0;
+    let result = unsafe {
+        ffi::ghostty_size_report_encode(
+            style.into(),
+            size.into(),
+            buf.as_mut_ptr().cast(),
+            buf.len(),
+            &mut written,
+        )
+    };
+    from_result_with_len(result, written)
+}
+
+/// Size report output format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SizeReportStyle {
+    /// In-band size report (mode 2048).
+    Mode2048,
+    /// XTWINOPS text area size in pixels (CSI 14 t).
+    Csi14T,
+    /// XTWINOPS cell size in pixels (CSI 16 t).
+    Csi16T,
+    /// XTWINOPS text area size in characters (CSI 18 t).
+    Csi18T,
+}
+
+impl From<SizeReportStyle> for ffi::GhosttySizeReportStyle {
+    fn from(value: SizeReportStyle) -> Self {
+        match value {
+            SizeReportStyle::Mode2048 => {
+                ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_MODE_2048
+            }
+            SizeReportStyle::Csi14T => ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_14_T,
+            SizeReportStyle::Csi16T => ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_16_T,
+            SizeReportStyle::Csi18T => ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_18_T,
+        }
+    }
+}
+
+/// Terminal size information for encoding size reports.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SizeReportSize {
+    /// Terminal row count in cells.
+    pub rows: u16,
+    /// Terminal column count in cells.
+    pub columns: u16,
+    /// Cell width in pixels.
+    pub cell_width: u32,
+    /// Cell height in pixels.
+    pub cell_height: u32,
+}
+
+impl From<SizeReportSize> for ffi::GhosttySizeReportSize {
+    fn from(value: SizeReportSize) -> Self {
+        Self {
+            rows: value.rows,
+            columns: value.columns,
+            cell_width: value.cell_width,
+            cell_height: value.cell_height,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // RenderState
 // ---------------------------------------------------------------------------
 
