@@ -381,6 +381,48 @@ impl From<Mode> for ffi::GhosttyMode {
 // Callbacks
 //---------------------------------------
 
+/// You might be wondering just what the heck this is.
+///
+/// Truth to be told, you don't need to understand how it works
+/// in order to use it. It does a bunch of voodoo behind the scenes
+/// that make sure all the invariants of the C API are upheld, while
+/// providing a convenient API for Rust users.
+///
+/// Each handler is defined in this following format:
+/// ```
+/// pub fn on_foobar(
+///     &mut self,
+///     // The corresponding GhosttyTerminalOption
+///     tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_FOOBAR,
+///
+///     // The name of the original function type in C,
+///     // along with the parameters beyond the terminal and user data
+///     // and the expected return type
+///     from = GhosttyTerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
+///
+///     // The name of mapped Rust function type,
+///     // along with the Rust parameters and return type.
+///     //
+///     // `<'t>` is used to tie the return value to the lifetime of the
+///     // terminal. The name is arbitrary - any lifetime marker will do.
+///     to = <'t>FoobarFn(&'t [u8]) -> bool,
+/// ) |prep| {
+///     // `prep` contains the terminal, the Rust user data and
+///     // the Rust callback handle. The name is again arbitrary.
+///     if let Some((terminal, userdata, callback)) = prep {
+///         // Convert the raw parameters into Rust types.
+///         // This is just to illustrate how.
+///         let slice = unsafe { std::slice::from_raw_parts(foo, bar) };
+///
+///         // Call into user logic and return.
+///         callback(&terminal, userdata, slice)
+///     } else {
+///         // This path should generally never happen, but is here
+///         // for the sake of completeness.
+///         false
+///     }
+/// }
+/// ```
 macro_rules! handlers {
     {
         $(
@@ -388,7 +430,7 @@ macro_rules! handlers {
             $vis:vis fn $name:ident(
                 &mut self,
                 tag = $tag:ident,
-                from = $rawfnty:ident( $($rfname:ident: $rfty:ty),*$(,)? ) -> $rawrty:ty,
+                from = $rawfnty:ident( $($rfname:ident: $rfty:ty),*$(,)? ) $(-> $rawrty:ty)?,
                 $(#[$tmeta:meta])*
                 to = $(<$lf:lifetime>)? $fnty:ident( $($fty:ty),*$(,)? ) $(-> $rty:ty)?,
             ) |$prep:ident| $block:block
@@ -401,7 +443,7 @@ macro_rules! handlers {
                     t: *mut $crate::ffi::GhosttyTerminal,
                     ud: *mut ::std::ffi::c_void,
                     $($rfname: $rfty),*
-                ) -> $rawrty {
+                ) $(-> $rawrty)? {
                     let $prep = unsafe { prep_callback::<'alloc, 'ud, UserData>(t, ud) }
                         .and_then(|(t, cbs)| Some((t, cbs.ud.as_deref_mut(), cbs.$name.as_deref()?)));
                     $block
@@ -467,8 +509,8 @@ handlers! {
     pub fn on_pty_write(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_WRITE_PTY,
-        from = GhosttyTerminalWritePtyFn(ptr: *const u8, len: usize) -> (),
-        to = WritePtyFn(&[u8]),
+        from = GhosttyTerminalWritePtyFn(ptr: *const u8, len: usize),
+        to = <'t>WritePtyFn(&'t [u8]),
     ) |prep| {
         if let Some((t, ud, func)) = prep {
             // SAFETY: We trust libghostty to return valid memory given we
@@ -486,7 +528,7 @@ handlers! {
     pub fn on_bell(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_BELL,
-        from = GhosttyTerminalBellFn() -> (),
+        from = GhosttyTerminalBellFn(),
         to = BellFn(),
     ) |prep| {
         if let Some((t, ud, func)) = prep {
@@ -535,7 +577,7 @@ handlers! {
     pub fn on_title_changed(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_TITLE_CHANGED,
-        from = GhosttyTerminalTitleChangedFn() -> (),
+        from = GhosttyTerminalTitleChangedFn(),
         to = TitleChanged(),
     ) |prep| {
         if let Some((t, ud, func)) = prep {
