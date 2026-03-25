@@ -605,16 +605,8 @@ impl<'alloc, 's> CellIteration<'alloc, 's> {
 
     pub fn graphemes(&self) -> Result<Vec<char>> {
         let len = self.graphemes_len()?;
-        let mut graphemes = Vec::<char>::with_capacity(len);
-
-        let result = unsafe {
-            ffi::ghostty_render_state_row_cells_get(
-                self.iter.0.as_raw(),
-                ffi::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,
-                graphemes.as_mut_ptr().cast(),
-            )
-        };
-        from_result(result)?;
+        let mut graphemes = vec!['\0'; len];
+        self.graphemes_buf(&mut graphemes)?;
         Ok(graphemes)
     }
 
@@ -622,6 +614,17 @@ impl<'alloc, 's> CellIteration<'alloc, 's> {
         self.get(
             ffi::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN,
         )
+    }
+
+    pub fn graphemes_buf(&self, buf: &mut [char]) -> Result<()> {
+        let result = unsafe {
+            ffi::ghostty_render_state_row_cells_get(
+                self.iter.0.as_raw(),
+                ffi::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_BUF,
+                buf.as_mut_ptr().cast(),
+            )
+        };
+        from_result(result)
     }
 }
 

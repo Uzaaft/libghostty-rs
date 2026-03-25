@@ -17,7 +17,6 @@ use std::rc::Rc;
 use ghostty::focus;
 use ghostty::key::Key;
 use ghostty::render::{Dirty, Snapshot};
-use ghostty::style::RgbColor;
 use ghostty::terminal::{self, Mode};
 use ghostty::{
     Terminal, TerminalOptions, ffi, key, mouse,
@@ -658,23 +657,6 @@ fn render_terminal<'alloc>(
         return Ok(());
     };
 
-    // If both fg and bg are black (no palette loaded yet), use white
-    // foreground so text is visible on the default black background.
-    let mut fg_default = colors.foreground;
-    if fg_default.r == 0
-        && fg_default.g == 0
-        && fg_default.b == 0
-        && colors.background.r == 0
-        && colors.background.g == 0
-        && colors.background.b == 0
-    {
-        fg_default = RgbColor {
-            r: 255,
-            g: 255,
-            b: 255,
-        };
-    }
-
     let Ok(mut row_iter) = rows.update(snapshot) else {
         return Ok(());
     };
@@ -729,11 +711,12 @@ fn render_terminal<'alloc>(
             }
 
             // Read grapheme codepoints and encode to a UTF-8 string.
-            let codepoints = cell.graphemes()?;
+            let mut codepoint_buf = ['\0'; 16];
+            cell.graphemes_buf(&mut codepoint_buf)?;
 
             let mut text_buf = [0u8; 64];
             let mut pos: usize = 0;
-            for cp in &codepoints {
+            for cp in &codepoint_buf[..grapheme_len.min(16)] {
                 if pos >= 60 {
                     break;
                 }
@@ -813,7 +796,7 @@ fn render_terminal<'alloc>(
     let cursor_visible = snapshot.cursor_visible().unwrap_or(false);
 
     if cursor_visible && let Ok(Some(viewport)) = snapshot.cursor_viewport() {
-        let cur_rgb = colors.cursor.unwrap_or(fg_default);
+        let cur_rgb = colors.cursor.unwrap_or(colors.foreground);
         let cur_x = pad + viewport.x as i32 * cell_width;
         let cur_y = pad + viewport.y as i32 * cell_height;
         d.draw_rectangle(
@@ -936,7 +919,7 @@ fn run() -> Result<()> {
 
     // Use raylib's default font. Replace with LoadFontFromMemory() and an
     // embedded TTF (e.g. JetBrains Mono) for proper monospace rendering.
-    let mono_font = rl.borrow().get_font_default();
+    let mono_font = rl.borrow_mut().get_font_default();
 
     // Measure a glyph to determine cell dimensions.
     let glyph_size = mono_font.measure_text("M", font_size as f32, 0.0);
