@@ -154,101 +154,6 @@ fn pty_write<Fd: AsFd>(fd: Fd, data: &[u8]) {
 // Input handling
 // ---------------------------------------------------------------------------
 
-/// Map a raylib key constant to a GhosttyKey code.
-/// Returns GHOSTTY_KEY_UNIDENTIFIED for keys we don't handle.
-fn raylib_key_to_ghostty(rl_key: KeyboardKey) -> Key {
-    use KeyboardKey::*;
-
-    // Letters -- raylib KEY_A..KEY_Z are contiguous, and so are
-    // GHOSTTY_KEY_A..GHOSTTY_KEY_Z.
-    let key_a = KEY_A as u32;
-    let key_z = KEY_Z as u32;
-    let key_zero = KEY_ZERO as u32;
-    let key_nine = KEY_NINE as u32;
-    let key_f1 = KEY_F1 as u32;
-    let key_f12 = KEY_F12 as u32;
-    let k = rl_key as u32;
-
-    if (key_a..=key_z).contains(&k) {
-        return Key::try_from(Key::A as u32 + (k - key_a)).unwrap();
-    }
-    // Digits -- raylib KEY_ZERO..KEY_NINE are contiguous.
-    if (key_zero..=key_nine).contains(&k) {
-        return Key::try_from(Key::Digit0 as u32 + (k - key_zero)).unwrap();
-    }
-    // Function keys -- raylib KEY_F1..KEY_F12 are contiguous.
-    if (key_f1..=key_f12).contains(&k) {
-        return Key::try_from(Key::F1 as u32 + (k - key_f1)).unwrap();
-    }
-
-    match rl_key {
-        KEY_SPACE => Key::Space,
-        KEY_ENTER => Key::Enter,
-        KEY_TAB => Key::Tab,
-        KEY_BACKSPACE => Key::Backspace,
-        KEY_DELETE => Key::Delete,
-        KEY_ESCAPE => Key::Escape,
-        KEY_UP => Key::ArrowUp,
-        KEY_DOWN => Key::ArrowDown,
-        KEY_LEFT => Key::ArrowLeft,
-        KEY_RIGHT => Key::ArrowRight,
-        KEY_HOME => Key::Home,
-        KEY_END => Key::End,
-        KEY_PAGE_UP => Key::PageUp,
-        KEY_PAGE_DOWN => Key::PageDown,
-        KEY_INSERT => Key::Insert,
-        KEY_MINUS => Key::Minus,
-        KEY_EQUAL => Key::Equal,
-        KEY_LEFT_BRACKET => Key::BracketLeft,
-        KEY_RIGHT_BRACKET => Key::BracketRight,
-        KEY_BACKSLASH => Key::Backslash,
-        KEY_SEMICOLON => Key::Semicolon,
-        KEY_APOSTROPHE => Key::Quote,
-        KEY_COMMA => Key::Comma,
-        KEY_PERIOD => Key::Period,
-        KEY_SLASH => Key::Slash,
-        KEY_GRAVE => Key::Backquote,
-        _ => Key::Unidentified,
-    }
-}
-
-/// Return the unshifted Unicode codepoint for a raylib key, i.e. the
-/// character the key produces with no modifiers on a US layout. The
-/// Kitty keyboard protocol requires this to identify keys. Returns 0
-/// for keys that don't have a natural codepoint (arrows, F-keys, etc.).
-fn raylib_key_unshifted_codepoint(rl_key: KeyboardKey) -> char {
-    use KeyboardKey::*;
-
-    let key_a = KEY_A as u32;
-    let key_z = KEY_Z as u32;
-    let key_zero = KEY_ZERO as u32;
-    let key_nine = KEY_NINE as u32;
-    let k = rl_key as u32;
-
-    if (key_a..=key_z).contains(&k) {
-        return char::from_u32('a' as u32 + (k - key_a)).unwrap();
-    }
-    if (key_zero..=key_nine).contains(&k) {
-        return char::from_u32('0' as u32 + (k - key_zero)).unwrap();
-    }
-
-    match rl_key {
-        KEY_SPACE => ' ',
-        KEY_MINUS => '-',
-        KEY_EQUAL => '=',
-        KEY_LEFT_BRACKET => '[',
-        KEY_RIGHT_BRACKET => ']',
-        KEY_BACKSLASH => '\\',
-        KEY_SEMICOLON => ';',
-        KEY_APOSTROPHE => '\'',
-        KEY_COMMA => ',',
-        KEY_PERIOD => '.',
-        KEY_SLASH => '/',
-        KEY_GRAVE => '`',
-        _ => '\0',
-    }
-}
-
 /// Build a GhosttyMods bitmask from the current raylib modifier key state.
 fn get_ghostty_mods(rl: &RaylibHandle) -> key::Mods {
     let mut mods = key::Mods::empty();
@@ -269,78 +174,98 @@ fn get_ghostty_mods(rl: &RaylibHandle) -> key::Mods {
     mods
 }
 
-/// Map a raylib mouse button to a GhosttyMouseButton.
-fn raylib_mouse_to_ghostty(rl_button: MouseButton) -> mouse::Button {
-    match rl_button {
-        MouseButton::MOUSE_BUTTON_LEFT => mouse::Button::Left,
-        MouseButton::MOUSE_BUTTON_RIGHT => mouse::Button::Right,
-        MouseButton::MOUSE_BUTTON_MIDDLE => mouse::Button::Middle,
-        MouseButton::MOUSE_BUTTON_SIDE => mouse::Button::Four,
-        MouseButton::MOUSE_BUTTON_EXTRA => mouse::Button::Five,
-        MouseButton::MOUSE_BUTTON_FORWARD => mouse::Button::Six,
-        MouseButton::MOUSE_BUTTON_BACK => mouse::Button::Seven,
-    }
-}
+/// All raylib mouse buttons we want to check with their libghostty equivalent.
+const ALL_MOUSE_BUTTONS: [(MouseButton, mouse::Button); 7] = [
+    (MouseButton::MOUSE_BUTTON_LEFT, mouse::Button::Left),
+    (MouseButton::MOUSE_BUTTON_RIGHT, mouse::Button::Right),
+    (MouseButton::MOUSE_BUTTON_MIDDLE, mouse::Button::Middle),
+    (MouseButton::MOUSE_BUTTON_SIDE, mouse::Button::Four),
+    (MouseButton::MOUSE_BUTTON_EXTRA, mouse::Button::Five),
+    (MouseButton::MOUSE_BUTTON_FORWARD, mouse::Button::Six),
+    (MouseButton::MOUSE_BUTTON_BACK, mouse::Button::Seven),
+];
 
-/// All raylib keys we want to check for press/repeat/release events.
-/// Letters and digits are handled via ranges; everything else is
-/// enumerated explicitly.
-fn all_keys_to_check() -> Vec<KeyboardKey> {
-    let mut keys = Vec::new();
-    for k in (KeyboardKey::KEY_A as u32)..=(KeyboardKey::KEY_Z as u32) {
-        keys.push(num_to_keyboard_key(k));
-    }
-    for k in (KeyboardKey::KEY_ZERO as u32)..=(KeyboardKey::KEY_NINE as u32) {
-        keys.push(num_to_keyboard_key(k));
-    }
-    keys.extend_from_slice(&[
-        KeyboardKey::KEY_SPACE,
-        KeyboardKey::KEY_ENTER,
-        KeyboardKey::KEY_TAB,
-        KeyboardKey::KEY_BACKSPACE,
-        KeyboardKey::KEY_DELETE,
-        KeyboardKey::KEY_ESCAPE,
-        KeyboardKey::KEY_UP,
-        KeyboardKey::KEY_DOWN,
-        KeyboardKey::KEY_LEFT,
-        KeyboardKey::KEY_RIGHT,
-        KeyboardKey::KEY_HOME,
-        KeyboardKey::KEY_END,
-        KeyboardKey::KEY_PAGE_UP,
-        KeyboardKey::KEY_PAGE_DOWN,
-        KeyboardKey::KEY_INSERT,
-        KeyboardKey::KEY_MINUS,
-        KeyboardKey::KEY_EQUAL,
-        KeyboardKey::KEY_LEFT_BRACKET,
-        KeyboardKey::KEY_RIGHT_BRACKET,
-        KeyboardKey::KEY_BACKSLASH,
-        KeyboardKey::KEY_SEMICOLON,
-        KeyboardKey::KEY_APOSTROPHE,
-        KeyboardKey::KEY_COMMA,
-        KeyboardKey::KEY_PERIOD,
-        KeyboardKey::KEY_SLASH,
-        KeyboardKey::KEY_GRAVE,
-        KeyboardKey::KEY_F1,
-        KeyboardKey::KEY_F2,
-        KeyboardKey::KEY_F3,
-        KeyboardKey::KEY_F4,
-        KeyboardKey::KEY_F5,
-        KeyboardKey::KEY_F6,
-        KeyboardKey::KEY_F7,
-        KeyboardKey::KEY_F8,
-        KeyboardKey::KEY_F9,
-        KeyboardKey::KEY_F10,
-        KeyboardKey::KEY_F11,
-        KeyboardKey::KEY_F12,
-    ]);
-    keys
-}
-
-/// Convert a u32 back to a KeyboardKey. Valid for the contiguous ranges
-/// we use (A-Z, 0-9, specials).
-fn num_to_keyboard_key(n: u32) -> KeyboardKey {
-    unsafe { std::mem::transmute::<u32, KeyboardKey>(n) }
-}
+/// All raylib keys we want to check for press/repeat/release events,
+/// with their libghostty equivalent and their unshifted Unicode codepoint,
+/// i.e. character the key produces with no modifiers on a US layout. The
+/// Kitty keyboard protocol requires this to identify keys. Returns NUL
+/// for keys that don't have a natural codepoint (arrows, F-keys, etc.).
+const ALL_KEYS: [(KeyboardKey, key::Key, char); 74] = [
+    (KeyboardKey::KEY_A, Key::A, 'a'),
+    (KeyboardKey::KEY_B, Key::B, 'b'),
+    (KeyboardKey::KEY_C, Key::C, 'c'),
+    (KeyboardKey::KEY_D, Key::D, 'd'),
+    (KeyboardKey::KEY_E, Key::E, 'e'),
+    (KeyboardKey::KEY_F, Key::F, 'f'),
+    (KeyboardKey::KEY_G, Key::G, 'g'),
+    (KeyboardKey::KEY_H, Key::H, 'h'),
+    (KeyboardKey::KEY_I, Key::I, 'i'),
+    (KeyboardKey::KEY_J, Key::J, 'j'),
+    (KeyboardKey::KEY_K, Key::K, 'k'),
+    (KeyboardKey::KEY_L, Key::L, 'l'),
+    (KeyboardKey::KEY_M, Key::M, 'm'),
+    (KeyboardKey::KEY_N, Key::N, 'n'),
+    (KeyboardKey::KEY_O, Key::O, 'o'),
+    (KeyboardKey::KEY_P, Key::P, 'p'),
+    (KeyboardKey::KEY_Q, Key::Q, 'q'),
+    (KeyboardKey::KEY_R, Key::R, 'r'),
+    (KeyboardKey::KEY_S, Key::S, 's'),
+    (KeyboardKey::KEY_T, Key::T, 't'),
+    (KeyboardKey::KEY_U, Key::U, 'u'),
+    (KeyboardKey::KEY_V, Key::V, 'v'),
+    (KeyboardKey::KEY_W, Key::W, 'w'),
+    (KeyboardKey::KEY_X, Key::X, 'x'),
+    (KeyboardKey::KEY_Y, Key::Y, 'y'),
+    (KeyboardKey::KEY_Z, Key::Z, 'z'),
+    (KeyboardKey::KEY_ZERO, Key::Digit0, '0'),
+    (KeyboardKey::KEY_ONE, Key::Digit1, '1'),
+    (KeyboardKey::KEY_TWO, Key::Digit2, '2'),
+    (KeyboardKey::KEY_THREE, Key::Digit3, '3'),
+    (KeyboardKey::KEY_FOUR, Key::Digit4, '4'),
+    (KeyboardKey::KEY_FIVE, Key::Digit5, '5'),
+    (KeyboardKey::KEY_SIX, Key::Digit6, '6'),
+    (KeyboardKey::KEY_SEVEN, Key::Digit7, '7'),
+    (KeyboardKey::KEY_EIGHT, Key::Digit8, '8'),
+    (KeyboardKey::KEY_NINE, Key::Digit9, '9'),
+    (KeyboardKey::KEY_SPACE, Key::Space, ' '),
+    (KeyboardKey::KEY_ENTER, Key::Enter, '\0'),
+    (KeyboardKey::KEY_TAB, Key::Tab, '\0'),
+    (KeyboardKey::KEY_BACKSPACE, Key::Backspace, '\0'),
+    (KeyboardKey::KEY_DELETE, Key::Delete, '\0'),
+    (KeyboardKey::KEY_ESCAPE, Key::Escape, '\0'),
+    (KeyboardKey::KEY_UP, Key::ArrowUp, '\0'),
+    (KeyboardKey::KEY_DOWN, Key::ArrowDown, '\0'),
+    (KeyboardKey::KEY_LEFT, Key::ArrowLeft, '\0'),
+    (KeyboardKey::KEY_RIGHT, Key::ArrowRight, '\0'),
+    (KeyboardKey::KEY_HOME, Key::Home, '\0'),
+    (KeyboardKey::KEY_END, Key::End, '\0'),
+    (KeyboardKey::KEY_PAGE_UP, Key::PageUp, '\0'),
+    (KeyboardKey::KEY_PAGE_DOWN, Key::PageDown, '\0'),
+    (KeyboardKey::KEY_INSERT, Key::Insert, '\0'),
+    (KeyboardKey::KEY_MINUS, Key::Minus, '-'),
+    (KeyboardKey::KEY_EQUAL, Key::Equal, '='),
+    (KeyboardKey::KEY_LEFT_BRACKET, Key::BracketLeft, '['),
+    (KeyboardKey::KEY_RIGHT_BRACKET, Key::BracketRight, ']'),
+    (KeyboardKey::KEY_BACKSLASH, Key::Backslash, '\\'),
+    (KeyboardKey::KEY_SEMICOLON, Key::Semicolon, ';'),
+    (KeyboardKey::KEY_APOSTROPHE, Key::Quote, '\''),
+    (KeyboardKey::KEY_COMMA, Key::Comma, ','),
+    (KeyboardKey::KEY_PERIOD, Key::Period, '.'),
+    (KeyboardKey::KEY_SLASH, Key::Slash, '/'),
+    (KeyboardKey::KEY_GRAVE, Key::Backquote, '`'),
+    (KeyboardKey::KEY_F1, Key::F1, '\0'),
+    (KeyboardKey::KEY_F2, Key::F2, '\0'),
+    (KeyboardKey::KEY_F3, Key::F3, '\0'),
+    (KeyboardKey::KEY_F4, Key::F4, '\0'),
+    (KeyboardKey::KEY_F5, Key::F5, '\0'),
+    (KeyboardKey::KEY_F6, Key::F6, '\0'),
+    (KeyboardKey::KEY_F7, Key::F7, '\0'),
+    (KeyboardKey::KEY_F8, Key::F8, '\0'),
+    (KeyboardKey::KEY_F9, Key::F9, '\0'),
+    (KeyboardKey::KEY_F10, Key::F10, '\0'),
+    (KeyboardKey::KEY_F11, Key::F11, '\0'),
+    (KeyboardKey::KEY_F12, Key::F12, '\0'),
+];
 
 /// Poll raylib for keyboard events and use the libghostty key encoder
 /// to produce the correct VT escape sequences, which are then written
@@ -367,22 +292,17 @@ fn handle_input<Fd: AsFd>(
         if char_utf8_len + ch.len_utf8() < char_utf8.len() {
             _ = ch.encode_utf8(&mut char_utf8[char_utf8_len..]);
         }
+        char_utf8_len += ch.len_utf8();
     }
-    let text = std::str::from_utf8(&char_utf8[..char_utf8_len]).expect("a valid UTF-8 string");
+    let mut text = std::str::from_utf8(&char_utf8[..char_utf8_len]).expect("a valid UTF-8 string");
 
-    let keys = all_keys_to_check();
     let mods = get_ghostty_mods(rl);
 
-    for rl_key in keys {
+    for (rl_key, gkey, ucp) in ALL_KEYS {
         let pressed = rl.is_key_pressed(rl_key);
         let repeated = rl.is_key_pressed_repeat(rl_key);
         let released = rl.is_key_released(rl_key);
         if !pressed && !repeated && !released {
-            continue;
-        }
-
-        let gkey = raylib_key_to_ghostty(rl_key);
-        if gkey == Key::Unidentified {
             continue;
         }
 
@@ -395,8 +315,6 @@ fn handle_input<Fd: AsFd>(
             key::Action::Repeat
         });
         event.set_mods(mods);
-
-        let ucp = raylib_key_unshifted_codepoint(rl_key);
         event.set_unshifted_codepoint(ucp);
 
         let mut consumed = key::Mods::empty();
@@ -405,9 +323,9 @@ fn handle_input<Fd: AsFd>(
         }
         event.set_consumed_mods(consumed);
 
-        if char_utf8_len > 0 && !released {
+        if !text.is_empty() && !released {
             event.set_utf8(Some(text));
-            char_utf8_len = 0;
+            text = "";
         } else {
             event.set_utf8(None);
         }
@@ -491,19 +409,7 @@ fn handle_mouse<Fd: AsFd>(
     event.set_position(mouse::Position { x: pos.x, y: pos.y });
 
     // Check each mouse button for press/release events.
-    const BUTTONS: [MouseButton; 7] = [
-        MouseButton::MOUSE_BUTTON_LEFT,
-        MouseButton::MOUSE_BUTTON_RIGHT,
-        MouseButton::MOUSE_BUTTON_MIDDLE,
-        MouseButton::MOUSE_BUTTON_SIDE,
-        MouseButton::MOUSE_BUTTON_EXTRA,
-        MouseButton::MOUSE_BUTTON_FORWARD,
-        MouseButton::MOUSE_BUTTON_BACK,
-    ];
-
-    for rl_btn in BUTTONS {
-        let gbtn = raylib_mouse_to_ghostty(rl_btn);
-
+    for (rl_btn, gbtn) in ALL_MOUSE_BUTTONS {
         if rl.is_mouse_button_pressed(rl_btn) {
             event.set_action(mouse::Action::Press);
             event.set_button(Some(gbtn));
