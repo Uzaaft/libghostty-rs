@@ -105,8 +105,22 @@ impl Terminal {
         unsafe { ffi::ghostty_terminal_vt_write(self.ptr.as_ptr(), data.as_ptr(), data.len()) }
     }
 
-    pub fn resize(&mut self, cols: u16, rows: u16) -> Result<(), Error> {
-        let result = unsafe { ffi::ghostty_terminal_resize(self.ptr.as_ptr(), cols, rows) };
+    pub fn resize(
+        &mut self,
+        cols: u16,
+        rows: u16,
+        cell_width_px: u32,
+        cell_height_px: u32,
+    ) -> Result<(), Error> {
+        let result = unsafe {
+            ffi::ghostty_terminal_resize(
+                self.ptr.as_ptr(),
+                cols,
+                rows,
+                cell_width_px,
+                cell_height_px,
+            )
+        };
         from_result(result)
     }
 
@@ -142,8 +156,7 @@ impl Terminal {
 
     pub fn mode_get(&self, mode: ffi::GhosttyMode) -> Result<bool, Error> {
         let mut value = false;
-        let result =
-            unsafe { ffi::ghostty_terminal_mode_get(self.ptr.as_ptr(), mode, &mut value) };
+        let result = unsafe { ffi::ghostty_terminal_mode_get(self.ptr.as_ptr(), mode, &mut value) };
         from_result(result)?;
         Ok(value)
     }
@@ -235,11 +248,7 @@ pub struct Formatter<'t> {
 }
 
 impl<'t> Formatter<'t> {
-    pub fn new(
-        terminal: &'t Terminal,
-        format: FormatterFormat,
-        trim: bool,
-    ) -> Result<Self, Error> {
+    pub fn new(terminal: &'t Terminal, format: FormatterFormat, trim: bool) -> Result<Self, Error> {
         let mut opts = ffi::GhosttyFormatterTerminalOptions::default();
         opts.size = std::mem::size_of::<ffi::GhosttyFormatterTerminalOptions>();
         opts.emit = format.to_raw();
@@ -247,12 +256,7 @@ impl<'t> Formatter<'t> {
 
         let mut raw: ffi::GhosttyFormatter_ptr = std::ptr::null_mut();
         let result = unsafe {
-            ffi::ghostty_formatter_terminal_new(
-                std::ptr::null(),
-                &mut raw,
-                terminal.as_raw(),
-                opts,
-            )
+            ffi::ghostty_formatter_terminal_new(std::ptr::null(), &mut raw, terminal.as_raw(), opts)
         };
         from_result(result)?;
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
@@ -376,11 +380,7 @@ impl SgrParser {
         })
     }
 
-    pub fn set_params(
-        &mut self,
-        params: &[u16],
-        separators: Option<&[u8]>,
-    ) -> Result<(), Error> {
+    pub fn set_params(&mut self, params: &[u16], separators: Option<&[u8]>) -> Result<(), Error> {
         let sep_ptr = match separators {
             Some(seps) => {
                 assert!(
@@ -404,11 +404,7 @@ impl SgrParser {
     pub fn next_attr(&mut self) -> Option<ffi::GhosttySgrAttribute> {
         let mut attr = ffi::GhosttySgrAttribute::default();
         let has_next = unsafe { ffi::ghostty_sgr_next(self.ptr.as_ptr(), &mut attr) };
-        if has_next {
-            Some(attr)
-        } else {
-            None
-        }
+        if has_next { Some(attr) } else { None }
     }
 }
 
@@ -482,18 +478,10 @@ pub fn build_info_optimize() -> Result<ffi::GhosttyOptimizeMode, Error> {
 // Focus encode
 // ---------------------------------------------------------------------------
 
-pub fn focus_encode(
-    event: ffi::GhosttyFocusEvent,
-    buf: &mut [u8],
-) -> Result<usize, Error> {
+pub fn focus_encode(event: ffi::GhosttyFocusEvent, buf: &mut [u8]) -> Result<usize, Error> {
     let mut written: usize = 0;
     let result = unsafe {
-        ffi::ghostty_focus_encode(
-            event,
-            buf.as_mut_ptr().cast(),
-            buf.len(),
-            &mut written,
-        )
+        ffi::ghostty_focus_encode(event, buf.as_mut_ptr().cast(), buf.len(), &mut written)
     };
     from_result_with_len(result, written)
 }
@@ -606,9 +594,7 @@ pub enum SizeReportStyle {
 impl From<SizeReportStyle> for ffi::GhosttySizeReportStyle {
     fn from(value: SizeReportStyle) -> Self {
         match value {
-            SizeReportStyle::Mode2048 => {
-                ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_MODE_2048
-            }
+            SizeReportStyle::Mode2048 => ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_MODE_2048,
             SizeReportStyle::Csi14T => ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_14_T,
             SizeReportStyle::Csi16T => ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_16_T,
             SizeReportStyle::Csi18T => ffi::GhosttySizeReportStyle_GHOSTTY_SIZE_REPORT_CSI_18_T,
@@ -666,9 +652,8 @@ impl RenderState {
     }
 
     pub fn update(&mut self, terminal: &mut Terminal) -> Result<(), Error> {
-        let result = unsafe {
-            ffi::ghostty_render_state_update(self.ptr.as_ptr(), terminal.as_raw())
-        };
+        let result =
+            unsafe { ffi::ghostty_render_state_update(self.ptr.as_ptr(), terminal.as_raw()) };
         from_result(result)
     }
 
@@ -778,9 +763,8 @@ impl RenderState {
     pub fn colors_get(&self) -> Result<ffi::GhosttyRenderStateColors, Error> {
         let mut colors = ffi::GhosttyRenderStateColors::default();
         colors.size = std::mem::size_of::<ffi::GhosttyRenderStateColors>();
-        let result = unsafe {
-            ffi::ghostty_render_state_colors_get(self.ptr.as_ptr(), &mut colors)
-        };
+        let result =
+            unsafe { ffi::ghostty_render_state_colors_get(self.ptr.as_ptr(), &mut colors) };
         from_result(result)?;
         Ok(colors)
     }
@@ -807,9 +791,7 @@ impl Drop for RenderState {
 // RenderStateRowIterator
 // ---------------------------------------------------------------------------
 
-fn render_state_row_iterator_next(
-    ptr: NonNull<ffi::GhosttyRenderStateRowIterator>,
-) -> bool {
+fn render_state_row_iterator_next(ptr: NonNull<ffi::GhosttyRenderStateRowIterator>) -> bool {
     unsafe { ffi::ghostty_render_state_row_iterator_next(ptr.as_ptr()) }
 }
 
@@ -871,9 +853,7 @@ fn render_state_row_set_dirty(
     from_result(result)
 }
 
-fn render_state_row_cells_next(
-    ptr: NonNull<ffi::GhosttyRenderStateRowCells>,
-) -> bool {
+fn render_state_row_cells_next(ptr: NonNull<ffi::GhosttyRenderStateRowCells>) -> bool {
     unsafe { ffi::ghostty_render_state_row_cells_next(ptr.as_ptr()) }
 }
 
@@ -1051,8 +1031,7 @@ pub struct RenderStateRowCells {
 impl RenderStateRowCells {
     pub fn new() -> Result<Self, Error> {
         let mut raw: ffi::GhosttyRenderStateRowCells_ptr = std::ptr::null_mut();
-        let result =
-            unsafe { ffi::ghostty_render_state_row_cells_new(std::ptr::null(), &mut raw) };
+        let result = unsafe { ffi::ghostty_render_state_row_cells_new(std::ptr::null(), &mut raw) };
         from_result(result)?;
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         Ok(Self {
@@ -1066,8 +1045,7 @@ impl RenderStateRowCells {
     }
 
     pub fn select(&mut self, x: u16) -> Result<(), Error> {
-        let result =
-            unsafe { ffi::ghostty_render_state_row_cells_select(self.ptr.as_ptr(), x) };
+        let result = unsafe { ffi::ghostty_render_state_row_cells_select(self.ptr.as_ptr(), x) };
         from_result(result)
     }
 
@@ -1267,11 +1245,7 @@ impl KeyEncoder {
         })
     }
 
-    pub fn setopt(
-        &mut self,
-        option: ffi::GhosttyKeyEncoderOption,
-        value: *const std::ffi::c_void,
-    ) {
+    pub fn setopt(&mut self, option: ffi::GhosttyKeyEncoderOption, value: *const std::ffi::c_void) {
         unsafe { ffi::ghostty_key_encoder_setopt(self.ptr.as_ptr(), option, value) }
     }
 
@@ -1347,11 +1321,7 @@ impl MouseEvent {
         let mut button: ffi::GhosttyMouseButton = 0;
         let has_button =
             unsafe { ffi::ghostty_mouse_event_get_button(self.ptr.as_ptr(), &mut button) };
-        if has_button {
-            Some(button)
-        } else {
-            None
-        }
+        if has_button { Some(button) } else { None }
     }
 
     pub fn set_mods(&mut self, mods: ffi::GhosttyMods) {
@@ -1442,9 +1412,7 @@ impl Drop for MouseEncoder {
 // Cell / Row helpers
 // ---------------------------------------------------------------------------
 
-pub fn cell_get_content_tag(
-    cell: ffi::GhosttyCell,
-) -> Result<ffi::GhosttyCellContentTag, Error> {
+pub fn cell_get_content_tag(cell: ffi::GhosttyCell) -> Result<ffi::GhosttyCellContentTag, Error> {
     let mut value: ffi::GhosttyCellContentTag = 0;
     let result = unsafe {
         ffi::ghostty_cell_get(

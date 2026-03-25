@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "ed1397826b03fc91eb07337d070290045bad0365";
+const GHOSTTY_COMMIT: &str = "bebca84668947bfc92b9a30ed58712e1c34eee1d";
 
 fn main() {
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_SYS_NO_VENDOR");
@@ -114,8 +114,7 @@ fn fetch_ghostty(out_dir: &PathBuf) -> PathBuf {
         .current_dir(&src_dir);
     run(checkout, "git checkout ghostty commit");
 
-    std::fs::write(&stamp, GHOSTTY_COMMIT)
-        .unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
+    std::fs::write(&stamp, GHOSTTY_COMMIT).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
 
     src_dir
 }

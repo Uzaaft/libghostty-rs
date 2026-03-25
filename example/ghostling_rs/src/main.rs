@@ -73,7 +73,9 @@ fn build_terminal_font_codepoints() -> Result<Vec<i32>, String> {
 
 fn load_embedded_mono_font(font_size_px: i32) -> Result<Font, String> {
     if font_size_px <= 0 {
-        return Err(format!("font_size_px must be greater than zero, got {font_size_px}"));
+        return Err(format!(
+            "font_size_px must be greater than zero, got {font_size_px}"
+        ));
     }
 
     let file_type = std::ffi::CString::new(".ttf")
@@ -149,13 +151,9 @@ fn pty_spawn(cols: u16, rows: u16) -> io::Result<(OwnedFd, libc::pid_t)> {
         // Determine the user's preferred shell. We try $SHELL first (the
         // standard convention), then fall back to the passwd entry, and
         // finally to /bin/sh if nothing else is available.
-        let shell = std::env::var("SHELL").ok().and_then(|s| {
-            if s.is_empty() {
-                None
-            } else {
-                Some(s)
-            }
-        });
+        let shell = std::env::var("SHELL")
+            .ok()
+            .and_then(|s| if s.is_empty() { None } else { Some(s) });
 
         let shell = shell.unwrap_or_else(|| {
             unsafe {
@@ -382,9 +380,7 @@ fn raylib_key_unshifted_codepoint(rl_key: KeyboardKey) -> u32 {
 /// Build a GhosttyMods bitmask from the current raylib modifier key state.
 fn get_ghostty_mods(rl: &RaylibHandle) -> ffi::GhosttyMods {
     let mut mods: ffi::GhosttyMods = 0;
-    if rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT)
-        || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT)
-    {
+    if rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT) {
         mods |= ffi::GHOSTTY_MODS_SHIFT as u16;
     }
     if rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
@@ -392,14 +388,10 @@ fn get_ghostty_mods(rl: &RaylibHandle) -> ffi::GhosttyMods {
     {
         mods |= ffi::GHOSTTY_MODS_CTRL as u16;
     }
-    if rl.is_key_down(KeyboardKey::KEY_LEFT_ALT)
-        || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT)
-    {
+    if rl.is_key_down(KeyboardKey::KEY_LEFT_ALT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT) {
         mods |= ffi::GHOSTTY_MODS_ALT as u16;
     }
-    if rl.is_key_down(KeyboardKey::KEY_LEFT_SUPER)
-        || rl.is_key_down(KeyboardKey::KEY_RIGHT_SUPER)
-    {
+    if rl.is_key_down(KeyboardKey::KEY_LEFT_SUPER) || rl.is_key_down(KeyboardKey::KEY_RIGHT_SUPER) {
         mods |= ffi::GHOSTTY_MODS_SUPER as u16;
     }
     mods
@@ -571,11 +563,7 @@ fn handle_input(
 /// Encode a mouse event and write the resulting escape sequence to the pty.
 /// If the encoder produces no output (e.g. tracking is disabled), this is
 /// a no-op.
-fn mouse_encode_and_write(
-    pty_fd: &OwnedFd,
-    encoder: &mut MouseEncoder,
-    event: &MouseEvent,
-) {
+fn mouse_encode_and_write(pty_fd: &OwnedFd, encoder: &mut MouseEncoder, event: &MouseEvent) {
     let mut buf = [0u8; 128];
     match encoder.encode(event, &mut buf) {
         Ok(written) if written > 0 => pty_write(pty_fd, &buf[..written]),
@@ -840,7 +828,9 @@ fn render_terminal(
     // If both fg and bg are black (no palette loaded yet), use white
     // foreground so text is visible on the default black background.
     let mut fg_default = colors.foreground;
-    if fg_default.r == 0 && fg_default.g == 0 && fg_default.b == 0
+    if fg_default.r == 0
+        && fg_default.g == 0
+        && fg_default.b == 0
         && colors.background.r == 0
         && colors.background.g == 0
         && colors.background.b == 0
@@ -881,7 +871,10 @@ fn render_terminal(
                             if let Ok(palette_idx) = ghostty::cell_get_color_palette(raw_cell) {
                                 let bg = colors.palette[palette_idx as usize];
                                 d.draw_rectangle(
-                                    x, y, cell_width, cell_height,
+                                    x,
+                                    y,
+                                    cell_width,
+                                    cell_height,
                                     Color::new(bg.r, bg.g, bg.b, 255),
                                 );
                             }
@@ -890,7 +883,10 @@ fn render_terminal(
                         {
                             if let Ok(bg) = ghostty::cell_get_color_rgb(raw_cell) {
                                 d.draw_rectangle(
-                                    x, y, cell_width, cell_height,
+                                    x,
+                                    y,
+                                    cell_width,
+                                    cell_height,
                                     Color::new(bg.r, bg.g, bg.b, 255),
                                 );
                             }
@@ -940,7 +936,10 @@ fn render_terminal(
                 || style.inverse
             {
                 d.draw_rectangle(
-                    x, y, cell_width, cell_height,
+                    x,
+                    y,
+                    cell_width,
+                    cell_height,
                     Color::new(bg_rgb.r, bg_rgb.g, bg_rgb.b, 255),
                 );
             }
@@ -948,22 +947,26 @@ fn render_terminal(
             // Fake italic by shifting the text right slightly.
             let italic_offset = if style.italic { font_size / 6 } else { 0 };
 
-            let text_cstr = unsafe {
-                std::ffi::CStr::from_ptr(text_buf.as_ptr().cast())
-            };
+            let text_cstr = unsafe { std::ffi::CStr::from_ptr(text_buf.as_ptr().cast()) };
             if let Ok(text_str) = text_cstr.to_str() {
                 d.draw_text_ex(
-                    font, text_str,
+                    font,
+                    text_str,
                     Vector2::new((x + italic_offset) as f32, y as f32),
-                    font_size as f32, 0.0, ray_fg,
+                    font_size as f32,
+                    0.0,
+                    ray_fg,
                 );
 
                 // Fake bold by drawing the text again offset by 1px.
                 if style.bold {
                     d.draw_text_ex(
-                        font, text_str,
+                        font,
+                        text_str,
                         Vector2::new((x + italic_offset + 1) as f32, y as f32),
-                        font_size as f32, 0.0, ray_fg,
+                        font_size as f32,
+                        0.0,
+                        ray_fg,
                     );
                 }
             }
@@ -994,7 +997,10 @@ fn render_terminal(
         let cur_x = pad + cx as i32 * cell_width;
         let cur_y = pad + cy as i32 * cell_height;
         d.draw_rectangle(
-            cur_x, cur_y, cell_width, cell_height,
+            cur_x,
+            cur_y,
+            cell_width,
+            cell_height,
             Color::new(cur_rgb.r, cur_rgb.g, cur_rgb.b, 128),
         );
     }
@@ -1019,7 +1025,10 @@ fn render_terminal(
             let thumb_y = (scroll_frac * (scr_h - thumb_height) as f64) as i32;
 
             d.draw_rectangle(
-                bar_x, thumb_y, bar_width, thumb_height,
+                bar_x,
+                thumb_y,
+                bar_width,
+                thumb_height,
                 Color::new(200, 200, 200, 128),
             );
         }
@@ -1027,9 +1036,7 @@ fn render_terminal(
 
     // Clear the global dirty flag so we know when the next update
     // actually changes something.
-    let _ = render_state.set_dirty(
-        ffi::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE,
-    );
+    let _ = render_state.set_dirty(ffi::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE);
 }
 
 // ---------------------------------------------------------------------------
@@ -1039,8 +1046,8 @@ fn render_terminal(
 /// Log libghostty-vt build configuration (SIMD, optimization level).
 fn log_build_info() {
     let simd = ghostty::build_info_simd().unwrap_or(false);
-    let opt = ghostty::build_info_optimize()
-        .unwrap_or(ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG);
+    let opt =
+        ghostty::build_info_optimize().unwrap_or(ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG);
 
     let opt_str = match opt {
         ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG => "Debug",
@@ -1091,10 +1098,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     // Load JetBrains Mono at DPI-scaled pixel size, matching upstream.
     let font_size_px = ((font_size as f32 * dpi_y) as i32).max(1);
-    let mono_font =
-        load_embedded_mono_font(font_size_px).map_err(|error| {
-            format!("failed to load embedded JetBrains Mono font: {error}")
-        })?;
+    let mono_font = load_embedded_mono_font(font_size_px)
+        .map_err(|error| format!("failed to load embedded JetBrains Mono font: {error}"))?;
 
     // The font atlas is already created at native resolution, so bilinear
     // filtering smooths fractional positioning without magnification blur.
@@ -1117,8 +1122,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut terminal = Terminal::new(term_cols, term_rows, 1000)?;
 
-    let (pty_fd, child) = pty_spawn(term_cols, term_rows)
-        .map_err(|e| format!("forkpty failed: {e}"))?;
+    let (pty_fd, child) =
+        pty_spawn(term_cols, term_rows).map_err(|e| format!("forkpty failed: {e}"))?;
 
     let mut key_encoder = KeyEncoder::new()?;
     let mut key_event = KeyEvent::new()?;
@@ -1144,7 +1149,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             if w != prev_width || h != prev_height {
                 let cols = ((w - 2 * pad) / cell_width).max(1) as u16;
                 let rows = ((h - 2 * pad) / cell_height).max(1) as u16;
-                let _ = terminal.resize(cols, rows);
+                let _ = terminal.resize(cols, rows, cell_width as u32, cell_height as u32);
 
                 // Notify the pty of the new window size so the shell
                 // and child programs can reflow their output.
@@ -1209,7 +1214,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // --- Scrollbar -------------------------------------------------------
         let scrollbar_consumed = handle_scrollbar(
-            &rl, &mut terminal, &mut render_state, &mut scrollbar_dragging,
+            &rl,
+            &mut terminal,
+            &mut render_state,
+            &mut scrollbar_dragging,
         );
 
         // --- Input -----------------------------------------------------------
@@ -1217,8 +1225,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             handle_input(&rl, &pty_fd, &mut key_encoder, &mut key_event, &terminal);
             if !scrollbar_consumed {
                 handle_mouse(
-                    &rl, &pty_fd, &mut mouse_encoder, &mut mouse_event,
-                    &mut terminal, cell_width, cell_height, pad,
+                    &rl,
+                    &pty_fd,
+                    &mut mouse_encoder,
+                    &mut mouse_event,
+                    &mut terminal,
+                    cell_width,
+                    cell_height,
+                    pad,
                 );
             }
         }
@@ -1231,8 +1245,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             .colors_get()
             .unwrap_or_else(|_| ffi::GhosttyRenderStateColors::default());
         let win_bg = Color::new(
-            bg_colors.background.r, bg_colors.background.g,
-            bg_colors.background.b, 255,
+            bg_colors.background.r,
+            bg_colors.background.g,
+            bg_colors.background.b,
+            255,
         );
 
         let scrollbar = terminal.scrollbar().ok();
@@ -1241,8 +1257,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         d.clear_background(win_bg);
 
         render_terminal(
-            &mut d, &mut render_state, &mut row_iter, &mut row_cells,
-            &mono_font, cell_width, cell_height, font_size,
+            &mut d,
+            &mut render_state,
+            &mut row_iter,
+            &mut row_cells,
+            &mono_font,
+            cell_width,
+            cell_height,
+            font_size,
             scrollbar.as_ref(),
         );
 
@@ -1260,16 +1282,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let banner_h = msg_size.y as i32 + 8;
 
             d.draw_rectangle(
-                0, screen_h - banner_h, screen_w, banner_h,
+                0,
+                screen_h - banner_h,
+                screen_w,
+                banner_h,
                 Color::new(0, 0, 0, 180),
             );
             d.draw_text_ex(
-                &mono_font, &exit_msg,
+                &mono_font,
+                &exit_msg,
                 Vector2::new(
                     (screen_w as f32 - msg_size.x) / 2.0,
                     (screen_h - banner_h + 4) as f32,
                 ),
-                font_size as f32, 0.0, Color::WHITE,
+                font_size as f32,
+                0.0,
+                Color::WHITE,
             );
         }
     }
