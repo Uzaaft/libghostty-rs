@@ -230,6 +230,43 @@ impl Terminal {
         from_result(result)?;
         Ok(value)
     }
+
+    /// Returns the number of lines in scrollback history.
+    pub fn scrollback_rows(&self) -> Result<usize, Error> {
+        let mut value: usize = 0;
+        let result = unsafe {
+            ffi::ghostty_terminal_get(
+                self.ptr.as_ptr(),
+                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS,
+                std::ptr::from_mut(&mut value).cast(),
+            )
+        };
+        from_result(result)?;
+        Ok(value)
+    }
+
+    /// Returns the total number of rows (active screen + scrollback).
+    pub fn total_rows(&self) -> Result<usize, Error> {
+        let mut value: usize = 0;
+        let result = unsafe {
+            ffi::ghostty_terminal_get(
+                self.ptr.as_ptr(),
+                ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_TOTAL_ROWS,
+                std::ptr::from_mut(&mut value).cast(),
+            )
+        };
+        from_result(result)?;
+        Ok(value)
+    }
+
+    /// Resolves a point to a grid reference for cell/row/style/grapheme access.
+    pub fn grid_ref(&self, point: ffi::GhosttyPoint) -> Result<ffi::GhosttyGridRef, Error> {
+        let mut grid_ref = ffi::GhosttyGridRef::default();
+        let result =
+            unsafe { ffi::ghostty_terminal_grid_ref(self.ptr.as_ptr(), point, &mut grid_ref) };
+        from_result(result)?;
+        Ok(grid_ref)
+    }
 }
 
 impl Drop for Terminal {
