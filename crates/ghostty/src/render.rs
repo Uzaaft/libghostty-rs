@@ -260,9 +260,12 @@ impl<'alloc> RenderState<'alloc> {
         Ok(Self(Object::new(raw)?))
     }
 
-    pub fn update<'s>(&'s mut self, terminal: &Terminal) -> Result<Snapshot<'alloc, 's>> {
+    pub fn update<'s, UserData>(
+        &'s mut self,
+        terminal: &Terminal<'_, '_, UserData>,
+    ) -> Result<Snapshot<'alloc, 's>> {
         let result =
-            unsafe { ffi::ghostty_render_state_update(self.0.as_raw(), terminal.0.as_raw()) };
+            unsafe { ffi::ghostty_render_state_update(self.0.as_raw(), terminal.inner.as_raw()) };
         from_result(result)?;
         Ok(Snapshot(self))
     }

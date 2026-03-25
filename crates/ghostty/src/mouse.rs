@@ -81,9 +81,15 @@ impl<'alloc> Encoder<'alloc> {
     ///
     /// This sets tracking mode and output format from terminal state.
     /// It does not modify size or any-button state.
-    pub fn with_options_from_terminal(self, terminal: &Terminal) -> Self {
+    pub fn with_options_from_terminal<UserData>(
+        self,
+        terminal: &Terminal<'_, '_, UserData>,
+    ) -> Self {
         unsafe {
-            ffi::ghostty_mouse_encoder_setopt_from_terminal(self.0.as_raw(), terminal.0.as_raw())
+            ffi::ghostty_mouse_encoder_setopt_from_terminal(
+                self.0.as_raw(),
+                terminal.inner.as_raw(),
+            )
         }
         self
     }

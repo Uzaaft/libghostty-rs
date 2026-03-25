@@ -14,9 +14,9 @@ use crate::{
 
 /// Formatter that formats terminal content.
 #[derive(Debug)]
-pub struct Formatter<'t, 'alloc> {
+pub struct Formatter<'t, 'alloc, 'ud, UserData> {
     inner: Object<'alloc, ffi::GhosttyFormatter>,
-    _terminal: PhantomData<&'t Terminal<'alloc>>,
+    _terminal: PhantomData<&'t Terminal<'alloc, 'ud, UserData>>,
 }
 
 /// Options for creating a terminal formatter.
@@ -30,9 +30,12 @@ pub struct FormatterOptions {
     pub unwrap: bool,
 }
 
-impl<'t, 'alloc> Formatter<'t, 'alloc> {
+impl<'t, 'alloc: 'ud, 'ud, UserData: 'ud> Formatter<'t, 'alloc, 'ud, UserData> {
     /// Create a formatter for a terminal's active screen.
-    pub fn new(terminal: &'t Terminal<'alloc>, opts: FormatterOptions) -> Result<Self> {
+    pub fn new(
+        terminal: &'t Terminal<'alloc, 'ud, UserData>,
+        opts: FormatterOptions,
+    ) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_inner(std::ptr::null(), terminal, opts) }
     }
@@ -43,7 +46,7 @@ impl<'t, 'alloc> Formatter<'t, 'alloc> {
     /// regarding custom memory management and lifetimes.
     pub fn new_with_alloc<'ctx: 'alloc, Ctx>(
         alloc: &'alloc Allocator<'ctx, Ctx>,
-        terminal: &'t Terminal<'alloc>,
+        terminal: &'t Terminal<'alloc, 'ud, UserData>,
         opts: FormatterOptions,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
@@ -52,12 +55,17 @@ impl<'t, 'alloc> Formatter<'t, 'alloc> {
 
     unsafe fn new_inner(
         alloc: *const ffi::GhosttyAllocator,
-        terminal: &'t Terminal<'alloc>,
+        terminal: &'t Terminal<'alloc, 'ud, UserData>,
         opts: FormatterOptions,
     ) -> Result<Self> {
         let mut raw: ffi::GhosttyFormatter_ptr = std::ptr::null_mut();
         let result = unsafe {
-            ffi::ghostty_formatter_terminal_new(alloc, &mut raw, terminal.0.as_raw(), opts.into())
+            ffi::ghostty_formatter_terminal_new(
+                alloc,
+                &mut raw,
+                terminal.inner.as_raw(),
+                opts.into(),
+            )
         };
         from_result(result)?;
 
@@ -139,7 +147,7 @@ impl<'t, 'alloc> Formatter<'t, 'alloc> {
     }
 }
 
-impl<'t, 'alloc> Drop for Formatter<'t, 'alloc> {
+impl<UserData> Drop for Formatter<'_, '_, '_, UserData> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_formatter_free(self.inner.as_raw()) }
     }

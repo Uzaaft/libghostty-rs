@@ -90,9 +90,12 @@ impl<'alloc> Encoder<'alloc> {
     /// Note that the macos_option_as_alt option cannot be determined from
     /// terminal state and is reset to [`OptionAsAlt::False`] by this call.
     /// Use [`Encoder::with_macos_option_as_alt`] to set it afterward if needed.
-    pub fn with_options_from_terminal(self, terminal: &Terminal) -> Self {
+    pub fn with_options_from_terminal<UserData>(
+        self,
+        terminal: &Terminal<'_, '_, UserData>,
+    ) -> Self {
         unsafe {
-            ffi::ghostty_key_encoder_setopt_from_terminal(self.0.as_raw(), terminal.0.as_raw())
+            ffi::ghostty_key_encoder_setopt_from_terminal(self.0.as_raw(), terminal.inner.as_raw())
         }
         self
     }
