@@ -1,23 +1,114 @@
 //! Types and functions around terminal state management.
 
-use std::mem::MaybeUninit;
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
     error::{Error, Result, from_result},
-    ffi, key, style,
+    ffi, key,
+    screen::GridRef,
+    style,
 };
 
 /// Complete terminal emulator state and rendering.
 ///
 /// A terminal instance manages the full emulator state including the screen,
 /// scrollback, cursor, styles, modes, and VT stream processing.
-pub struct Terminal<'alloc, 'ud, UserData> {
+///
+/// Once a terminal session is up and running, you can configure a key encoder
+/// to write keyboard input via [`crate::key::Encoder::with_options_from_terminal`].
+///
+/// # Effects
+///
+/// By default, the terminal sequence processing with [`Terminal::vt_write`]
+/// only process sequences that directly affect terminal state and ignores
+/// sequences that have side effect behavior or require responses. These
+/// sequences include things like bell characters, title changes, device
+/// attributes queries, and more. To handle these sequences, the user
+/// must configure "effects."
+///
+/// Effects are callbacks that the terminal invokes in response to VT sequences
+/// processed during [`Terminal::vt_write`]. They let the embedding application
+/// react to terminal-initiated events such as bell characters, title changes,
+/// device status report responses, and more.
+///
+/// Each effect is registered with its corresponding `Terminal::on_<effect>`
+/// function, which accepts a closure with access to the terminal state and
+/// possibly other parameters. Some examples include [`Terminal::on_bell`]
+/// and [`Terminal::on_pty_write`].
+///
+/// All callbacks are invoked synchronously during [`Terminal::vt_write`].
+/// Callbacks must be very careful to not block for too long or perform
+/// expensive operations, since they are blocking further IO processing.
+///
+/// ## Shared state
+///
+/// **Unlike the C API**, you *cannot* specify arbitrary user data that's
+/// shared between all callbacks, mainly because a safe, idiomatic Rust
+/// equivalent of this pattern is very difficult to implement and use
+/// due to Rust's much stricter safety guarantees. In turn, we use the
+/// user data internally for callback dispatch purposes.
+///
+/// You should instead use idiomatic Rust mechanisms like [`Rc`](std::rc::Rc)s
+/// to hold common, mutable state between callbacks (which is perfectly safe,
+/// since everything is run on a single thread within a single `vt_write` call),
+/// or with some other type with interior mutability.
+///
+/// ## Example: Registering effects and processing VT data
+///
+/// ```rust
+/// use std::{cell::Cell, rc::Rc};
+/// use ghostty::{Terminal, TerminalOptions};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut terminal = Terminal::new(TerminalOptions {
+///     cols: 80,
+///     rows: 24,
+///     max_scrollback: 0,
+/// })?;
+///
+/// // Set up a simple bell counter
+/// let bell_count = Rc::new(Cell::new(0usize));
+/// terminal
+///     .on_pty_write(|_term, data| {
+///         println!("Replying {} bytes to the PTY", data.len());
+///     })?
+///    .on_bell({
+///        let bell_count = bell_count.clone();
+///        move |_term| {
+///            bell_count.update(|v| v + 1);
+///            println!("Bell! (count = {})", bell_count.get())
+///        }
+///     })?
+///    .on_title_changed(|term| {
+///        // Query the cursor position to confirm the terminal processed the
+///        // title change (the title itself is tracked by the embedder via the
+///        // OSC parser or its own state).
+///        let col = term.cursor_x().unwrap();
+///        println!("Title changed! (cursor at col {col})");
+///    })?;
+///
+/// // Feed VT data that triggers effects:
+/// // 1. Bell (BEL = 0x07)
+/// terminal.vt_write(b"\x07");
+/// // 2. Title change (OSC 2 ; <title> ST)
+/// terminal.vt_write(b"\x1b]2;Hello Effects\x1b\\");
+/// // 3. Device status report (DECRQM for wraparound mode ?7)
+/// //    triggers write_pty with the response
+/// terminal.vt_write(b"\x1B[?7$p");
+/// // 4. Another bell to show the counter increments
+/// terminal.vt_write(b"\x07");
+///
+/// assert_eq!(bell_count.get(), 2);
+/// # Ok(())}
+/// ```
+pub struct Terminal<'alloc: 'cb, 'cb> {
     pub(crate) inner: Object<'alloc, ffi::GhosttyTerminal>,
-    cbs: Callbacks<'alloc, 'ud, UserData>,
+    vtable: VTable<'alloc, 'cb>,
 }
 
 /// Terminal initialization options.
+#[derive(Clone, Copy, Debug)]
 pub struct Options {
     /// Terminal width in cells. Must be greater than zero.
     pub cols: u16,
@@ -37,7 +128,7 @@ impl From<Options> for ffi::GhosttyTerminalOptions {
     }
 }
 
-impl<'alloc: 'ud, 'ud, UserData: 'ud> Terminal<'alloc, 'ud, UserData> {
+impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Create a new terminal instance.
     pub fn new(opts: Options) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
@@ -62,7 +153,7 @@ impl<'alloc: 'ud, 'ud, UserData: 'ud> Terminal<'alloc, 'ud, UserData> {
         from_result(result)?;
         Ok(Self {
             inner: Object::new(raw)?,
-            cbs: Default::default(),
+            vtable: Default::default(),
         })
     }
 
@@ -124,6 +215,33 @@ impl<'alloc: 'ud, 'ud, UserData: 'ud> Terminal<'alloc, 'ud, UserData> {
     /// Scroll the terminal viewport.
     pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
         unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) }
+    }
+
+    /// Resolve a point in the terminal grid to a grid reference.
+    ///
+    /// Resolves the given point (which can be in active, viewport, screen,
+    /// or history coordinates) to a grid reference for that location. Use
+    /// [`GridRef::cell`] and [`GridRef::row`] to extract the cell and row.
+    ///
+    /// Lookups using the active and viewport tags are fast. The Screen and
+    /// history tags may require traversing the full scrollback page list to
+    /// resolve the y coordinate, so they can be expensive for large scrollback
+    /// buffers.
+    ///
+    /// This function isn't meant to be used as the core of render loop. It
+    /// isn't built to sustain the framerates needed for rendering large
+    /// screens. Use the render state API for that. This API is instead meant
+    /// for less strictly performance-sensitive use cases.
+    pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
+        let mut grid_ref = ffi::sized!(ffi::GhosttyGridRef);
+        let result = unsafe {
+            ffi::ghostty_terminal_grid_ref(self.inner.as_raw(), point.into(), &mut grid_ref)
+        };
+        from_result(result)?;
+        Ok(GridRef {
+            inner: grid_ref,
+            _phan: PhantomData,
+        })
     }
 
     /// Get the current value of a terminal mode.
@@ -253,27 +371,72 @@ impl<'alloc: 'ud, 'ud, UserData: 'ud> Terminal<'alloc, 'ud, UserData> {
     pub fn scrollback_rows(&self) -> Result<usize> {
         self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS)
     }
-
-    fn update_cbs(&mut self) -> Result<()> {
-        self.set::<Callbacks<'alloc, 'ud, UserData>>(
-            ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_USERDATA,
-            &self.cbs,
-        )
-    }
-
-    /// Set the user data passed to all callbacks.
-    pub fn set_userdata(&mut self, ud: &'ud mut UserData) -> Result<()> {
-        self.cbs.ud = Some(ud);
-        self.update_cbs()
-    }
 }
 
-impl<UserData> Drop for Terminal<'_, '_, UserData> {
+impl Drop for Terminal<'_, '_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_terminal_free(self.inner.as_raw()) }
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Point {
+    Active(PointCoordinate),
+    Viewport(PointCoordinate),
+    Screen(PointCoordinate),
+    History(PointCoordinate),
+}
+
+impl From<Point> for ffi::GhosttyPoint {
+    fn from(value: Point) -> Self {
+        match value {
+            Point::Active(coord) => Self {
+                tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_ACTIVE,
+                value: ffi::GhosttyPointValue {
+                    coordinate: coord.into(),
+                },
+            },
+            Point::Viewport(coord) => Self {
+                tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_VIEWPORT,
+                value: ffi::GhosttyPointValue {
+                    coordinate: coord.into(),
+                },
+            },
+            Point::Screen(coord) => Self {
+                tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_SCREEN,
+                value: ffi::GhosttyPointValue {
+                    coordinate: coord.into(),
+                },
+            },
+            Point::History(coord) => Self {
+                tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_HISTORY,
+                value: ffi::GhosttyPointValue {
+                    coordinate: coord.into(),
+                },
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PointCoordinate {
+    x: u16,
+    y: u32,
+}
+impl From<PointCoordinate> for ffi::GhosttyPointCoordinate {
+    fn from(value: PointCoordinate) -> Self {
+        let PointCoordinate { x, y } = value;
+        Self { x, y }
+    }
+}
+impl From<ffi::GhosttyPointCoordinate> for PointCoordinate {
+    fn from(value: ffi::GhosttyPointCoordinate) -> Self {
+        let ffi::GhosttyPointCoordinate { x, y } = value;
+        Self { x, y }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScrollViewport {
     Top,
     Bottom,
@@ -389,15 +552,14 @@ impl From<Mode> for ffi::GhosttyMode {
 /// providing a convenient API for Rust users.
 ///
 /// Each handler is defined in this following format:
-/// ```
+/// ```ignore
 /// pub fn on_foobar(
 ///     &mut self,
 ///     // The corresponding GhosttyTerminalOption
 ///     tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_FOOBAR,
 ///
 ///     // The name of the original function type in C,
-///     // along with the parameters beyond the terminal and user data
-///     // and the expected return type
+///     // along with the extra C parameters and the expected C return type
 ///     from = GhosttyTerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
 ///
 ///     // The name of mapped Rust function type,
@@ -406,21 +568,16 @@ impl From<Mode> for ffi::GhosttyMode {
 ///     // `<'t>` is used to tie the return value to the lifetime of the
 ///     // terminal. The name is arbitrary - any lifetime marker will do.
 ///     to = <'t>FoobarFn(&'t [u8]) -> bool,
-/// ) |prep| {
-///     // `prep` contains the terminal, the Rust user data and
-///     // the Rust callback handle. The name is again arbitrary.
-///     if let Some((terminal, userdata, callback)) = prep {
-///         // Convert the raw parameters into Rust types.
-///         // This is just to illustrate how.
-///         let slice = unsafe { std::slice::from_raw_parts(foo, bar) };
+/// ) |term, func| {
+///     // `term` is the terminal and `func` is the Rust callback.
+///     // Both names are arbitrary.
 ///
-///         // Call into user logic and return.
-///         callback(&terminal, userdata, slice)
-///     } else {
-///         // This path should generally never happen, but is here
-///         // for the sake of completeness.
-///         false
-///     }
+///     // Convert the raw parameters into Rust types.
+///     // This is just to illustrate how.
+///     let slice = unsafe { std::slice::from_raw_parts(foo, bar) };
+///
+///     // Call into user logic and return.
+///     func(&terminal, slice)
 /// }
 /// ```
 macro_rules! handlers {
@@ -433,38 +590,59 @@ macro_rules! handlers {
                 from = $rawfnty:ident( $($rfname:ident: $rfty:ty),*$(,)? ) $(-> $rawrty:ty)?,
                 $(#[$tmeta:meta])*
                 to = $(<$lf:lifetime>)? $fnty:ident( $($fty:ty),*$(,)? ) $(-> $rty:ty)?,
-            ) |$prep:ident| $block:block
+            ) |$t:ident, $func:ident| $block:block
         )*
     } => {
-        impl<'alloc: 'ud, 'ud, UserData: 'ud> Terminal<'alloc, 'ud, UserData> {$(
+        impl<'alloc, 'cb> $crate::terminal::Terminal<'alloc, 'cb> {$(
             $(#[$fmeta])*
-            $vis fn $name(&mut self, f: Option<$fnty<'alloc, 'ud, UserData>>) -> Result<()> {
-                unsafe extern "C" fn callback<'alloc: 'ud, 'ud, UserData: 'ud>(
+            $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> Result<&mut Self> {
+                unsafe extern "C" fn callback(
                     t: *mut $crate::ffi::GhosttyTerminal,
-                    ud: *mut ::std::ffi::c_void,
+                    ud: *mut std::ffi::c_void,
                     $($rfname: $rfty),*
                 ) $(-> $rawrty)? {
-                    let $prep = unsafe { prep_callback::<'alloc, 'ud, UserData>(t, ud) }
-                        .and_then(|(t, cbs)| Some((t, cbs.ud.as_deref_mut(), cbs.$name.as_deref()?)));
-                    $block
+                    // SAFETY: We own the vtable, so it should never become invalid.
+                    let vtable = unsafe { &mut *ud.cast::<VTable<'_, '_>>() };
+
+                    let obj = Object::new(t).expect("received null terminal ptr in callback - this is a bug!");
+                    let $t = Terminal::<'_, '_> {
+                        inner: obj,
+                        vtable: Default::default(),
+                    };
+                    let $func = vtable.$name.as_deref_mut()
+                        .expect("no handler set but callback is still called - this is a bug!");
+                    let ret = $block;
+
+                    // IMPORTANT: Do NOT let the destructor run.
+                    std::mem::forget($t);
+                    ret
                 }
 
-                if let Some(f) = f {
-                    self.cbs.$name = Some(f);
-                    self.update_cbs()?;
+                self.vtable.$name = Some(::std::boxed::Box::new(f));
 
-                    self.set::<$crate::ffi::$rawfnty>(
+                self.set(
+                    ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_USERDATA,
+                    &self.vtable
+                )?;
+
+                // The callback must be coerced into a function *pointer*
+                // and not a function *item* (which is a ZST whose address is meaningless).
+                // :)
+                let callback_ptr: unsafe extern "C" fn(
+                    *mut $crate::ffi::GhosttyTerminal,
+                    *mut std::ffi::c_void,
+                    $($rfty),*
+                ) $(-> $rawrty)? = callback;
+
+                let result = unsafe {
+                    ffi::ghostty_terminal_set(
+                        self.inner.as_raw(),
                         $crate::ffi::$tag,
-                        &Some(callback::<'alloc, 'ud, UserData>),
+                        callback_ptr as *const std::ffi::c_void
                     )
-                } else {
-                    self.cbs.$name = None;
-                    self.update_cbs()?;
-                    self.set::<$crate::ffi::$rawfnty>(
-                        $crate::ffi::$tag,
-                        &None,
-                    )
-                }
+                };
+                from_result(result)?;
+                Ok(self)
             }
         )*}
         $(
@@ -476,23 +654,28 @@ macro_rules! handlers {
                 ").\n"
             )]
             $(#[$tmeta])*
-            pub type $fnty<'alloc, 'ud, UserData> =
-                ::std::boxed::Box<dyn $(for<$lf>)? Fn(
-                    &$($lf)? Terminal<'alloc, 'ud, UserData>,
-                    ::core::option::Option<&'ud mut UserData>,
+            pub trait $fnty<'alloc, 'cb>:
+                $(for<$lf>)? FnMut(
+                    &$($lf)? $crate::terminal::Terminal<'alloc, 'cb>,
                     $($fty),*
-                ) $(-> $rty)?>;
+                ) $(-> $rty)? + 'cb {}
+
+            impl<'alloc, 'cb, F> $fnty<'alloc, 'cb> for F
+            where
+                F: $(for<$lf>)? FnMut(
+                    &$($lf)? $crate::terminal::Terminal<'alloc, 'cb>,
+                    $($fty),*
+                ) $(-> $rty)? + 'cb
+            {}
         )*
 
-        struct Callbacks<'alloc, 'ud, UserData: 'ud> {
-            ud: Option<&'ud mut UserData>,
-            $($name: Option<$fnty<'alloc, 'ud, UserData>>),*
+        struct VTable<'alloc, 'cb> {
+            $($name: Option<::std::boxed::Box<dyn $fnty<'alloc, 'cb>>>),*
         }
 
-        impl<'alloc, 'ud, UserData: 'ud> Default for Callbacks<'alloc, 'ud, UserData> {
+        impl<'alloc, 'cb> Default for VTable<'alloc, 'cb> {
             fn default() -> Self {
                 Self {
-                    ud: None,
                     $($name: None),*
                 }
             }
@@ -501,101 +684,78 @@ macro_rules! handlers {
 }
 
 handlers! {
-    /// Set the callback invoked when the terminal needs to write data
-    /// back to the pty (e.g. in response to a DECRQM query or device status
-    /// report).
-    ///
-    /// Set to `None` to ignore such sequences.
+    /// Call the given function when the terminal needs to write data back
+    /// to the pty (e.g. in response to a DECRQM query or device status report).
     pub fn on_pty_write(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_WRITE_PTY,
         from = GhosttyTerminalWritePtyFn(ptr: *const u8, len: usize),
-        to = <'t>WritePtyFn(&'t [u8]),
-    ) |prep| {
-        if let Some((t, ud, func)) = prep {
-            // SAFETY: We trust libghostty to return valid memory given we
-            // uphold all lifetime invariants (e.g. no `vt_write` calls
-            // during this callback, which is guaranteed via the mutable reference).
-            let data = unsafe { std::slice::from_raw_parts(ptr, len) };
-            func(&t, ud, data);
-        }
+        to = <'t>PtyWriteFn(&'t [u8]),
+    ) |term, func| {
+        // SAFETY: We trust libghostty to return valid memory given we
+        // uphold all lifetime invariants (e.g. no `vt_write` calls
+        // during this callback, which is guaranteed via the mutable reference).
+        let data = unsafe { std::slice::from_raw_parts(ptr, len) };
+        func(&term, data);
     }
 
-    /// Set the callback invoked when the terminal
-    /// receives a BEL character (0x07).
-    ///
-    /// Set to `None` ignore bell events.
+    /// Call the given function when the terminal receives
+    /// a BEL character (0x07).
     pub fn on_bell(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_BELL,
         from = GhosttyTerminalBellFn(),
         to = BellFn(),
-    ) |prep| {
-        if let Some((t, ud, func)) = prep {
-            func(&t, ud);
-        }
+    ) |term, func| {
+        func(&term)
     }
 
-    /// Set the callback invoked when the terminal
-    /// receives an ENQ character (0x05).
-    ///
-    /// Set to `None` to send no response.
+    /// Call the given function when the terminal receives
+    /// an ENQ character (0x05).
     pub fn on_enquiry(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_ENQUIRY,
         from = GhosttyTerminalEnquiryFn() -> ffi::GhosttyString,
         to = <'t>EnquiryFn() -> Option<&'t str>,
-    ) |prep| {
-        if let Some((t, ud, func)) = prep {
-            func(&t, ud).unwrap_or("").into()
-        } else {
-            "".into()
-        }
+    ) |term, func| {
+        func(&term).unwrap_or("").into()
     }
 
-    /// Set the callback invoked when the terminal
-    /// receives an XTVERSION query (CSI > q).
-    ///
-    /// Set to `None` to report the default "libghostty" string.
+    /// Call the given function when the terminal receives an XTVERSION
+    /// query (CSI > q), and respond with the resulting version string
+    /// (e.g. "myterm 1.0").
     pub fn on_xtversion(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_XTVERSION,
         from = GhosttyTerminalXtversionFn() -> ffi::GhosttyString,
         to = <'t>XtversionFn() -> Option<&'t str>,
-    ) |prep| {
-        if let Some((t, ud, func)) = prep {
-            func(&t, ud).unwrap_or("").into()
-        } else {
-            "".into()
-        }
+    ) |term, func| {
+        func(&term).unwrap_or("").into()
     }
 
-    /// Set the callback invoked when the terminal title changes
+    /// Call the given function when the terminal title changes
     /// via escape sequences (e.g. OSC 0 or OSC 2).
     ///
-    /// Set to `None` to ignore title change events.
+    /// The new title can be queried from the terminal after
+    /// the callback returns.
     pub fn on_title_changed(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_TITLE_CHANGED,
         from = GhosttyTerminalTitleChangedFn(),
         to = TitleChanged(),
-    ) |prep| {
-        if let Some((t, ud, func)) = prep {
-            func(&t, ud)
-        }
+    ) |term, func| {
+        func(&term)
     }
 
-    /// Set the callback invoked in response to XTWINOPS size queries
+    /// Call the given function in response to XTWINOPS size queries
     /// (CSI 14/16/18 t).
-    ///
-    /// Set to `None` to silently ignore size queries.
     pub fn on_size(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_SIZE,
         from = GhosttyTerminalSizeFn(out: *mut ffi::GhosttySizeReportSize) -> bool,
         to = SizeFn() -> Option<ffi::GhosttySizeReportSize>,
-    ) |prep| {
-        if let Some((t, ud, func)) = prep && let Some(size) = func(&t, ud) {
+    ) |term, func| {
+        if let Some(size) = func(&term) {
             // SAFETY: Out pointer is assumed to be valid.
             unsafe { *out = size };
             true
@@ -604,20 +764,18 @@ handlers! {
         }
     }
 
-    /// Set the callback invoked in response to a color scheme device status
-    /// report query (CSI ? 996 n).
+    /// Call the given function in response to a color scheme
+    /// device status report query (CSI ? 996 n).
     ///
-    /// Return `Some` to report the current scheme, or return `None` to
-    /// silently ignore.
-    ///
-    /// Set to `None` to ignore color scheme queries.
+    /// Return `Some` to report the current color scheme,
+    /// or return `None` to silently ignore.
     pub fn on_color_scheme(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_SCHEME,
         from = GhosttyTerminalColorSchemeFn(out: *mut ffi::GhosttyColorScheme) -> bool,
         to = ColorSchemeFn() -> Option<ffi::GhosttyColorScheme>,
-    ) |prep| {
-        if let Some((t, ud, func)) = prep && let Some(size) = func(&t, ud) {
+    ) |term, func| {
+        if let Some(size) = func(&term) {
             // SAFETY: Out pointer is assumed to be valid.
             unsafe { *out = size };
             true
@@ -626,19 +784,18 @@ handlers! {
         }
     }
 
-    /// Set the callback invoked in response to a device attributes query
+    /// Call the given function in response to a device attributes query
     /// (CSI c, CSI > c, or CSI = c).
     ///
-    /// Return `Some` with the response data, or return `None` to silently ignore.
-    ///
-    /// Set to `None` to ignore device attributes queries.
+    /// Return `Some` with the response data,
+    /// or return `None` to silently ignore.
     pub fn on_device_attributes(
         &mut self,
         tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES,
         from = GhosttyTerminalDeviceAttributesFn(out: *mut ffi::GhosttyDeviceAttributes) -> bool,
         to = DeviceAttributesFn() -> Option<ffi::GhosttyDeviceAttributes>,
-    ) |prep| {
-        if let Some((t, ud, func)) = prep && let Some(size) = func(&t, ud) {
+    ) |term, func| {
+        if let Some(size) = func(&term) {
             // SAFETY: Out pointer is assumed to be valid.
             unsafe { *out = size };
             true
@@ -646,23 +803,4 @@ handlers! {
             false
         }
     }
-}
-
-unsafe fn prep_callback<'alloc: 'ud, 'ud, UserData: 'ud>(
-    t: *mut ffi::GhosttyTerminal,
-    ud: *mut std::ffi::c_void,
-) -> Option<(
-    Terminal<'alloc, 'ud, UserData>,
-    &'ud mut Callbacks<'alloc, 'ud, UserData>,
-)> {
-    // SAFETY: Lifetime system should already ensure the userdata
-    // reference lasts longer than 'ud here.
-    let cbs = unsafe { &mut *ud.cast::<Callbacks<'alloc, 'ud, UserData>>() };
-
-    let obj = Object::new(t).ok()?;
-    let t = Terminal::<'alloc, 'ud, UserData> {
-        inner: obj,
-        cbs: Default::default(),
-    };
-    Some((t, cbs))
 }

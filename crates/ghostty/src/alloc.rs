@@ -11,7 +11,7 @@ use std::{
 use allocator_api2::alloc;
 
 use crate::{
-    error::{Error, Result, from_result},
+    error::{Error, Result},
     ffi::{self, GhosttyAllocator, GhosttyAllocatorVtable},
 };
 

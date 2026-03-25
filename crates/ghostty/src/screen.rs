@@ -3,13 +3,84 @@
 //! These types represent the contents of a terminal screen.
 //! A [`Cell`] is a single grid cell and a [`Row`] is a single row.
 //! Both are opaque values whose fields are accessed via their methods.
-use std::mem::MaybeUninit;
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
-    error::{Error, Result, from_result},
+    error::{Error, Result, from_result, from_result_with_len},
     ffi,
-    style::{self, PaletteIndex, RgbColor},
+    style::{self, PaletteIndex, RgbColor, Style},
 };
+
+/// Resolved reference to a terminal cell position.
+///
+/// A grid reference is a resolved reference to a specific cell position in
+/// the terminal's internal page structure. Obtain a grid reference from
+/// [`Terminal::grid_ref`][crate::Terminal::grid_ref], then extract the cell
+/// or row via [`GridRef::cell`] and [`GridRef::row`].
+///
+/// A grid reference is only valid until the next update to the terminal
+/// instance. There is no guarantee that a grid reference will remain valid
+/// after ANY operation, even if a seemingly unrelated part of the grid is
+/// changed, so any information related to the grid reference should be read
+/// and cached immediately after obtaining the grid reference.
+///
+/// This API is not meant to be used as the core of render loop.
+/// It isn't built to sustain the framerates needed for rendering large screens.
+/// Use the render state API for that.
+#[derive(Clone, Debug)]
+pub struct GridRef<'t> {
+    pub(crate) inner: ffi::GhosttyGridRef,
+    pub(crate) _phan: PhantomData<&'t ffi::GhosttyTerminal>,
+}
+
+impl<'t> GridRef<'t> {
+    /// Get the row from a grid reference.
+    pub fn row(&self) -> Result<Row> {
+        let mut v = ffi::GhosttyRow::default();
+        let result = unsafe { ffi::ghostty_grid_ref_row(std::ptr::from_ref(&self.inner), &mut v) };
+        from_result(result)?;
+        Ok(Row(v))
+    }
+    /// Get the cell from a grid reference.
+    pub fn cell(&self) -> Result<Cell> {
+        let mut v = ffi::GhosttyCell::default();
+        let result = unsafe { ffi::ghostty_grid_ref_cell(std::ptr::from_ref(&self.inner), &mut v) };
+        from_result(result)?;
+        Ok(Cell(v))
+    }
+    /// Get the style of the cell at the grid reference's position.
+    pub fn style(&self) -> Result<Style> {
+        let mut v = ffi::GhosttyStyle::default();
+        let result =
+            unsafe { ffi::ghostty_grid_ref_style(std::ptr::from_ref(&self.inner), &mut v) };
+        from_result(result)?;
+        Style::try_from(v)
+    }
+
+    /// Get the grapheme cluster codepoints for the cell at the grid
+    /// reference's position.
+    ///
+    /// Writes the full grapheme cluster (the cell's primary codepoint
+    /// followed by any combining codepoints) into the provided buffer.
+    /// If the cell has no text, `Ok(0)` is returned.
+    ///
+    /// If the buffer is too small, the function returns
+    /// `Err(Error::OutOfSpace { required })` where `required` is the
+    /// required number of codepoints. The caller can then retry with
+    /// a sufficiently sized buffer.
+    pub fn graphemes(&self, buf: &mut [char]) -> Result<usize> {
+        let mut len = 0;
+        let result = unsafe {
+            ffi::ghostty_grid_ref_graphemes(
+                std::ptr::from_ref(&self.inner),
+                std::ptr::from_mut(buf).cast(),
+                buf.len(),
+                &mut len,
+            )
+        };
+        from_result_with_len(result, len)
+    }
+}
 
 /// Represents a single terminal row.
 ///

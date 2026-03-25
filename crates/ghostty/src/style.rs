@@ -34,7 +34,7 @@ pub struct Style {
 }
 
 impl Style {
-    fn is_default(self) -> bool {
+    pub fn is_default(self) -> bool {
         let raw = ffi::GhosttyStyle::from(self);
         unsafe { ffi::ghostty_style_is_default(&raw) }
     }

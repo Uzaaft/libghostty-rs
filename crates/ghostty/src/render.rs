@@ -225,7 +225,7 @@ pub struct CellIterator<'alloc>(Object<'alloc, ffi::GhosttyRenderStateRowCells>)
 /// within the render state.
 ///
 /// Cell iterations are created by [updating](CellIterator::update) row iterators
-/// at a given [row](RowEntry). The borrow checker statically
+/// at a given [row](RowIteration). The borrow checker statically
 /// guarantees that all accesses of the data do not outlive the given snapshot,
 /// at the cost of added lifetime annotations.
 pub struct CellIteration<'alloc, 's> {
@@ -260,10 +260,7 @@ impl<'alloc> RenderState<'alloc> {
         Ok(Self(Object::new(raw)?))
     }
 
-    pub fn update<'s, UserData>(
-        &'s mut self,
-        terminal: &Terminal<'_, '_, UserData>,
-    ) -> Result<Snapshot<'alloc, 's>> {
+    pub fn update<'s>(&'s mut self, terminal: &Terminal<'_, '_>) -> Result<Snapshot<'alloc, 's>> {
         let result =
             unsafe { ffi::ghostty_render_state_update(self.0.as_raw(), terminal.inner.as_raw()) };
         from_result(result)?;
