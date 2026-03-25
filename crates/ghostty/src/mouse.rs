@@ -81,7 +81,7 @@ impl<'alloc> Encoder<'alloc> {
     ///
     /// This sets tracking mode and output format from terminal state.
     /// It does not modify size or any-button state.
-    pub fn with_options_from_terminal(self, terminal: &Terminal<'_, '_>) -> Self {
+    pub fn with_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> &mut Self {
         unsafe {
             ffi::ghostty_mouse_encoder_setopt_from_terminal(
                 self.0.as_raw(),
@@ -91,7 +91,7 @@ impl<'alloc> Encoder<'alloc> {
         self
     }
     /// Set mouse tracking mode.
-    pub fn with_tracking_mode(mut self, value: TrackingMode) -> Self {
+    pub fn with_tracking_mode(&mut self, value: TrackingMode) -> &mut Self {
         unsafe {
             self.setopt(
                 ffi::GhosttyMouseEncoderOption_GHOSTTY_MOUSE_ENCODER_OPT_EVENT,
@@ -101,7 +101,7 @@ impl<'alloc> Encoder<'alloc> {
         self
     }
     /// Set mouse output format.
-    pub fn with_format(mut self, value: Format) -> Self {
+    pub fn with_format(&mut self, value: Format) -> &mut Self {
         unsafe {
             self.setopt(
                 ffi::GhosttyMouseEncoderOption_GHOSTTY_MOUSE_ENCODER_OPT_EVENT,
@@ -111,7 +111,7 @@ impl<'alloc> Encoder<'alloc> {
         self
     }
     /// Set renderer size context.
-    pub fn with_size(mut self, value: EncoderSize) -> Self {
+    pub fn with_size(&mut self, value: EncoderSize) -> &mut Self {
         let raw: ffi::GhosttyMouseEncoderSize = value.into();
         unsafe {
             self.setopt(
@@ -122,7 +122,7 @@ impl<'alloc> Encoder<'alloc> {
         self
     }
     /// Set whether any mouse button is currently pressed.
-    pub fn with_any_button_pressed(mut self, value: bool) -> Self {
+    pub fn with_any_button_pressed(&mut self, value: bool) -> &mut Self {
         unsafe {
             self.setopt(
                 ffi::GhosttyMouseEncoderOption_GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED,
@@ -132,7 +132,7 @@ impl<'alloc> Encoder<'alloc> {
         self
     }
     /// Set whether to enable motion deduplication by last cell.
-    pub fn with_track_last_cell(mut self, value: bool) -> Self {
+    pub fn with_track_last_cell(&mut self, value: bool) -> &mut Self {
         unsafe {
             self.setopt(
                 ffi::GhosttyMouseEncoderOption_GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL,

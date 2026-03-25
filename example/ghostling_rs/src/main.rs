@@ -5,17 +5,23 @@
 //! `ghostty` crate) for terminal emulation. The architecture is intentionally
 //! simple: single-threaded, 2D software rendering, one file.
 
+use std::cell::{Cell, RefCell};
 use std::io;
 use std::os::fd::AsFd;
 use std::os::unix::io::{AsRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
+use std::rc::Rc;
 
-use ghostty::ffi;
+use ghostty::focus;
+use ghostty::key::Key;
+use ghostty::render::{Dirty, Snapshot};
+use ghostty::style::RgbColor;
+use ghostty::terminal::{self, Mode};
 use ghostty::{
-    KeyEncoder, KeyEvent, MouseEncoder, MouseEvent, RenderState, RenderStateRowCells,
-    RenderStateRowIterator, Terminal,
+    Terminal, TerminalOptions, ffi, key, mouse,
+    render::{CellIterator, RenderState, RowIterator},
 };
 use nix::errno::Errno;
 use nix::fcntl::{self, OFlag};
@@ -23,6 +29,8 @@ use nix::pty::ForkptyResult;
 use nix::sys::{signal, wait};
 use nix::unistd::{self, Pid};
 use raylib::prelude::*;
+
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 // ---------------------------------------------------------------------------
 // PTY helpers
@@ -149,7 +157,7 @@ fn pty_write<Fd: AsFd>(fd: Fd, data: &[u8]) {
 
 /// Map a raylib key constant to a GhosttyKey code.
 /// Returns GHOSTTY_KEY_UNIDENTIFIED for keys we don't handle.
-fn raylib_key_to_ghostty(rl_key: KeyboardKey) -> ffi::GhosttyKey {
+fn raylib_key_to_ghostty(rl_key: KeyboardKey) -> Key {
     use KeyboardKey::*;
 
     // Letters -- raylib KEY_A..KEY_Z are contiguous, and so are
@@ -162,46 +170,46 @@ fn raylib_key_to_ghostty(rl_key: KeyboardKey) -> ffi::GhosttyKey {
     let key_f12 = KEY_F12 as u32;
     let k = rl_key as u32;
 
-    if k >= key_a && k <= key_z {
-        return ffi::GhosttyKey_GHOSTTY_KEY_A + (k - key_a);
+    if (key_a..=key_z).contains(&k) {
+        return Key::try_from(Key::A as u32 + (k - key_a)).unwrap();
     }
     // Digits -- raylib KEY_ZERO..KEY_NINE are contiguous.
-    if k >= key_zero && k <= key_nine {
-        return ffi::GhosttyKey_GHOSTTY_KEY_DIGIT_0 + (k - key_zero);
+    if (key_zero..=key_nine).contains(&k) {
+        return Key::try_from(Key::Digit0 as u32 + (k - key_zero)).unwrap();
     }
     // Function keys -- raylib KEY_F1..KEY_F12 are contiguous.
-    if k >= key_f1 && k <= key_f12 {
-        return ffi::GhosttyKey_GHOSTTY_KEY_F1 + (k - key_f1);
+    if (key_f1..=key_f12).contains(&k) {
+        return Key::try_from(Key::F1 as u32 + (k - key_f1)).unwrap();
     }
 
     match rl_key {
-        KEY_SPACE => ffi::GhosttyKey_GHOSTTY_KEY_SPACE,
-        KEY_ENTER => ffi::GhosttyKey_GHOSTTY_KEY_ENTER,
-        KEY_TAB => ffi::GhosttyKey_GHOSTTY_KEY_TAB,
-        KEY_BACKSPACE => ffi::GhosttyKey_GHOSTTY_KEY_BACKSPACE,
-        KEY_DELETE => ffi::GhosttyKey_GHOSTTY_KEY_DELETE,
-        KEY_ESCAPE => ffi::GhosttyKey_GHOSTTY_KEY_ESCAPE,
-        KEY_UP => ffi::GhosttyKey_GHOSTTY_KEY_ARROW_UP,
-        KEY_DOWN => ffi::GhosttyKey_GHOSTTY_KEY_ARROW_DOWN,
-        KEY_LEFT => ffi::GhosttyKey_GHOSTTY_KEY_ARROW_LEFT,
-        KEY_RIGHT => ffi::GhosttyKey_GHOSTTY_KEY_ARROW_RIGHT,
-        KEY_HOME => ffi::GhosttyKey_GHOSTTY_KEY_HOME,
-        KEY_END => ffi::GhosttyKey_GHOSTTY_KEY_END,
-        KEY_PAGE_UP => ffi::GhosttyKey_GHOSTTY_KEY_PAGE_UP,
-        KEY_PAGE_DOWN => ffi::GhosttyKey_GHOSTTY_KEY_PAGE_DOWN,
-        KEY_INSERT => ffi::GhosttyKey_GHOSTTY_KEY_INSERT,
-        KEY_MINUS => ffi::GhosttyKey_GHOSTTY_KEY_MINUS,
-        KEY_EQUAL => ffi::GhosttyKey_GHOSTTY_KEY_EQUAL,
-        KEY_LEFT_BRACKET => ffi::GhosttyKey_GHOSTTY_KEY_BRACKET_LEFT,
-        KEY_RIGHT_BRACKET => ffi::GhosttyKey_GHOSTTY_KEY_BRACKET_RIGHT,
-        KEY_BACKSLASH => ffi::GhosttyKey_GHOSTTY_KEY_BACKSLASH,
-        KEY_SEMICOLON => ffi::GhosttyKey_GHOSTTY_KEY_SEMICOLON,
-        KEY_APOSTROPHE => ffi::GhosttyKey_GHOSTTY_KEY_QUOTE,
-        KEY_COMMA => ffi::GhosttyKey_GHOSTTY_KEY_COMMA,
-        KEY_PERIOD => ffi::GhosttyKey_GHOSTTY_KEY_PERIOD,
-        KEY_SLASH => ffi::GhosttyKey_GHOSTTY_KEY_SLASH,
-        KEY_GRAVE => ffi::GhosttyKey_GHOSTTY_KEY_BACKQUOTE,
-        _ => ffi::GhosttyKey_GHOSTTY_KEY_UNIDENTIFIED,
+        KEY_SPACE => Key::Space,
+        KEY_ENTER => Key::Enter,
+        KEY_TAB => Key::Tab,
+        KEY_BACKSPACE => Key::Backspace,
+        KEY_DELETE => Key::Delete,
+        KEY_ESCAPE => Key::Escape,
+        KEY_UP => Key::ArrowUp,
+        KEY_DOWN => Key::ArrowDown,
+        KEY_LEFT => Key::ArrowLeft,
+        KEY_RIGHT => Key::ArrowRight,
+        KEY_HOME => Key::Home,
+        KEY_END => Key::End,
+        KEY_PAGE_UP => Key::PageUp,
+        KEY_PAGE_DOWN => Key::PageDown,
+        KEY_INSERT => Key::Insert,
+        KEY_MINUS => Key::Minus,
+        KEY_EQUAL => Key::Equal,
+        KEY_LEFT_BRACKET => Key::BracketLeft,
+        KEY_RIGHT_BRACKET => Key::BracketRight,
+        KEY_BACKSLASH => Key::Backslash,
+        KEY_SEMICOLON => Key::Semicolon,
+        KEY_APOSTROPHE => Key::Quote,
+        KEY_COMMA => Key::Comma,
+        KEY_PERIOD => Key::Period,
+        KEY_SLASH => Key::Slash,
+        KEY_GRAVE => Key::Backquote,
+        _ => Key::Unidentified,
     }
 }
 
@@ -209,7 +217,7 @@ fn raylib_key_to_ghostty(rl_key: KeyboardKey) -> ffi::GhosttyKey {
 /// character the key produces with no modifiers on a US layout. The
 /// Kitty keyboard protocol requires this to identify keys. Returns 0
 /// for keys that don't have a natural codepoint (arrows, F-keys, etc.).
-fn raylib_key_unshifted_codepoint(rl_key: KeyboardKey) -> u32 {
+fn raylib_key_unshifted_codepoint(rl_key: KeyboardKey) -> char {
     use KeyboardKey::*;
 
     let key_a = KEY_A as u32;
@@ -218,60 +226,60 @@ fn raylib_key_unshifted_codepoint(rl_key: KeyboardKey) -> u32 {
     let key_nine = KEY_NINE as u32;
     let k = rl_key as u32;
 
-    if k >= key_a && k <= key_z {
-        return b'a' as u32 + (k - key_a);
+    if (key_a..=key_z).contains(&k) {
+        return char::from_u32('a' as u32 + (k - key_a)).unwrap();
     }
-    if k >= key_zero && k <= key_nine {
-        return b'0' as u32 + (k - key_zero);
+    if (key_zero..=key_nine).contains(&k) {
+        return char::from_u32('0' as u32 + (k - key_zero)).unwrap();
     }
 
     match rl_key {
-        KEY_SPACE => b' ' as u32,
-        KEY_MINUS => b'-' as u32,
-        KEY_EQUAL => b'=' as u32,
-        KEY_LEFT_BRACKET => b'[' as u32,
-        KEY_RIGHT_BRACKET => b']' as u32,
-        KEY_BACKSLASH => b'\\' as u32,
-        KEY_SEMICOLON => b';' as u32,
-        KEY_APOSTROPHE => b'\'' as u32,
-        KEY_COMMA => b',' as u32,
-        KEY_PERIOD => b'.' as u32,
-        KEY_SLASH => b'/' as u32,
-        KEY_GRAVE => b'`' as u32,
-        _ => 0,
+        KEY_SPACE => ' ',
+        KEY_MINUS => '-',
+        KEY_EQUAL => '=',
+        KEY_LEFT_BRACKET => '[',
+        KEY_RIGHT_BRACKET => ']',
+        KEY_BACKSLASH => '\\',
+        KEY_SEMICOLON => ';',
+        KEY_APOSTROPHE => '\'',
+        KEY_COMMA => ',',
+        KEY_PERIOD => '.',
+        KEY_SLASH => '/',
+        KEY_GRAVE => '`',
+        _ => '\0',
     }
 }
 
 /// Build a GhosttyMods bitmask from the current raylib modifier key state.
-fn get_ghostty_mods(rl: &RaylibHandle) -> ffi::GhosttyMods {
-    let mut mods: ffi::GhosttyMods = 0;
+fn get_ghostty_mods(rl: &RaylibHandle) -> key::Mods {
+    let mut mods = key::Mods::empty();
     if rl.is_key_down(KeyboardKey::KEY_LEFT_SHIFT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_SHIFT) {
-        mods |= ffi::GHOSTTY_MODS_SHIFT as u16;
+        mods |= key::Mods::SHIFT;
     }
     if rl.is_key_down(KeyboardKey::KEY_LEFT_CONTROL)
         || rl.is_key_down(KeyboardKey::KEY_RIGHT_CONTROL)
     {
-        mods |= ffi::GHOSTTY_MODS_CTRL as u16;
+        mods |= key::Mods::CTRL;
     }
     if rl.is_key_down(KeyboardKey::KEY_LEFT_ALT) || rl.is_key_down(KeyboardKey::KEY_RIGHT_ALT) {
-        mods |= ffi::GHOSTTY_MODS_ALT as u16;
+        mods |= key::Mods::ALT;
     }
     if rl.is_key_down(KeyboardKey::KEY_LEFT_SUPER) || rl.is_key_down(KeyboardKey::KEY_RIGHT_SUPER) {
-        mods |= ffi::GHOSTTY_MODS_SUPER as u16;
+        mods |= key::Mods::SUPER;
     }
     mods
 }
 
 /// Map a raylib mouse button to a GhosttyMouseButton.
-fn raylib_mouse_to_ghostty(rl_button: MouseButton) -> ffi::GhosttyMouseButton {
+fn raylib_mouse_to_ghostty(rl_button: MouseButton) -> mouse::Button {
     match rl_button {
-        MouseButton::MOUSE_BUTTON_LEFT => ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_LEFT,
-        MouseButton::MOUSE_BUTTON_RIGHT => ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_RIGHT,
-        MouseButton::MOUSE_BUTTON_MIDDLE => ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_MIDDLE,
-        MouseButton::MOUSE_BUTTON_SIDE => ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FOUR,
-        MouseButton::MOUSE_BUTTON_EXTRA => ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FIVE,
-        MouseButton::MOUSE_BUTTON_FORWARD => ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_SIX,
-        MouseButton::MOUSE_BUTTON_BACK => ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_SEVEN,
+        MouseButton::MOUSE_BUTTON_LEFT => mouse::Button::Left,
+        MouseButton::MOUSE_BUTTON_RIGHT => mouse::Button::Right,
+        MouseButton::MOUSE_BUTTON_MIDDLE => mouse::Button::Middle,
+        MouseButton::MOUSE_BUTTON_SIDE => mouse::Button::Four,
+        MouseButton::MOUSE_BUTTON_EXTRA => mouse::Button::Five,
+        MouseButton::MOUSE_BUTTON_FORWARD => mouse::Button::Six,
+        MouseButton::MOUSE_BUTTON_BACK => mouse::Button::Seven,
     }
 }
 
@@ -343,25 +351,25 @@ fn num_to_keyboard_key(n: u32) -> KeyboardKey {
 fn handle_input<Fd: AsFd>(
     rl: &mut RaylibHandle,
     pty_fd: Fd,
-    encoder: &mut KeyEncoder,
-    event: &mut KeyEvent,
+    encoder: &mut key::Encoder,
+    event: &mut key::Event,
     terminal: &Terminal,
 ) {
     // Sync encoder options from the terminal so mode changes (e.g.
     // application cursor keys, Kitty keyboard protocol) are honoured.
-    encoder.setopt_from_terminal(terminal);
+    encoder.with_options_from_terminal(terminal);
 
     // Drain printable characters from raylib's input queue. We collect
     // them into a single UTF-8 buffer so the encoder can attach text
     // to the key event.
     let mut char_utf8 = [0u8; 64];
     let mut char_utf8_len: usize = 0;
-
     while let Some(ch) = rl.get_char_pressed() {
         if char_utf8_len + ch.len_utf8() < char_utf8.len() {
             _ = ch.encode_utf8(&mut char_utf8[char_utf8_len..]);
         }
     }
+    let text = std::str::from_utf8(&char_utf8[..char_utf8_len]).expect("a valid UTF-8 string");
 
     let keys = all_keys_to_check();
     let mods = get_ghostty_mods(rl);
@@ -375,33 +383,31 @@ fn handle_input<Fd: AsFd>(
         }
 
         let gkey = raylib_key_to_ghostty(rl_key);
-        if gkey == ffi::GhosttyKey_GHOSTTY_KEY_UNIDENTIFIED {
+        if gkey == Key::Unidentified {
             continue;
         }
 
-        let action = if released {
-            ffi::GhosttyKeyAction_GHOSTTY_KEY_ACTION_RELEASE
-        } else if pressed {
-            ffi::GhosttyKeyAction_GHOSTTY_KEY_ACTION_PRESS
-        } else {
-            ffi::GhosttyKeyAction_GHOSTTY_KEY_ACTION_REPEAT
-        };
-
         event.set_key(gkey);
-        event.set_action(action);
+        event.set_action(if released {
+            key::Action::Release
+        } else if pressed {
+            key::Action::Press
+        } else {
+            key::Action::Repeat
+        });
         event.set_mods(mods);
 
         let ucp = raylib_key_unshifted_codepoint(rl_key);
         event.set_unshifted_codepoint(ucp);
 
-        let mut consumed: ffi::GhosttyMods = 0;
-        if ucp != 0 && (mods & ffi::GHOSTTY_MODS_SHIFT as u16) != 0 {
-            consumed |= ffi::GHOSTTY_MODS_SHIFT as u16;
+        let mut consumed = key::Mods::empty();
+        if ucp != '\0' && mods.contains(key::Mods::SHIFT) {
+            consumed |= key::Mods::SHIFT;
         }
         event.set_consumed_mods(consumed);
 
         if char_utf8_len > 0 && !released {
-            event.set_utf8(Some(&char_utf8[..char_utf8_len]));
+            event.set_utf8(Some(text));
             char_utf8_len = 0;
         } else {
             event.set_utf8(None);
@@ -422,7 +428,11 @@ fn handle_input<Fd: AsFd>(
 /// Encode a mouse event and write the resulting escape sequence to the pty.
 /// If the encoder produces no output (e.g. tracking is disabled), this is
 /// a no-op.
-fn mouse_encode_and_write<Fd: AsFd>(pty_fd: Fd, encoder: &mut MouseEncoder, event: &MouseEvent) {
+fn mouse_encode_and_write<Fd: AsFd>(
+    pty_fd: Fd,
+    encoder: &mut mouse::Encoder,
+    event: &mouse::Event,
+) {
     let mut buf = [0u8; 128];
     match encoder.encode(event, &mut buf) {
         Ok(written) if written > 0 => pty_write(pty_fd, &buf[..written]),
@@ -438,64 +448,51 @@ fn mouse_encode_and_write<Fd: AsFd>(pty_fd: Fd, encoder: &mut MouseEncoder, even
 fn handle_mouse<Fd: AsFd>(
     rl: &RaylibHandle,
     pty_fd: &Fd,
-    encoder: &mut MouseEncoder,
-    event: &mut MouseEvent,
+    encoder: &mut mouse::Encoder,
+    event: &mut mouse::Event,
     terminal: &mut Terminal,
-    cell_width: i32,
-    cell_height: i32,
-    pad: i32,
+    cell_width: u32,
+    cell_height: u32,
+    pad: u32,
 ) {
-    // Sync encoder tracking mode and format from terminal state so
-    // mode changes (e.g. applications enabling SGR mouse reporting)
-    // are honoured automatically.
-    encoder.setopt_from_terminal(terminal);
-
     // Provide the encoder with the current terminal geometry so it
     // can convert pixel positions to cell coordinates.
-    let scr_w = rl.get_screen_width();
-    let scr_h = rl.get_screen_height();
-
-    let mut enc_size = ffi::GhosttyMouseEncoderSize::default();
-    enc_size.size = std::mem::size_of::<ffi::GhosttyMouseEncoderSize>();
-    enc_size.screen_width = scr_w as u32;
-    enc_size.screen_height = scr_h as u32;
-    enc_size.cell_width = cell_width as u32;
-    enc_size.cell_height = cell_height as u32;
-    enc_size.padding_top = pad as u32;
-    enc_size.padding_bottom = pad as u32;
-    enc_size.padding_left = pad as u32;
-    enc_size.padding_right = pad as u32;
-
-    encoder.setopt(
-        ffi::GhosttyMouseEncoderOption_GHOSTTY_MOUSE_ENCODER_OPT_SIZE,
-        std::ptr::from_ref(&enc_size).cast(),
-    );
+    let scr_w = rl.get_screen_width() as u32;
+    let scr_h = rl.get_screen_height() as u32;
 
     // Track whether any button is currently held -- the encoder uses
     // this to distinguish drags from plain motion.
     let any_pressed = rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT)
         || rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT)
         || rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_MIDDLE);
-    encoder.setopt(
-        ffi::GhosttyMouseEncoderOption_GHOSTTY_MOUSE_ENCODER_OPT_ANY_BUTTON_PRESSED,
-        std::ptr::from_ref(&any_pressed).cast(),
-    );
 
-    // Enable motion deduplication so the encoder suppresses redundant
-    // motion events within the same cell.
-    let track_cell = true;
-    encoder.setopt(
-        ffi::GhosttyMouseEncoderOption_GHOSTTY_MOUSE_ENCODER_OPT_TRACK_LAST_CELL,
-        std::ptr::from_ref(&track_cell).cast(),
-    );
+    encoder
+        // Sync encoder tracking mode and format from terminal state so
+        // mode changes (e.g. applications enabling SGR mouse reporting)
+        // are honoured automatically.
+        .with_options_from_terminal(terminal)
+        .with_size(mouse::EncoderSize {
+            screen_width: scr_w,
+            screen_height: scr_h,
+            cell_width: cell_width,
+            cell_height: cell_height,
+            padding_top: pad,
+            padding_bottom: pad,
+            padding_left: pad,
+            padding_right: pad,
+        })
+        .with_any_button_pressed(any_pressed)
+        // Enable motion deduplication so the encoder suppresses redundant
+        // motion events within the same cell.
+        .with_track_last_cell(true);
 
     let mods = get_ghostty_mods(rl);
     let pos = rl.get_mouse_position();
     event.set_mods(mods);
-    event.set_position(pos.x, pos.y);
+    event.set_position(mouse::Position { x: pos.x, y: pos.y });
 
     // Check each mouse button for press/release events.
-    const BUTTONS: &[MouseButton] = &[
+    const BUTTONS: [MouseButton; 7] = [
         MouseButton::MOUSE_BUTTON_LEFT,
         MouseButton::MOUSE_BUTTON_RIGHT,
         MouseButton::MOUSE_BUTTON_MIDDLE,
@@ -505,16 +502,16 @@ fn handle_mouse<Fd: AsFd>(
         MouseButton::MOUSE_BUTTON_BACK,
     ];
 
-    for &rl_btn in BUTTONS {
+    for rl_btn in BUTTONS {
         let gbtn = raylib_mouse_to_ghostty(rl_btn);
 
         if rl.is_mouse_button_pressed(rl_btn) {
-            event.set_action(ffi::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_PRESS);
-            event.set_button(gbtn);
+            event.set_action(mouse::Action::Press);
+            event.set_button(Some(gbtn));
             mouse_encode_and_write(&pty_fd, encoder, event);
         } else if rl.is_mouse_button_released(rl_btn) {
-            event.set_action(ffi::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_RELEASE);
-            event.set_button(gbtn);
+            event.set_action(mouse::Action::Release);
+            event.set_button(Some(gbtn));
             mouse_encode_and_write(&pty_fd, encoder, event);
         }
     }
@@ -523,16 +520,16 @@ fn handle_mouse<Fd: AsFd>(
     // (or no button for pure motion in any-event tracking mode).
     let delta = rl.get_mouse_delta();
     if delta.x != 0.0 || delta.y != 0.0 {
-        event.set_action(ffi::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_MOTION);
-        if rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
-            event.set_button(ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_LEFT);
+        event.set_action(mouse::Action::Motion);
+        event.set_button(if rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_LEFT) {
+            Some(mouse::Button::Left)
         } else if rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_RIGHT) {
-            event.set_button(ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_RIGHT);
+            Some(mouse::Button::Right)
         } else if rl.is_mouse_button_down(MouseButton::MOUSE_BUTTON_MIDDLE) {
-            event.set_button(ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_MIDDLE);
+            Some(mouse::Button::Middle)
         } else {
-            event.clear_button();
-        }
+            None
+        });
         mouse_encode_and_write(pty_fd, encoder, event);
     }
 
@@ -547,38 +544,34 @@ fn handle_mouse<Fd: AsFd>(
         if mouse_tracking {
             // Forward to the application via the mouse encoder.
             let scroll_btn = if wheel > 0.0 {
-                ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FOUR
+                mouse::Button::Four
             } else {
-                ffi::GhosttyMouseButton_GHOSTTY_MOUSE_BUTTON_FIVE
+                mouse::Button::Five
             };
-            event.set_button(scroll_btn);
-            event.set_action(ffi::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_PRESS);
+            event.set_button(Some(scroll_btn));
+            event.set_action(mouse::Action::Press);
             mouse_encode_and_write(pty_fd, encoder, event);
-            event.set_action(ffi::GhosttyMouseAction_GHOSTTY_MOUSE_ACTION_RELEASE);
+            event.set_action(mouse::Action::Release);
             mouse_encode_and_write(pty_fd, encoder, event);
         } else {
             // Scroll the viewport through scrollback. Scroll 3 rows
             // per wheel tick for a comfortable pace.
             let scroll_delta: isize = if wheel > 0.0 { -3 } else { 3 };
-            terminal.scroll_viewport_delta(scroll_delta);
+            terminal.scroll_viewport(terminal::ScrollViewport::Delta(scroll_delta));
         }
     }
 }
 
 /// Check whether any mouse tracking mode is enabled on the terminal.
-///
-/// The mode values correspond to DEC private modes 9 (X10), 1000 (normal),
-/// 1002 (button), 1003 (any). In the packed GhosttyMode format, DEC private
-/// modes have bit 15 set: mode_value = (1 << 15) | dec_mode_number.
 fn is_mouse_tracking_enabled(terminal: &Terminal) -> bool {
-    let tracking_mode_numbers: &[u16] = &[9, 1000, 1002, 1003];
-    for &mode_num in tracking_mode_numbers {
-        let mode: ffi::GhosttyMode = (1 << 15) | mode_num;
-        if let Ok(true) = terminal.mode_get(mode) {
-            return true;
-        }
-    }
-    false
+    [
+        Mode::X10Mouse,
+        Mode::NormalMouse,
+        Mode::ButtonMouse,
+        Mode::AnyMouse,
+    ]
+    .into_iter()
+    .any(|mode| matches!(terminal.mode(mode), Ok(true)))
 }
 
 // ---------------------------------------------------------------------------
@@ -629,7 +622,7 @@ fn handle_scrollbar(
         let delta = target - scrollbar.offset as i64;
 
         if delta != 0 {
-            terminal.scroll_viewport_delta(delta as isize);
+            terminal.scroll_viewport(terminal::ScrollViewport::Delta(delta as isize));
             let _ = render_state.update(terminal);
         }
     }
@@ -645,43 +638,24 @@ fn handle_scrollbar(
 // Rendering
 // ---------------------------------------------------------------------------
 
-/// Resolve a style color to an RGB value. Palette colors are looked up
-/// in the render state's 256-color palette; RGB colors are used directly;
-/// unset colors fall back to the provided default.
-fn resolve_color(
-    color: &ffi::GhosttyStyleColor,
-    colors: &ffi::GhosttyRenderStateColors,
-    fallback: ffi::GhosttyColorRgb,
-) -> ffi::GhosttyColorRgb {
-    match color.tag {
-        ffi::GhosttyStyleColorTag_GHOSTTY_STYLE_COLOR_RGB => unsafe { color.value.rgb },
-        ffi::GhosttyStyleColorTag_GHOSTTY_STYLE_COLOR_PALETTE => {
-            let idx = unsafe { color.value.palette };
-            colors.palette[idx as usize]
-        }
-        _ => fallback,
-    }
-}
-
 /// Render the terminal contents using the render state API.
 ///
 /// Iterates over rows and cells from the render state, resolves styles
 /// and colors, and draws each cell using raylib's 2D text rendering.
 /// Also draws the cursor and an optional scrollbar thumb.
-fn render_terminal(
+fn render_terminal<'alloc>(
     d: &mut RaylibDrawHandle,
-    render_state: &mut RenderState,
-    row_iter: &mut RenderStateRowIterator,
-    cells: &mut RenderStateRowCells,
+    snapshot: &Snapshot<'alloc, '_>,
+    rows: &mut RowIterator<'alloc>,
+    cells: &mut CellIterator<'alloc>,
     font: &impl AsRef<raylib::ffi::Font>,
     cell_width: i32,
     cell_height: i32,
     font_size: i32,
     scrollbar: Option<&ffi::GhosttyTerminalScrollbar>,
-) {
-    let colors = match render_state.colors_get() {
-        Ok(c) => c,
-        Err(_) => return,
+) -> Result<()> {
+    let Ok(colors) = snapshot.colors() else {
+        return Ok(());
     };
 
     // If both fg and bg are black (no palette loaded yet), use white
@@ -694,39 +668,39 @@ fn render_terminal(
         && colors.background.g == 0
         && colors.background.b == 0
     {
-        fg_default = ffi::GhosttyColorRgb {
+        fg_default = RgbColor {
             r: 255,
             g: 255,
             b: 255,
         };
     }
 
-    if render_state.populate_row_iterator(row_iter).is_err() {
-        return;
-    }
+    let Ok(mut row_iter) = rows.update(snapshot) else {
+        return Ok(());
+    };
 
     let pad = 4;
     let mut y = pad;
 
-    while row_iter.next() {
-        if row_iter.populate_cells(cells).is_err() {
-            y += cell_height;
+    while let Some(row) = row_iter.next() {
+        let Ok(mut cell_iter) = cells.update(row) else {
             continue;
-        }
+        };
 
         let mut x = pad;
-
-        while cells.next() {
-            let grapheme_len = cells.graphemes_len().unwrap_or(0);
+        while let Some(cell) = cell_iter.next() {
+            let grapheme_len = cell.graphemes_len().unwrap_or(0);
 
             if grapheme_len == 0 {
                 // Empty cell -- check for background-only content (palette
                 // or direct RGB background without text).
-                if let Ok(raw_cell) = cells.raw_cell() {
-                    match ghostty::cell_get_content_tag(raw_cell) {
-                        Ok(ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE) => {
-                            if let Ok(palette_idx) = ghostty::cell_get_color_palette(raw_cell) {
-                                let bg = colors.palette[palette_idx as usize];
+                if let Ok(raw_cell) = cell.raw_cell() {
+                    use ghostty::screen::CellContentTag;
+
+                    match raw_cell.content_tag() {
+                        Ok(CellContentTag::BgColorPalette) => {
+                            if let Ok(palette_idx) = raw_cell.bg_color_palette() {
+                                let bg = colors.palette[palette_idx.0 as usize];
                                 d.draw_rectangle(
                                     x,
                                     y,
@@ -736,8 +710,8 @@ fn render_terminal(
                                 );
                             }
                         }
-                        Ok(ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_RGB) => {
-                            if let Ok(bg) = ghostty::cell_get_color_rgb(raw_cell) {
+                        Ok(CellContentTag::BgColorRgb) => {
+                            if let Ok(bg) = raw_cell.bg_color_rgb() {
                                 d.draw_rectangle(
                                     x,
                                     y,
@@ -755,75 +729,75 @@ fn render_terminal(
             }
 
             // Read grapheme codepoints and encode to a UTF-8 string.
-            let mut codepoints = ['\0'; 16];
-            let len = grapheme_len.min(16) as usize;
-            _ = cells.graphemes_buf(&mut codepoints[..len]);
+            let codepoints = cell.graphemes()?;
 
             let mut text_buf = [0u8; 64];
             let mut pos: usize = 0;
-            for cp in &codepoints[..len] {
+            for cp in &codepoints {
                 if pos >= 60 {
                     break;
                 }
                 _ = cp.encode_utf8(&mut text_buf[pos..]);
                 pos += cp.len_utf8();
             }
-            text_buf[pos] = 0; // null-terminate for CStr
+            let text = std::str::from_utf8(&text_buf[..pos]).expect("a valid UTF-8 string");
 
-            // Resolve foreground, background, and style flags.
-            let style = cells.style().unwrap_or_else(|_| {
-                let mut s = ffi::GhosttyStyle::default();
-                s.size = std::mem::size_of::<ffi::GhosttyStyle>();
-                s
-            });
+            // Resolve foreground and background colors using the new
+            // per-cell color queries.  These flatten style colors,
+            // content-tag colors, and palette lookups into a single RGB
+            // value, returning INVALID_VALUE when the cell has no
+            // explicit color (in which case we use the terminal default).
+            let mut fg = cell.fg_color()?.unwrap_or(colors.foreground);
+            let bg = cell.bg_color()?;
+            let mut has_bg = bg.is_some();
+            let mut bg = bg.unwrap_or(colors.background);
 
-            let mut fg = resolve_color(&style.fg_color, &colors, fg_default);
-            let mut bg_rgb = resolve_color(&style.bg_color, &colors, colors.background);
-
+            // Read the style for flags (inverse, bold, italic) — color
+            // resolution is handled above via the new API.
+            let style = cell.style()?;
             if style.inverse {
-                std::mem::swap(&mut fg, &mut bg_rgb);
+                std::mem::swap(&mut fg, &mut bg);
+                has_bg = true;
             }
 
             let ray_fg = Color::new(fg.r, fg.g, fg.b, 255);
 
-            // Draw background if the cell has an explicit bg color or is inverted.
-            if style.bg_color.tag != ffi::GhosttyStyleColorTag_GHOSTTY_STYLE_COLOR_NONE
-                || style.inverse
-            {
+            // Draw a background rectangle if the cell has a non-default bg
+            // or if inverse mode forced a swap.
+            if has_bg {
                 d.draw_rectangle(
                     x,
                     y,
                     cell_width,
                     cell_height,
-                    Color::new(bg_rgb.r, bg_rgb.g, bg_rgb.b, 255),
+                    Color::new(bg.r, bg.g, bg.b, 255),
                 );
             }
 
-            // Fake italic by shifting the text right slightly.
+            // Italic: apply a simple shear by shifting the top of the glyph
+            // to the right.  The offset is proportional to font size so it
+            // looks reasonable at any scale.
             let italic_offset = if style.italic { font_size / 6 } else { 0 };
 
-            let text_cstr = unsafe { std::ffi::CStr::from_ptr(text_buf.as_ptr().cast()) };
-            if let Ok(text_str) = text_cstr.to_str() {
+            d.draw_text_ex(
+                font,
+                text,
+                Vector2::new((x + italic_offset) as f32, y as f32),
+                font_size as f32,
+                0.0,
+                ray_fg,
+            );
+
+            // Fake bold by drawing the text again offset by 1px.
+            if style.bold {
                 d.draw_text_ex(
                     font,
-                    text_str,
-                    Vector2::new((x + italic_offset) as f32, y as f32),
+                    text,
+                    Vector2::new((x + italic_offset + 1) as f32, y as f32),
                     font_size as f32,
                     0.0,
                     ray_fg,
                 );
-
-                // Fake bold by drawing the text again offset by 1px.
-                if style.bold {
-                    d.draw_text_ex(
-                        font,
-                        text_str,
-                        Vector2::new((x + italic_offset + 1) as f32, y as f32),
-                        font_size as f32,
-                        0.0,
-                        ray_fg,
-                    );
-                }
             }
 
             x += cell_width;
@@ -831,26 +805,17 @@ fn render_terminal(
 
         // Mark the row as clean so we don't redraw it unnecessarily
         // on the next frame (the render state tracks per-row dirty flags).
-        let _ = row_iter.set_dirty(false);
+        row_iter.set_dirty(false)?;
         y += cell_height;
     }
 
     // Draw cursor.
-    let cursor_visible = render_state.cursor_visible().unwrap_or(false);
-    let cursor_in_viewport = render_state.cursor_viewport_has_value().unwrap_or(false);
+    let cursor_visible = snapshot.cursor_visible().unwrap_or(false);
 
-    if cursor_visible && cursor_in_viewport {
-        let cx = render_state.cursor_viewport_x().unwrap_or(0);
-        let cy = render_state.cursor_viewport_y().unwrap_or(0);
-
-        let cur_rgb = if colors.cursor_has_value {
-            colors.cursor
-        } else {
-            fg_default
-        };
-
-        let cur_x = pad + cx as i32 * cell_width;
-        let cur_y = pad + cy as i32 * cell_height;
+    if cursor_visible && let Ok(Some(viewport)) = snapshot.cursor_viewport() {
+        let cur_rgb = colors.cursor.unwrap_or(fg_default);
+        let cur_x = pad + viewport.x as i32 * cell_width;
+        let cur_y = pad + viewport.y as i32 * cell_height;
         d.draw_rectangle(
             cur_x,
             cur_y,
@@ -891,7 +856,8 @@ fn render_terminal(
 
     // Clear the global dirty flag so we know when the next update
     // actually changes something.
-    let _ = render_state.set_dirty(ffi::GhosttyRenderStateDirty_GHOSTTY_RENDER_STATE_DIRTY_FALSE);
+    snapshot.set_dirty(Dirty::Clean)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -900,26 +866,49 @@ fn render_terminal(
 
 /// Log libghostty-vt build configuration (SIMD, optimization level).
 fn log_build_info() {
-    let simd = ghostty::build_info_simd().unwrap_or(false);
-    let opt =
-        ghostty::build_info_optimize().unwrap_or(ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG);
-
-    let opt_str = match opt {
-        ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_DEBUG => "Debug",
-        ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_RELEASE_SAFE => "ReleaseSafe",
-        ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_RELEASE_SMALL => "ReleaseSmall",
-        ffi::GhosttyOptimizeMode_GHOSTTY_OPTIMIZE_RELEASE_FAST => "ReleaseFast",
-        _ => "Unknown",
-    };
+    use ghostty::build_info::*;
+    let simd = supports_simd().unwrap_or(false);
+    let opt = optimization_mode().unwrap_or(OptimizeMode::Debug);
 
     eprintln!(
-        "ghostty-vt: simd: {}, optimize: {opt_str}",
+        "ghostty-vt: simd: {}, optimize: {opt:?}",
         if simd { "enabled" } else { "disabled" }
     );
 }
 
 // ioctl wrapper
 nix::ioctl_write_ptr_bad!(tiocswinsz, libc::TIOCSWINSZ, nix::pty::Winsize);
+
+// ---------------------------------------------------------------------------
+// Effects
+// ---------------------------------------------------------------------------
+
+// TODO: Port to native types
+fn get_device_attributes() -> Option<ffi::GhosttyDeviceAttributes> {
+    let mut da1_features = [0u16; 64];
+    da1_features[0] = ffi::GHOSTTY_DA_FEATURE_COLUMNS_132 as u16;
+    da1_features[1] = ffi::GHOSTTY_DA_FEATURE_SELECTIVE_ERASE as u16;
+    da1_features[2] = ffi::GHOSTTY_DA_FEATURE_ANSI_COLOR as u16;
+
+    Some(ffi::GhosttyDeviceAttributes {
+        // DA1: VT220-level with a few common features.
+        primary: ffi::GhosttyDeviceAttributesPrimary {
+            conformance_level: ffi::GHOSTTY_DA_CONFORMANCE_VT220 as u16,
+            features: da1_features,
+            num_features: 3,
+        },
+
+        // DA2: VT220-type, version 1, no ROM cartridge.
+        secondary: ffi::GhosttyDeviceAttributesSecondary {
+            device_type: ffi::GHOSTTY_DA_DEVICE_TYPE_VT220 as u16,
+            firmware_version: 1,
+            rom_cartridge: 0,
+        },
+
+        // DA3: arbitrary unit id.
+        tertiary: ffi::GhosttyDeviceAttributesTertiary { unit_id: 0 },
+    })
+}
 
 // ---------------------------------------------------------------------------
 // Main
@@ -932,21 +921,22 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> Result<()> {
     log_build_info();
 
     let font_size: i32 = 16;
-    let (mut rl, thread) = raylib::init()
+    let (rl, thread) = raylib::init()
         .size(800, 600)
         .title("ghostling")
         .resizable()
         .build();
+    let rl = Rc::new(RefCell::new(rl));
 
-    rl.set_target_fps(60);
+    rl.borrow_mut().set_target_fps(60);
 
     // Use raylib's default font. Replace with LoadFontFromMemory() and an
     // embedded TTF (e.g. JetBrains Mono) for proper monospace rendering.
-    let mono_font = rl.get_font_default();
+    let mono_font = rl.borrow().get_font_default();
 
     // Measure a glyph to determine cell dimensions.
     let glyph_size = mono_font.measure_text("M", font_size as f32, 0.0);
@@ -954,41 +944,89 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cell_height = (glyph_size.y as i32).max(1);
 
     let pad = 4;
-    let scr_w = rl.get_screen_width();
-    let scr_h = rl.get_screen_height();
-    let term_cols = ((scr_w - 2 * pad) / cell_width).max(1) as u16;
-    let term_rows = ((scr_h - 2 * pad) / cell_height).max(1) as u16;
+    let scr_w = rl.borrow().get_screen_width();
+    let scr_h = rl.borrow().get_screen_height();
+    let term_cols = Rc::new(Cell::new(((scr_w - 2 * pad) / cell_width).max(1) as u16));
+    let term_rows = Rc::new(Cell::new(((scr_h - 2 * pad) / cell_height).max(1) as u16));
 
-    let mut terminal = Terminal::new(term_cols, term_rows, 1000)?;
+    let (pty_fd, child) = unsafe { pty_spawn(term_cols.get(), term_rows.get()) }
+        .map_err(|e| format!("forkpty failed: {e}"))?;
 
-    let (pty_fd, child) =
-        unsafe { pty_spawn(term_cols, term_rows) }.map_err(|e| format!("forkpty failed: {e}"))?;
+    let mut terminal = Terminal::new(TerminalOptions {
+        cols: term_cols.get(),
+        rows: term_rows.get(),
+        max_scrollback: 1000,
+    })?;
 
-    let mut key_encoder = KeyEncoder::new()?;
-    let mut key_event = KeyEvent::new()?;
-    let mut mouse_encoder = MouseEncoder::new()?;
-    let mut mouse_event = MouseEvent::new()?;
+    terminal
+        // write_pty effect — the terminal calls this whenever a VT sequence
+        // requires a response back to the application (device status reports,
+        // mode queries, device attributes, etc.).  Without this, programs like
+        // vim and tmux that probe terminal capabilities would hang.
+        .on_pty_write(|_term, data| {
+            pty_write(&pty_fd, data);
+        })?
+        // size effect — responds to XTWINOPS size queries (CSI 14/16/18 t)
+        // so programs can discover the terminal geometry in cells and pixels.
+        .on_size({
+            let term_cols = term_cols.clone();
+            let term_rows = term_rows.clone();
+            move |_term| {
+                // TODO
+                Some(ffi::GhosttySizeReportSize {
+                    rows: term_rows.get(),
+                    columns: term_cols.get(),
+                    cell_width: cell_width as u32,
+                    cell_height: cell_height as u32,
+                })
+            }
+        })?
+        // device_attributes effect — responds to DA1/DA2/DA3 queries so
+        // terminal applications can identify the terminal's capabilities.
+        // We report VT220-level conformance with a modest feature set.
+        .on_device_attributes(|_term| get_device_attributes())?
+        // xtversion effect — responds to CSI > q with our application name.
+        .on_xtversion(|_term| Some("ghostling-rs"))?
+        // title_changed effect — updates the raylib window title whenever the
+        // terminal receives an OSC 0 or OSC 2 title-setting sequence.
+        .on_title_changed(|term| {
+            let Ok(title) = term.title() else {
+                return;
+            };
+            rl.borrow().set_window_title(&thread, title);
+        })?
+        // color_scheme effect — responds to CSI ? 996 n.  Raylib has no API to
+        // query the OS color scheme, so we return false to silently ignore the
+        // query rather than guessing.
+        .on_color_scheme(|_term| None)?;
+
+    let mut key_encoder = key::Encoder::new()?;
+    let mut key_event = key::Event::new()?;
+    let mut mouse_encoder = mouse::Encoder::new()?;
+    let mut mouse_event = mouse::Event::new()?;
     let mut render_state = RenderState::new()?;
-    let mut row_iter = RenderStateRowIterator::new()?;
-    let mut row_cells = RenderStateRowCells::new()?;
+    let mut rows = RowIterator::new()?;
+    let mut cells = CellIterator::new()?;
 
     let mut prev_width = scr_w;
     let mut prev_height = scr_h;
-    let mut prev_focused = rl.is_window_focused();
+    let mut prev_focused = rl.borrow().is_window_focused();
     let mut scrollbar_dragging = false;
     let mut child_exited = false;
     let mut child_reaped = false;
     let mut child_exit_status: i32 = -1;
 
-    while !rl.window_should_close() {
+    while !rl.borrow().window_should_close() {
         // --- Resize ----------------------------------------------------------
-        if rl.is_window_resized() {
-            let w = rl.get_screen_width();
-            let h = rl.get_screen_height();
+        if rl.borrow().is_window_resized() {
+            let w = rl.borrow().get_screen_width();
+            let h = rl.borrow().get_screen_height();
             if w != prev_width || h != prev_height {
                 let cols = ((w - 2 * pad) / cell_width).max(1) as u16;
                 let rows = ((h - 2 * pad) / cell_height).max(1) as u16;
-                let _ = terminal.resize(cols, rows);
+                term_rows.set(rows);
+                term_cols.set(cols);
+                terminal.resize(cols, rows, cell_width as u32, cell_height as u32)?;
 
                 // Notify the pty of the new window size so the shell
                 // and child programs can reflow their output.
@@ -1006,20 +1044,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // --- Focus tracking --------------------------------------------------
-        let focused = rl.is_window_focused();
+        let focused = rl.borrow().is_window_focused();
         if focused != prev_focused {
             if !child_exited {
-                // Send focus gained/lost if the terminal has focus reporting
-                // enabled (DEC private mode 1004).
-                let focus_mode: ffi::GhosttyMode = (1 << 15) | 1004;
-                if let Ok(true) = terminal.mode_get(focus_mode) {
+                // Send focus gained/lost if the terminal has focus reporting enabled.
+                if let Ok(true) = terminal.mode(Mode::FocusEvent) {
                     let focus_event = if focused {
-                        ffi::GhosttyFocusEvent_GHOSTTY_FOCUS_GAINED
+                        focus::Event::Gained
                     } else {
-                        ffi::GhosttyFocusEvent_GHOSTTY_FOCUS_LOST
+                        focus::Event::Lost
                     };
                     let mut focus_buf = [0u8; 8];
-                    if let Ok(written) = ghostty::focus_encode(focus_event, &mut focus_buf) {
+                    if let Ok(written) = focus_event.encode(&mut focus_buf) {
                         if written > 0 {
                             pty_write(&pty_fd, &focus_buf[..written]);
                         }
@@ -1051,7 +1087,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // --- Scrollbar -------------------------------------------------------
         let scrollbar_consumed = handle_scrollbar(
-            &rl,
+            &rl.borrow(),
             &mut terminal,
             &mut render_state,
             &mut scrollbar_dragging,
@@ -1060,7 +1096,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         // --- Input -----------------------------------------------------------
         if !child_exited {
             handle_input(
-                &mut rl,
+                &mut rl.borrow_mut(),
                 &pty_fd,
                 &mut key_encoder,
                 &mut key_event,
@@ -1068,25 +1104,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             );
             if !scrollbar_consumed {
                 handle_mouse(
-                    &rl,
+                    &rl.borrow(),
                     &pty_fd,
                     &mut mouse_encoder,
                     &mut mouse_event,
                     &mut terminal,
-                    cell_width,
-                    cell_height,
-                    pad,
+                    cell_width as u32,
+                    cell_height as u32,
+                    pad as u32,
                 );
             }
         }
 
         // --- Update render state ---------------------------------------------
-        let _ = render_state.update(&mut terminal);
+        let snapshot = render_state.update(&mut terminal)?;
 
         // --- Draw ------------------------------------------------------------
-        let bg_colors = render_state
-            .colors_get()
-            .unwrap_or_else(|_| ffi::GhosttyRenderStateColors::default());
+        let bg_colors = snapshot.colors()?;
         let win_bg = Color::new(
             bg_colors.background.r,
             bg_colors.background.g,
@@ -1096,57 +1130,59 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         let scrollbar = terminal.scrollbar().ok();
 
-        let mut d = rl.begin_drawing(&thread);
-        d.clear_background(win_bg);
+        {
+            let mut rl = rl.borrow_mut();
+            let mut d = rl.begin_drawing(&thread);
+            d.clear_background(win_bg);
 
-        render_terminal(
-            &mut d,
-            &mut render_state,
-            &mut row_iter,
-            &mut row_cells,
-            &mono_font,
-            cell_width,
-            cell_height,
-            font_size,
-            scrollbar.as_ref(),
-        );
-
-        // Show an exit banner when the child process has terminated.
-        if child_exited {
-            let exit_msg = if child_exit_status >= 0 {
-                format!("[process exited with status {child_exit_status}]")
-            } else {
-                "[process exited]".to_owned()
-            };
-
-            let msg_size = mono_font.measure_text(&exit_msg, font_size as f32, 0.0);
-            let screen_w = d.get_screen_width();
-            let screen_h = d.get_screen_height();
-            let banner_h = msg_size.y as i32 + 8;
-
-            d.draw_rectangle(
-                0,
-                screen_h - banner_h,
-                screen_w,
-                banner_h,
-                Color::new(0, 0, 0, 180),
-            );
-            d.draw_text_ex(
+            render_terminal(
+                &mut d,
+                &snapshot,
+                &mut rows,
+                &mut cells,
                 &mono_font,
-                &exit_msg,
-                Vector2::new(
-                    (screen_w as f32 - msg_size.x) / 2.0,
-                    (screen_h - banner_h + 4) as f32,
-                ),
-                font_size as f32,
-                0.0,
-                Color::WHITE,
-            );
+                cell_width,
+                cell_height,
+                font_size,
+                scrollbar.as_ref(),
+            )?;
+
+            // Show an exit banner when the child process has terminated.
+            if child_exited {
+                let exit_msg = if child_exit_status >= 0 {
+                    format!("[process exited with status {child_exit_status}]")
+                } else {
+                    "[process exited]".to_owned()
+                };
+
+                let msg_size = mono_font.measure_text(&exit_msg, font_size as f32, 0.0);
+                let screen_w = d.get_screen_width();
+                let screen_h = d.get_screen_height();
+                let banner_h = msg_size.y as i32 + 8;
+
+                d.draw_rectangle(
+                    0,
+                    screen_h - banner_h,
+                    screen_w,
+                    banner_h,
+                    Color::new(0, 0, 0, 180),
+                );
+                d.draw_text_ex(
+                    &mono_font,
+                    &exit_msg,
+                    Vector2::new(
+                        (screen_w as f32 - msg_size.x) / 2.0,
+                        (screen_h - banner_h + 4) as f32,
+                    ),
+                    font_size as f32,
+                    0.0,
+                    Color::WHITE,
+                );
+            }
         }
     }
 
     // --- Cleanup -------------------------------------------------------------
-    drop(pty_fd);
     if !child_reaped {
         if !child_exited {
             _ = signal::kill(child, signal::SIGHUP);

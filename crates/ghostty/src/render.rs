@@ -6,6 +6,7 @@ use crate::{
     alloc::{Allocator, Object},
     error::{Error, Result, from_result},
     ffi,
+    screen::{Cell, Row},
     style::{RgbColor, Style},
     terminal::Terminal,
 };
@@ -417,7 +418,7 @@ impl<'alloc> RowIterator<'alloc> {
     pub fn update<'s>(
         &'s mut self,
         snapshot: &'s Snapshot<'alloc, 's>,
-    ) -> RowIteration<'alloc, 's> {
+    ) -> Result<RowIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -425,12 +426,12 @@ impl<'alloc> RowIterator<'alloc> {
                 std::ptr::from_mut(&mut self.0.ptr).cast(),
             )
         };
-        assert!(from_result(result).is_ok());
+        from_result(result)?;
 
-        RowIteration {
+        Ok(RowIteration {
             iter: self,
             _phan: PhantomData,
-        }
+        })
     }
 }
 
@@ -476,8 +477,9 @@ impl<'alloc, 's> RowIteration<'alloc, 's> {
         self.get(ffi::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_DIRTY)
     }
 
-    pub fn raw_row(&self) -> Result<ffi::GhosttyRow> {
+    pub fn raw_row(&self) -> Result<Row> {
         self.get(ffi::GhosttyRenderStateRowData_GHOSTTY_RENDER_STATE_ROW_DATA_RAW)
+            .map(Row)
     }
 
     pub fn set_dirty(&self, dirty: bool) -> Result<()> {
@@ -509,7 +511,7 @@ impl<'alloc> CellIterator<'alloc> {
     pub fn update<'s>(
         &'s mut self,
         row: &'s RowIteration<'alloc, 's>,
-    ) -> CellIteration<'alloc, 's> {
+    ) -> Result<CellIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
@@ -517,12 +519,12 @@ impl<'alloc> CellIterator<'alloc> {
                 std::ptr::from_mut(&mut self.0.ptr).cast(),
             )
         };
-        assert!(from_result(result).is_ok());
+        from_result(result)?;
 
-        CellIteration {
+        Ok(CellIteration {
             iter: self,
             _phan: PhantomData,
-        }
+        })
     }
 }
 
@@ -561,8 +563,9 @@ impl<'alloc, 's> CellIteration<'alloc, 's> {
         // SAFETY: Value should be initialized after successful call.
         Ok(unsafe { value.assume_init() })
     }
-    pub fn raw_cell(&self) -> Result<ffi::GhosttyCell> {
+    pub fn raw_cell(&self) -> Result<Cell> {
         self.get(ffi::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_RAW)
+            .map(Cell)
     }
 
     pub fn style(&self) -> Result<Style> {
@@ -578,10 +581,30 @@ impl<'alloc, 's> CellIteration<'alloc, 's> {
         Style::try_from(value)
     }
 
+    pub fn fg_color(&self) -> Result<Option<RgbColor>> {
+        let res = self.get::<ffi::GhosttyColorRgb>(
+            ffi::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_FG_COLOR,
+        );
+        match res {
+            Ok(o) => Ok(Some(o.into())),
+            Err(Error::InvalidValue) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn bg_color(&self) -> Result<Option<RgbColor>> {
+        let res = self.get::<ffi::GhosttyColorRgb>(
+            ffi::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_BG_COLOR,
+        );
+        match res {
+            Ok(o) => Ok(Some(o.into())),
+            Err(Error::InvalidValue) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
     pub fn graphemes(&self) -> Result<Vec<char>> {
-        let len = self.get(
-            ffi::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN,
-        )?;
+        let len = self.graphemes_len()?;
         let mut graphemes = Vec::<char>::with_capacity(len);
 
         let result = unsafe {
@@ -593,6 +616,12 @@ impl<'alloc, 's> CellIteration<'alloc, 's> {
         };
         from_result(result)?;
         Ok(graphemes)
+    }
+
+    pub fn graphemes_len(&self) -> Result<usize> {
+        self.get(
+            ffi::GhosttyRenderStateRowCellsData_GHOSTTY_RENDER_STATE_ROW_CELLS_DATA_GRAPHEMES_LEN,
+        )
     }
 }
 

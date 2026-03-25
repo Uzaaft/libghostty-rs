@@ -341,9 +341,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
     /// returned when no title has been set.
     pub fn title(&self) -> Result<&str> {
-        let str = self.get::<ffi::GhosttyString>(
-            ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING,
-        )?;
+        let str =
+            self.get::<ffi::GhosttyString>(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_TITLE)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
         // while we uphold that no mutation could happen during its lifetime.
         let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
@@ -482,7 +481,7 @@ pub enum Mode {
     Origin = 6,
     Wraparound = 7,
     Autorepeat = 8,
-    X1innerMouse = 9,
+    X10Mouse = 9,
     CursorBlinking = 12,
     CursorVisible = 25,
     EnableMode3 = 40,

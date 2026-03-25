@@ -87,7 +87,7 @@ impl<'t> GridRef<'t> {
 /// The internal layout is opaque and must be queried via its methods.
 /// Obtain cell values from terminal query APIs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Row(ffi::GhosttyRow);
+pub struct Row(pub(crate) ffi::GhosttyRow);
 
 impl Row {
     fn get<T>(&self, tag: ffi::GhosttyRowData) -> Result<T> {
@@ -141,7 +141,7 @@ impl Row {
 /// The internal layout is opaque and must be queried via its methods.
 /// Obtain cell values from terminal query APIs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Cell(ffi::GhosttyCell);
+pub struct Cell(pub(crate) ffi::GhosttyCell);
 
 impl Cell {
     fn get<T>(&self, tag: ffi::GhosttyCellData) -> Result<T> {
