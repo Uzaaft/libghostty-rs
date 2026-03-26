@@ -33,7 +33,7 @@ pub struct GridRef<'t> {
     pub(crate) _phan: PhantomData<&'t ffi::GhosttyTerminal>,
 }
 
-impl<'t> GridRef<'t> {
+impl GridRef<'_> {
     /// Get the row from a grid reference.
     pub fn row(&self) -> Result<Row> {
         let mut v = ffi::GhosttyRow::default();

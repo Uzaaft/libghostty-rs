@@ -55,7 +55,7 @@ impl<'alloc> Parser<'alloc> {
         unsafe { ffi::ghostty_osc_next(self.ptr.as_ptr(), byte) }
     }
 
-    pub fn end<'p>(&'p mut self, terminator: u8) -> Command<'p, 'alloc> {
+    pub fn end(&mut self, terminator: u8) -> Command<'_, 'alloc> {
         let raw = unsafe { ffi::ghostty_osc_end(self.ptr.as_ptr(), terminator) };
         Command {
             ptr: raw,

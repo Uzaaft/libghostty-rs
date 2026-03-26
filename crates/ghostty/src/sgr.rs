@@ -111,7 +111,7 @@ impl<'alloc> Parser<'alloc> {
     ///
     /// This cannot be expressed as a regular iterator since the returned
     /// attribute borrows memory from the parser directly.
-    pub fn next<'p>(&'p mut self) -> Result<Option<Attribute<'p>>> {
+    pub fn next(&mut self) -> Result<Option<Attribute<'_>>> {
         let mut raw_attr = ffi::GhosttySgrAttribute::default();
         let has_next = unsafe { ffi::ghostty_sgr_next(self.ptr.as_ptr(), &mut raw_attr) };
         if has_next {

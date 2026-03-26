@@ -261,7 +261,7 @@ impl<'alloc> RenderState<'alloc> {
         Ok(Self(Object::new(raw)?))
     }
 
-    pub fn update<'s>(&'s mut self, terminal: &Terminal<'_, '_>) -> Result<Snapshot<'alloc, 's>> {
+    pub fn update(&mut self, terminal: &Terminal<'_, '_>) -> Result<Snapshot<'alloc, '_>> {
         let result =
             unsafe { ffi::ghostty_render_state_update(self.0.as_raw(), terminal.inner.as_raw()) };
         from_result(result)?;
@@ -275,7 +275,7 @@ impl Drop for RenderState<'_> {
     }
 }
 
-impl<'alloc, 's> Snapshot<'alloc, 's> {
+impl Snapshot<'_, '_> {
     fn get<T>(&self, tag: ffi::GhosttyRenderStateData) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
@@ -415,10 +415,10 @@ impl<'alloc> RowIterator<'alloc> {
         Ok(Self(Object::new(raw)?))
     }
 
-    pub fn update<'s>(
-        &'s mut self,
-        snapshot: &'s Snapshot<'alloc, 's>,
-    ) -> Result<RowIteration<'alloc, 's>> {
+    pub fn update(
+        &mut self,
+        snapshot: &Snapshot<'alloc, '_>,
+    ) -> Result<RowIteration<'alloc, '_>> {
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -441,7 +441,7 @@ impl Drop for RowIterator<'_> {
     }
 }
 
-impl<'alloc, 's> RowIteration<'alloc, 's> {
+impl RowIteration<'_, '_> {
     // Can't actually implement Iterator - this is lending.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&Self> {
@@ -508,10 +508,10 @@ impl<'alloc> CellIterator<'alloc> {
         Ok(Self(Object::new(raw)?))
     }
 
-    pub fn update<'s>(
-        &'s mut self,
-        row: &'s RowIteration<'alloc, 's>,
-    ) -> Result<CellIteration<'alloc, 's>> {
+    pub fn update(
+        &mut self,
+        row: &RowIteration<'alloc, '_>,
+    ) -> Result<CellIteration<'alloc, '_>> {
         let result = unsafe {
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
@@ -534,7 +534,7 @@ impl Drop for CellIterator<'_> {
     }
 }
 
-impl<'alloc, 's> CellIteration<'alloc, 's> {
+impl CellIteration<'_, '_> {
     // Can't actually implement Iterator - this is lending.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&Self> {

@@ -672,7 +672,7 @@ macro_rules! handlers {
             $($name: Option<::std::boxed::Box<dyn $fnty<'alloc, 'cb>>>),*
         }
 
-        impl<'alloc, 'cb> Default for VTable<'alloc, 'cb> {
+        impl Default for VTable<'_, '_> {
             fn default() -> Self {
                 Self {
                     $($name: None),*

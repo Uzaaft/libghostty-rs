@@ -29,7 +29,7 @@ pub struct Allocator<'ctx, Ctx: 'ctx = ()> {
     _phan: PhantomData<&'ctx Ctx>,
 }
 
-impl<'ctx, Ctx> Allocator<'ctx, Ctx> {
+impl<Ctx> Allocator<'_, Ctx> {
     pub(crate) fn to_raw(&self) -> *const GhosttyAllocator {
         std::ptr::from_ref(&self.inner)
     }
@@ -43,7 +43,7 @@ pub(crate) struct Object<'alloc, T> {
     _phan: PhantomData<&'alloc GhosttyAllocator>,
 }
 
-impl<'alloc, T> Object<'alloc, T> {
+impl<T> Object<'_, T> {
     pub(crate) fn new(raw: *mut T) -> Result<Self> {
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         Ok(Self {
