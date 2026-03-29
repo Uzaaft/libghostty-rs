@@ -34,6 +34,27 @@ pub struct GridRef<'t> {
 }
 
 impl GridRef<'_> {
+    /// Create a new grid reference at a different column but the same row.
+    ///
+    /// This reuses the internal row node pointer, avoiding a full grid
+    /// lookup per column when iterating cells in a row.
+    ///
+    /// The returned `GridRef` aliases the same underlying row node.
+    /// The caller must ensure the original `GridRef` (and the terminal
+    /// it was obtained from) remains valid for the lifetime of the copy.
+    #[must_use]
+    pub fn with_x(&self, x: u16) -> GridRef<'_> {
+        GridRef {
+            inner: ffi::GhosttyGridRef {
+                size: self.inner.size,
+                node: self.inner.node,
+                x,
+                y: self.inner.y,
+            },
+            _phan: self._phan,
+        }
+    }
+
     /// Get the row from a grid reference.
     pub fn row(&self) -> Result<Row> {
         let mut v = ffi::GhosttyRow::default();

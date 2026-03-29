@@ -52,15 +52,21 @@ pub use ffi::GhosttySizeReportSize as SizeReportSize;
 /// due to Rust's much stricter safety guarantees. In turn, we use the
 /// user data internally for callback dispatch purposes.
 ///
-/// You should instead use idiomatic Rust mechanisms like [`Rc`](std::rc::Rc)s
-/// to hold common, mutable state between callbacks (which is perfectly safe,
-/// since everything is run on a single thread within a single `vt_write` call),
-/// or with some other type with interior mutability.
+/// You should instead use idiomatic Rust mechanisms like
+/// [`Arc<Mutex<T>>`](std::sync::Arc) to hold common, mutable state between
+/// callbacks, or with some other `Send` type with interior mutability.
+///
+/// Note: `Terminal` is `Send` (but not `Sync`), meaning it can be moved
+/// between threads but not shared. Since callbacks are stored inside the
+/// terminal, they must also be `Send`. This means you cannot use
+/// [`Rc`](std::rc::Rc) or [`Cell`](std::cell::Cell) for shared callback
+/// state; use [`Arc`](std::sync::Arc) and [`Mutex`](std::sync::Mutex)
+/// instead.
 ///
 /// ## Example: Registering effects and processing VT data
 ///
 /// ```rust
-/// use std::{cell::Cell, rc::Rc};
+/// use std::sync::{Arc, Mutex};
 /// use libghostty_vt::{Terminal, TerminalOptions};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -71,7 +77,7 @@ pub use ffi::GhosttySizeReportSize as SizeReportSize;
 /// })?;
 ///
 /// // Set up a simple bell counter
-/// let bell_count = Rc::new(Cell::new(0usize));
+/// let bell_count = Arc::new(Mutex::new(0usize));
 /// terminal
 ///     .on_pty_write(|_term, data| {
 ///         println!("Replying {} bytes to the PTY", data.len());
@@ -79,8 +85,9 @@ pub use ffi::GhosttySizeReportSize as SizeReportSize;
 ///    .on_bell({
 ///        let bell_count = bell_count.clone();
 ///        move |_term| {
-///            bell_count.update(|v| v + 1);
-///            println!("Bell! (count = {})", bell_count.get())
+///            let mut count = bell_count.lock().unwrap();
+///            *count += 1;
+///            println!("Bell! (count = {})", *count)
 ///        }
 ///     })?
 ///    .on_title_changed(|term| {
@@ -102,7 +109,7 @@ pub use ffi::GhosttySizeReportSize as SizeReportSize;
 /// // 4. Another bell to show the counter increments
 /// terminal.vt_write(b"\x07");
 ///
-/// assert_eq!(bell_count.get(), 2);
+/// assert_eq!(*bell_count.lock().unwrap(), 2);
 /// # Ok(())}
 /// ```
 #[derive(Debug)]
@@ -384,6 +391,13 @@ impl Drop for Terminal<'_, '_> {
     }
 }
 
+// SAFETY: The Terminal handle is an opaque pointer to heap-allocated C data.
+// Moving it between threads is safe as long as it is not accessed concurrently,
+// which is enforced by Terminal being !Sync.
+// The VTable stores only Send callbacks (enforced by the Send bound on
+// callback traits), so the entire Terminal is safe to send.
+unsafe impl Send for Terminal<'_, '_> {}
+
 /// A point in the terminal grid.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Point {
@@ -432,9 +446,9 @@ impl From<Point> for ffi::GhosttyPoint {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PointCoordinate {
     /// Column (0-indexed).
-    x: u16,
+    pub x: u16,
     /// Row (0-indexed). May exceed page size for screen/history tags.
-    y: u32,
+    pub y: u32,
 }
 impl From<PointCoordinate> for ffi::GhosttyPointCoordinate {
     fn from(value: PointCoordinate) -> Self {
@@ -874,14 +888,14 @@ macro_rules! handlers {
                 $(for<$lf>)? FnMut(
                     &$($lf)? $crate::terminal::Terminal<'alloc, 'cb>,
                     $($fty),*
-                ) $(-> $rty)? + 'cb {}
+                ) $(-> $rty)? + Send + 'cb {}
 
             impl<'alloc, 'cb, F> $fnty<'alloc, 'cb> for F
             where
                 F: $(for<$lf>)? FnMut(
                     &$($lf)? $crate::terminal::Terminal<'alloc, 'cb>,
                     $($fty),*
-                ) $(-> $rty)? + 'cb
+                ) $(-> $rty)? + Send + 'cb
             {}
         )*
 

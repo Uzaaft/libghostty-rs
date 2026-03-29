@@ -18,9 +18,14 @@
 //!
 //! # Thread safety
 //!
-//! All `libghostty-vt` objects are **not** thread-safe, and have been marked
-//! `!Send + !Sync` accordingly. The expectation is for them to be managed
-//! by a single thread, that may communicate with other threads via channels.
+//! Most `libghostty-vt` objects are `!Send + !Sync` and should be managed
+//! by a single thread.
+//!
+//! [`Terminal`] is the exception: it is `Send` but not `Sync`. This means a
+//! terminal can be moved between threads (e.g. across `.await` points in a
+//! tokio task) but cannot be shared concurrently. Callback closures registered
+//! on the terminal must be `Send` as well; use [`Arc<Mutex<T>>`](std::sync::Arc)
+//! rather than `Rc<Cell<T>>` for shared mutable state in callbacks.
 #![warn(clippy::pedantic)]
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
