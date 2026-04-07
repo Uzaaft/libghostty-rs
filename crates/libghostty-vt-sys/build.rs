@@ -18,7 +18,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=HOST");
-    println!("cargo:rerun-if-changed=crates/libghostty-vt-sys/build.rs");
+    println!("cargo:rerun-if-changed=build.rs");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let target = env::var("TARGET").expect("TARGET must be set");
