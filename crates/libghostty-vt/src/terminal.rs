@@ -1145,6 +1145,7 @@ handlers! {
 mod tests {
     use super::*;
     use std::cell::Cell;
+    use std::mem::ManuallyDrop;
     use std::rc::Rc;
 
     #[inline(never)]
@@ -1177,37 +1178,61 @@ mod tests {
         terminal
     }
 
-    /// Force a guaranteed relocation by pushing into a Vec that must
-    /// reallocate, then verify the callback still fires.
+    /// Move a value into distinct heap storage with an explicit byte-for-byte
+    /// relocation so the test does not rely on optimizer or allocator behavior.
+    fn relocate_into_new_box<T>(value: T) -> (Box<T>, usize, usize) {
+        // Keep the source allocation alive without running T's destructor.
+        // We need the bytes to remain initialized until after the copy.
+        let src = Box::new(ManuallyDrop::new(value));
+        let src_addr = std::ptr::from_ref(&**src).cast::<T>() as usize;
+
+        unsafe {
+            let dst_layout = std::alloc::Layout::new::<T>();
+            let dst_ptr = std::alloc::alloc(dst_layout).cast::<T>();
+            if dst_ptr.is_null() {
+                std::alloc::handle_alloc_error(dst_layout);
+            }
+
+            let dst_addr = dst_ptr as usize;
+            assert_ne!(
+                src_addr, dst_addr,
+                "test setup failed: source and destination storage unexpectedly match"
+            );
+
+            // SAFETY: src points to a fully initialized T wrapped in
+            // ManuallyDrop, dst points to distinct uninitialized storage for
+            // exactly one T, and the regions do not overlap.
+            std::ptr::copy_nonoverlapping(
+                std::ptr::from_ref(&**src).cast::<T>(),
+                dst_ptr,
+                1,
+            );
+
+            // SAFETY: src was allocated as Box<ManuallyDrop<T>> and must be
+            // freed without dropping T because ownership was transferred by
+            // the raw byte copy above.
+            std::alloc::dealloc(
+                Box::into_raw(src).cast::<u8>(),
+                std::alloc::Layout::new::<ManuallyDrop<T>>(),
+            );
+
+            // SAFETY: We just initialized dst_ptr by copying a valid T into it,
+            // so it now owns exactly one initialized T allocation.
+            (Box::from_raw(dst_ptr), src_addr, dst_addr)
+        }
+    }
+
+    /// Explicitly relocate the Terminal into distinct storage, then verify the
+    /// callback still fires through the stable VTable userdata pointer.
     #[test]
-    fn callbacks_survive_vec_reallocation() {
+    fn callbacks_survive_explicit_relocation() {
         let callback_count = Rc::new(Cell::new(0usize));
-
-        // Start with capacity 1 so the second push forces reallocation,
-        // which memcpy's the first Terminal to a new heap address.
-        let mut terminals: Vec<Terminal<'static, 'static>> = Vec::with_capacity(1);
-        terminals.push(build_terminal(callback_count.clone()));
-
-        let addr_before = std::ptr::from_ref(&terminals[0]) as usize;
-
-        // Push a dummy terminal to force Vec reallocation.
-        terminals.push(
-            Terminal::new(Options {
-                cols: 80,
-                rows: 24,
-                max_scrollback: 1000,
-            })
-            .expect("terminal should initialize"),
-        );
-
-        let addr_after = std::ptr::from_ref(&terminals[0]) as usize;
-        assert_ne!(
-            addr_before, addr_after,
-            "Vec did not reallocate; test is not exercising the move"
-        );
+        let terminal = build_terminal(callback_count.clone());
+        let (mut terminal, addr_before, addr_after) = relocate_into_new_box(terminal);
+        assert_ne!(addr_before, addr_after);
 
         // Primary DA request (CSI c) should invoke on_device_attributes.
-        terminals[0].vt_write(b"\x1b[c");
+        terminal.vt_write(b"\x1b[c");
         assert_eq!(callback_count.get(), 1);
     }
 }
