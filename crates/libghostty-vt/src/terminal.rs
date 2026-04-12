@@ -914,10 +914,12 @@ macro_rules! handlers {
                     ud: *mut std::ffi::c_void,
                     $($rfname: $rfty),*
                 ) $(-> $rawrty)? {
-                    // SAFETY: USERDATA is set to the boxed VTable pointee before
-                    // the callback is registered. ghostty invokes callbacks
-                    // synchronously during vt_write, so the VTable remains alive
-                    // for the duration of this call.
+                    // SAFETY: USERDATA is set to the boxed VTable pointee
+                    // (derived from a mutable reference for write provenance)
+                    // before the callback is registered. ghostty invokes
+                    // callbacks synchronously during vt_write, so the VTable
+                    // remains alive and exclusively accessed for the duration
+                    // of this call.
                     let vtable = unsafe { &mut *ud.cast::<VTable<'_, '_>>() };
 
                     let obj = $crate::alloc::Object::new(t).expect("received null terminal ptr in callback - this is a bug!");
@@ -946,10 +948,12 @@ macro_rules! handlers {
                 // USERDATA is a raw pointer option: pass the heap allocation
                 // itself, not the address of the Box smart pointer field stored
                 // inline in Terminal.
-                self.set_ptr(
-                    $crate::ffi::TerminalOption::USERDATA,
-                    self.vtable.as_ref() as *const VTable<'alloc, 'cb> as *const ::std::ffi::c_void,
-                )?;
+                //
+                // Derive the pointer from a mutable reference so it carries
+                // write provenance – the callback later reborrows it as &mut.
+                let userdata = std::ptr::from_mut::<VTable<'alloc, 'cb>>(self.vtable.as_mut())
+                    as *const ::std::ffi::c_void;
+                self.set_ptr($crate::ffi::TerminalOption::USERDATA, userdata)?;
 
                 // The callback must be coerced into a function *pointer*
                 // and not a function *item* (which is a ZST whose address is meaningless).
@@ -1173,29 +1177,37 @@ mod tests {
         terminal
     }
 
-    #[inline(never)]
-    fn clobber_stack() {
-        let mut scratch = [0usize; 4096];
-        for (i, slot) in scratch.iter_mut().enumerate() {
-            *slot = i;
-        }
-        std::hint::black_box(scratch);
-    }
-
+    /// Force a guaranteed relocation by pushing into a Vec that must
+    /// reallocate, then verify the callback still fires.
     #[test]
-    fn callbacks_survive_terminal_moves() {
+    fn callbacks_survive_vec_reallocation() {
         let callback_count = Rc::new(Cell::new(0usize));
-        let mut terminal = build_terminal(callback_count.clone());
 
-        // Force some additional stack activity after the move out of
-        // build_terminal so stale stack pointers are more likely to break.
-        for _ in 0..32 {
-            clobber_stack();
-        }
+        // Start with capacity 1 so the second push forces reallocation,
+        // which memcpy's the first Terminal to a new heap address.
+        let mut terminals: Vec<Terminal<'static, 'static>> = Vec::with_capacity(1);
+        terminals.push(build_terminal(callback_count.clone()));
+
+        let addr_before = std::ptr::from_ref(&terminals[0]) as usize;
+
+        // Push a dummy terminal to force Vec reallocation.
+        terminals.push(
+            Terminal::new(Options {
+                cols: 80,
+                rows: 24,
+                max_scrollback: 1000,
+            })
+            .expect("terminal should initialize"),
+        );
+
+        let addr_after = std::ptr::from_ref(&terminals[0]) as usize;
+        assert_ne!(
+            addr_before, addr_after,
+            "Vec did not reallocate; test is not exercising the move"
+        );
 
         // Primary DA request (CSI c) should invoke on_device_attributes.
-        terminal.vt_write(b"\x1b[c");
-
+        terminals[0].vt_write(b"\x1b[c");
         assert_eq!(callback_count.get(), 1);
     }
 }
