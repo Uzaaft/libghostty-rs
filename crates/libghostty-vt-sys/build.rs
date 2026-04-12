@@ -4,7 +4,9 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "a1e75daef8b64426dbca551c6e41b1fbc2b7ae24";
+const GHOSTTY_COMMIT: &str = "01825411ab2720e47e6902e9464e805bc6a062a1";
+#[cfg(feature = "pkg-config")]
+const LIB_VERSION: &str = "0.1.0";
 
 fn main() {
     // docs.rs has no Zig toolchain. The checked-in bindings in src/bindings.rs
@@ -14,12 +16,32 @@ fn main() {
         return;
     }
 
-    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_NO_VENDOR");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=HOST");
     println!("cargo:rerun-if-changed=crates/libghostty-vt-sys/build.rs");
 
+    // When the pkg-config feature is enabled, try pkg-config first. If the
+    // library is already installed (or the NixOS pkg-config wrapper can find
+    // it), use that and skip the zig build entirely. On NixOS the wrapper
+    // also adds rpath automatically.
+    #[cfg(feature = "pkg-config")]
+    if let Ok(lib) = pkg_config::Config::new()
+        .atleast_version(LIB_VERSION)
+        .probe("libghostty-vt")
+    {
+        if let Some(include) = lib.include_paths.first() {
+            println!("cargo:include={}", include.display());
+        }
+        return;
+    }
+
+    build_vendored();
+}
+
+/// Build libghostty-vt from source via zig. The zig build itself
+/// generates a `libghostty-vt.pc` pkg-config file in `share/pkgconfig/`.
+fn build_vendored() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let target = env::var("TARGET").expect("TARGET must be set");
     let host = env::var("HOST").expect("HOST must be set");
@@ -80,6 +102,10 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=dylib=ghostty-vt");
+    println!(
+        "cargo:rustc-link-arg=-Wl,-rpath,{}",
+        lib_dir.display()
+    );
     println!("cargo:include={}", include_dir.display());
 }
 
