@@ -9,6 +9,9 @@ rust-version.workspace = true
 links = "ghostty-vt"
 build = "build.rs"
 
+[lib]
+doctest = false
+
 [features]
 default = ["vendored"]
 vendored = []
