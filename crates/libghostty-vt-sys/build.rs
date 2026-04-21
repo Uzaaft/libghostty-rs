@@ -21,10 +21,19 @@ fn main() {
     println!("cargo:rerun-if-env-changed=HOST");
     println!("cargo:rerun-if-changed=crates/libghostty-vt-sys/build.rs");
 
+    // An explicit source override should stay authoritative even when the
+    // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
+    // test against.
+    if env::var_os("GHOSTTY_SOURCE_DIR").is_some() {
+        build_vendored();
+        return;
+    }
+
     // When the pkg-config feature is enabled, try pkg-config first. If the
     // library is already installed (or the NixOS pkg-config wrapper can find
-    // it), use that and skip the zig build entirely. On NixOS the wrapper
-    // also adds rpath automatically.
+    // it), use that and skip the zig build entirely. This only applies when
+    // GHOSTTY_SOURCE_DIR is unset. On NixOS the wrapper also adds rpath
+    // automatically.
     #[cfg(feature = "pkg-config")]
     if let Ok(lib) = pkg_config::Config::new()
         .atleast_version(LIB_VERSION)
