@@ -161,7 +161,7 @@
 //!       // Look up the image and print its properties.
 //!       let image = graphics.image(image_id).unwrap();
 //!       println!(
-//!           "    image: number={} size={}x{} format={} data_len={}",
+//!           "    image: number={} size={}x{} format={:?} data_len={}",
 //!           image.number()?,
 //!           image.width()?,
 //!           image.height()?,
