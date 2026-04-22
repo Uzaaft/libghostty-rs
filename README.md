@@ -63,6 +63,20 @@ cargo test -p libghostty-vt-sys
 cargo build -p ghostling_rs
 ```
 
+### Miri Verification
+
+The workspace includes a dedicated nightly shell for Miri:
+
+```sh
+nix develop .#miri
+cargo miri test -p libghostty-vt-sys --lib
+cargo miri test -p libghostty-vt --lib
+```
+
+These checks intentionally stay on Rust-owned unsafe seams such as string,
+slice, and allocator plumbing. They do not execute the native Ghostty FFI
+backend.
+
 ### Running the example
 
 ```sh

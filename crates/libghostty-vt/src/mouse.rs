@@ -390,3 +390,66 @@ pub enum Button {
     Ten = ffi::MouseButton::TEN,
     Eleven = ffi::MouseButton::ELEVEN,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Action, Button, Encoder, EncoderSize, Event, Format, Position, TrackingMode};
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires native Ghostty FFI")]
+    fn mouse_encoder_writes_consistent_bytes_into_vec_and_fixed_buffer() {
+        let mut event = Event::new().expect("mouse event allocation should succeed");
+        let position = Position { x: 15.0, y: 25.0 };
+        event
+            .set_action(Action::Press)
+            .set_button(Some(Button::Left))
+            .set_position(position);
+
+        assert_eq!(event.action(), Action::Press);
+        assert_eq!(event.button(), Some(Button::Left));
+        let encoded_position = event.position();
+        assert_eq!(encoded_position.x, position.x);
+        assert_eq!(encoded_position.y, position.y);
+
+        let size = EncoderSize {
+            screen_width: 800,
+            screen_height: 600,
+            cell_width: 10,
+            cell_height: 20,
+            padding_top: 0,
+            padding_bottom: 0,
+            padding_right: 0,
+            padding_left: 0,
+        };
+
+        // Start with zero spare capacity so the wrapper has to retry after the
+        // native encoder reports how much space it needs.
+        let mut vec_output = Vec::new();
+        let mut vec_encoder = Encoder::new().expect("mouse encoder allocation should succeed");
+        vec_encoder
+            .set_tracking_mode(TrackingMode::Normal)
+            .set_format(Format::Sgr)
+            .set_size(size);
+        vec_encoder
+            .encode_to_vec(&event, &mut vec_output)
+            .expect("encoding into Vec should succeed");
+
+        let mut fixed_output = [0u8; 32];
+        let mut fixed_encoder = Encoder::new().expect("mouse encoder allocation should succeed");
+        fixed_encoder
+            .set_tracking_mode(TrackingMode::Normal)
+            .set_format(Format::Sgr)
+            .set_size(size);
+        let fixed_written = fixed_encoder
+            .encode(&event, &mut fixed_output)
+            .expect("encoding into a fixed buffer should succeed");
+
+        assert!(!vec_output.is_empty(), "native encoder should emit bytes");
+        assert!(fixed_written > 0, "fixed buffer path should report written bytes");
+        assert!(
+            fixed_written <= fixed_output.len(),
+            "written length must stay within the caller buffer"
+        );
+        assert_eq!(vec_output.as_slice(), &fixed_output[..fixed_written]);
+    }
+}

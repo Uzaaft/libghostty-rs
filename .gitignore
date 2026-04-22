@@ -3,3 +3,4 @@
 /.direnv/
 **/.zig-cache
 **/zig-out
+rustc-ice-*.txt

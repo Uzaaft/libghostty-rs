@@ -366,3 +366,78 @@ unsafe extern "C" fn _remap<A: alloc::Allocator>(
 unsafe fn get_allocator<'a, A: alloc::Allocator>(ptr: *mut c_void) -> Option<&'a A> {
     unsafe { ptr.cast::<A>().as_ref() }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::ptr::NonNull;
+
+    use super::{_global_alloc, _global_free, _global_remap};
+
+    // These tests stay entirely within Rust-owned allocator shims so Miri can
+    // validate the pointer and initialization flow without executing Ghostty.
+
+    #[test]
+    fn global_allocator_respects_requested_alignment() {
+        let len = 16usize;
+        let alignment_log2 = 4u8;
+        let expected_alignment = 1usize << alignment_log2;
+
+        let raw = unsafe { _global_alloc(std::ptr::null_mut(), len, alignment_log2, 0) };
+        let mem = NonNull::new(raw.cast::<u8>()).expect("global allocator returned null");
+
+        assert_eq!((mem.as_ptr() as usize) % expected_alignment, 0);
+
+        unsafe {
+            _global_free(
+                std::ptr::null_mut(),
+                mem.as_ptr().cast(),
+                len,
+                alignment_log2,
+                0,
+            )
+        };
+    }
+
+    #[test]
+    fn global_allocator_round_trip_preserves_written_bytes() {
+        let initial_len = 16usize;
+        let new_len = 32usize;
+        let alignment_log2 = 3u8;
+
+        let raw = unsafe { _global_alloc(std::ptr::null_mut(), initial_len, alignment_log2, 0) };
+        let mem = NonNull::new(raw.cast::<u8>()).expect("global allocator returned null");
+
+        let initial = unsafe { std::slice::from_raw_parts_mut(mem.as_ptr(), initial_len) };
+        for (index, byte) in initial.iter_mut().enumerate() {
+            *byte = index as u8;
+        }
+
+        let raw = unsafe {
+            _global_remap(
+                std::ptr::null_mut(),
+                mem.as_ptr().cast(),
+                initial_len,
+                alignment_log2,
+                new_len,
+                0,
+            )
+        };
+        let mem = NonNull::new(raw.cast::<u8>()).expect("global remap returned null");
+
+        let grown = unsafe { std::slice::from_raw_parts(mem.as_ptr(), new_len) };
+        for (index, byte) in grown[..initial_len].iter().copied().enumerate() {
+            assert_eq!(byte, index as u8);
+        }
+
+        unsafe {
+            _global_free(
+                std::ptr::null_mut(),
+                mem.as_ptr().cast(),
+                new_len,
+                alignment_log2,
+                0,
+            )
+        };
+    }
+
+}

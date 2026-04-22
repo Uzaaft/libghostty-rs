@@ -196,3 +196,26 @@ pub enum CommandType<'p> {
     ConemuComment,
     KittyTextSizing,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{CommandType, Parser};
+
+    // Exercises the real Parser → Command → get<T> wrapper code path.
+    // Under Miri the FFI shim provides the backing implementation, so this
+    // test validates the actual unsafe seam in Command::get rather than a
+    // fabricated reproduction.
+    #[test]
+    fn public_parser_api_preserves_change_window_title_contents() {
+        let mut parser = Parser::new().expect("OSC parser allocation should succeed");
+        for &byte in b"2;hello" {
+            parser.next_byte(byte);
+        }
+
+        let command = parser.end(0x07);
+        match command.command_type() {
+            CommandType::ChangeWindowTitle { title } => assert_eq!(title, "hello"),
+            other => panic!("expected title change command, got {other:?}"),
+        }
+    }
+}

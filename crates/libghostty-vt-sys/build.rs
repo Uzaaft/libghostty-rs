@@ -14,6 +14,13 @@ fn main() {
         return;
     }
 
+    // Under Miri the native Ghostty library cannot be loaded. Pure-Rust
+    // shims in src/shim.rs provide the FFI symbols instead, so we skip
+    // the entire Zig build and link step.
+    if env::var("CARGO_CFG_MIRI").is_ok() {
+        return;
+    }
+
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_NO_VENDOR");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");

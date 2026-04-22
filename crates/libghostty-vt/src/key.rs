@@ -645,3 +645,48 @@ bitflags::bitflags! {
         const ALL = ffi::KITTY_KEY_ALL;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Action, Encoder, Event, Key};
+
+    #[test]
+    #[cfg_attr(miri, ignore = "requires native Ghostty FFI")]
+    fn key_encoder_writes_consistent_bytes_into_vec_and_fixed_buffer() {
+        let mut event = Event::new().expect("key event allocation should succeed");
+        event
+            .set_action(Action::Press)
+            .set_key(Key::A)
+            .set_utf8(Some("a"))
+            .set_unshifted_codepoint('a');
+
+        assert_eq!(event.action(), Action::Press);
+        assert_eq!(event.key(), Key::A);
+        assert_eq!(event.utf8(), Some("a"));
+
+        // Start with zero spare capacity so the wrapper has to retry after the
+        // native encoder reports how much space it needs.
+        let mut vec_output = Vec::new();
+        Encoder::new()
+            .expect("key encoder allocation should succeed")
+            .encode_to_vec(&event, &mut vec_output)
+            .expect("encoding into Vec should succeed");
+
+        let mut fixed_output = [0u8; 32];
+        let fixed_written = Encoder::new()
+            .expect("key encoder allocation should succeed")
+            .encode(&event, &mut fixed_output)
+            .expect("encoding into a fixed buffer should succeed");
+
+        assert!(!vec_output.is_empty(), "native encoder should emit bytes");
+        assert!(
+            fixed_written > 0,
+            "fixed buffer path should report written bytes"
+        );
+        assert!(
+            fixed_written <= fixed_output.len(),
+            "written length must stay within the caller buffer"
+        );
+        assert_eq!(vec_output.as_slice(), &fixed_output[..fixed_written]);
+    }
+}
