@@ -61,7 +61,11 @@ checkout instead.
 
 The `pkg-config` path is opt-in. If you enable `libghostty-vt-sys/pkg-config`,
 the build will prefer an installed `libghostty-vt` discovered through
-`pkg-config` only when `GHOSTTY_SOURCE_DIR` is unset. An explicit
+`pkg-config` only when `GHOSTTY_SOURCE_DIR` is unset and the discovered native
+library matches the checked-in bindings. Native builds validate this through
+`ghostty_type_json()` plus a required-symbol probe. If validation fails, or if
+the build is cross-compiling and cannot run the host-side probe, the build
+falls back to the vendored Ghostty source instead. An explicit
 `GHOSTTY_SOURCE_DIR` always wins.
 
 ```sh
