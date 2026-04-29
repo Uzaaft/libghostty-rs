@@ -54,7 +54,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Building
 
-Requires [Zig](https://ziglang.org/) 0.15.x on PATH. The ghostty source is fetched automatically at build time (pinned commit in `build.rs`). Set `GHOSTTY_SOURCE_DIR` to use a local checkout instead.
+Requires [Zig](https://ziglang.org/) 0.15.x on PATH. By default, the ghostty
+source is fetched automatically at build time from the pinned commit in
+`build.rs`. Set `GHOSTTY_SOURCE_DIR` to make the build use a local Ghostty
+checkout instead.
+
+The `pkg-config` path is opt-in. If you enable `libghostty-vt-sys/pkg-config`,
+the build will prefer an installed `libghostty-vt` discovered through
+`pkg-config` when `GHOSTTY_SOURCE_DIR` is unset. libghostty-vt is pre-1.0, so
+the checked-in bindings are expected to move with the pinned Ghostty source and
+do not guarantee compatibility with arbitrary installed C API revisions. An
+explicit `GHOSTTY_SOURCE_DIR` always wins.
 
 ```sh
 nix develop

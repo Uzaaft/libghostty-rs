@@ -9,6 +9,7 @@ use crate::{
     alloc::{Allocator, Bytes, Object},
     error::{Error, Result, from_result},
     ffi,
+    screen::Selection,
     terminal::Terminal,
 };
 
@@ -20,19 +21,23 @@ pub struct Formatter<'t, 'alloc: 'cb, 'cb: 't> {
 }
 
 /// Options for creating a terminal formatter.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FormatterOptions {
+#[derive(Debug)]
+pub struct FormatterOptions<'t> {
     /// Output format to emit.
     pub format: Format,
     /// Whether to trim trailing whitespace on non-blank lines.
     pub trim: bool,
     /// Whether to unwrap soft-wrapped lines.
     pub unwrap: bool,
+    /// Optional selection to restrict output to a range.
+    ///
+    /// If `None`, the entire screen is formatted.
+    pub selection: Option<Selection<'t>>,
 }
 
 impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// Create a formatter for a terminal's active screen.
-    pub fn new(terminal: &'t Terminal<'alloc, 'cb>, opts: FormatterOptions) -> Result<Self> {
+    pub fn new(terminal: &'t Terminal<'alloc, 'cb>, opts: FormatterOptions<'t>) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_inner(std::ptr::null(), terminal, opts) }
     }
@@ -41,8 +46,8 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc, Ctx>(
-        alloc: &'alloc Allocator<'ctx, Ctx>,
+    pub fn new_with_alloc<'ctx: 'alloc>(
+        alloc: &'alloc Allocator<'ctx>,
         terminal: &'t Terminal<'alloc, 'cb>,
         opts: FormatterOptions,
     ) -> Result<Self> {
@@ -56,6 +61,20 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         opts: FormatterOptions,
     ) -> Result<Self> {
         let mut raw: ffi::Formatter = std::ptr::null_mut();
+        let selection = opts.selection.map(Into::into);
+
+        let opts = ffi::FormatterTerminalOptions {
+            emit: opts.format.into(),
+            trim: opts.trim,
+            extra: ffi::FormatterTerminalExtra::default(),
+            unwrap: opts.unwrap,
+            selection: match selection {
+                Some(s) => &raw const s,
+                None => std::ptr::null(),
+            },
+            ..ffi::sized!(ffi::FormatterTerminalOptions)
+        };
+
         let result = unsafe {
             ffi::ghostty_formatter_terminal_new(
                 alloc,
@@ -76,9 +95,9 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     ///
     /// Each call formats the current terminal state. The buffer is allocated
     /// using the provided allocator (or the default allocator if `None`).
-    pub fn format_alloc<'a, 'ctx: 'a, Ctx>(
+    pub fn format_alloc<'a, 'ctx: 'a>(
         &mut self,
-        alloc: Option<&'a Allocator<'ctx, Ctx>>,
+        alloc: Option<&'a Allocator<'ctx>>,
     ) -> Result<Bytes<'a>> {
         let alloc = if let Some(alloc) = alloc {
             alloc.to_raw()
@@ -147,18 +166,6 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
 impl Drop for Formatter<'_, '_, '_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_formatter_free(self.inner.as_raw()) }
-    }
-}
-
-impl From<FormatterOptions> for ffi::FormatterTerminalOptions {
-    fn from(value: FormatterOptions) -> Self {
-        Self {
-            size: std::mem::size_of::<ffi::FormatterTerminalOptions>(),
-            emit: value.format.into(),
-            trim: value.trim,
-            extra: ffi::FormatterTerminalExtra::default(),
-            unwrap: value.unwrap,
-        }
     }
 }
 

@@ -69,6 +69,14 @@ pub fn minor_version() -> Result<usize> {
 pub fn patch_version() -> Result<usize> {
     build_info(Info::VERSION_PATCH)
 }
+/// The pre metadata string (e.g. "alpha", "beta", "dev").
+///
+/// Has zero length if no pre metadata is present.
+pub fn pre_version() -> Result<&'static str> {
+    build_info::<ffi::String>(Info::VERSION_PRE)
+        // SAFETY: API guarantees
+        .map(|s| unsafe { s.to_str() })
+}
 /// The build metadata string (e.g. commit hash).
 ///
 /// Has zero length if no build metadata is present.

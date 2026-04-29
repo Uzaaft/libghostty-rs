@@ -106,6 +106,7 @@ const PREFIXES: &[(&str, &str)] = &[
     ("GhosttyModeReportState", "GHOSTTY_MODE_REPORT"),
     ("GhosttyFocusEvent", "GHOSTTY_FOCUS"),
     ("GhosttyResult", "GHOSTTY_"),
+    ("GhosttyKittyGraphicsImageData", "GHOSTTY_KITTY_IMAGE_DATA"),
 ];
 
 #[derive(Debug)]

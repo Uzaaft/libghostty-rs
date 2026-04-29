@@ -11,6 +11,19 @@ use crate::{
     style::{self, PaletteIndex, RgbColor, Style},
 };
 
+/// Terminal screen identifier.
+///
+/// Identifies which screen buffer is active in the terminal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum Screen {
+    /// The primary (normal) screen.
+    #[default]
+    Primary = ffi::TerminalScreen::PRIMARY,
+    /// The alternate screen.
+    Alternate = ffi::TerminalScreen::ALTERNATE,
+}
+
 /// Resolved reference to a terminal cell position.
 ///
 /// A grid reference is a resolved reference to a specific cell position in
@@ -34,6 +47,13 @@ pub struct GridRef<'t> {
 }
 
 impl GridRef<'_> {
+    pub(crate) unsafe fn from_raw(inner: ffi::GridRef) -> Self {
+        Self {
+            inner,
+            _phan: PhantomData,
+        }
+    }
+
     /// Get the row from a grid reference.
     pub fn row(&self) -> Result<Row> {
         let mut v = ffi::Row::default();
@@ -74,6 +94,28 @@ impl GridRef<'_> {
         let mut len = 0;
         let result = unsafe {
             ffi::ghostty_grid_ref_graphemes(
+                std::ptr::from_ref(&self.inner),
+                std::ptr::from_mut(buf).cast(),
+                buf.len(),
+                &raw mut len,
+            )
+        };
+        from_result_with_len(result, len)
+    }
+
+    /// Get the hyperlink URI for the cell at the grid reference's position.
+    ///
+    /// Writes the URI bytes into the provided buffer.
+    /// If the cell has no hyperlink, `Ok(0)` is returned.
+    ///
+    /// If the buffer is too small, the function returns
+    /// `Err(Error::OutOfSpace { required })` where `required` is the
+    /// required number of codepoints. The caller can then retry with
+    /// a sufficiently sized buffer.
+    pub fn hyperlink_uri(&self, buf: &mut [u8]) -> Result<usize> {
+        let mut len = 0;
+        let result = unsafe {
+            ffi::ghostty_grid_ref_hyperlink_uri(
                 std::ptr::from_ref(&self.inner),
                 std::ptr::from_mut(buf).cast(),
                 buf.len(),
@@ -204,6 +246,36 @@ impl Cell {
     /// Only valid when [`Cell::content_tag`] is [`CellContentTag::BgColorRgb`].
     pub fn bg_color_rgb(self) -> Result<RgbColor> {
         Ok(self.get::<ffi::ColorRgb>(ffi::CellData::COLOR_RGB)?.into())
+    }
+}
+
+/// A selection range defined by two grid references.
+#[derive(Debug)]
+pub struct Selection<'t> {
+    /// Start of the selection range (inclusive).
+    pub start: GridRef<'t>,
+    /// End of the selection range (inclusive).
+    pub end: GridRef<'t>,
+    /// Whether the selection is rectangular (block) rather than linear.
+    pub rectangle: bool,
+}
+impl From<Selection<'_>> for ffi::Selection {
+    fn from(value: Selection<'_>) -> Self {
+        Self {
+            start: value.start.inner,
+            end: value.end.inner,
+            rectangle: value.rectangle,
+            ..ffi::sized!(ffi::Selection)
+        }
+    }
+}
+impl Selection<'_> {
+    pub(crate) unsafe fn from_raw(value: ffi::Selection) -> Self {
+        Self {
+            start: unsafe { GridRef::from_raw(value.start) },
+            end: unsafe { GridRef::from_raw(value.end) },
+            rectangle: value.rectangle,
+        }
     }
 }
 

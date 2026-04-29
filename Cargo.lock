@@ -221,7 +221,7 @@ dependencies = [
  "byteorder",
  "color_quant",
  "num-traits",
- "png",
+ "png 0.17.16",
 ]
 
 [[package]]
@@ -259,6 +259,8 @@ dependencies = [
  "bitflags 2.11.0",
  "int-enum",
  "libghostty-vt-sys",
+ "log",
+ "png 0.18.1",
 ]
 
 [[package]]
@@ -268,6 +270,7 @@ dependencies = [
  "bindgen",
  "heck",
  "libc",
+ "pkg-config",
 ]
 
 [[package]]
@@ -396,12 +399,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "pkg-config"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
+
+[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "82151a2fc869e011c153adc57cf2789ccb8d9906ce52c0b39a6b5697749d7526"
 dependencies = [
  "bitflags 1.3.2",
+ "crc32fast",
+ "fdeflate",
+ "flate2",
+ "miniz_oxide",
+]
+
+[[package]]
+name = "png"
+version = "0.18.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60769b8b31b2a9f263dae2776c37b1b28ae246943cf719eb6946a1db05128a61"
+dependencies = [
+ "bitflags 2.11.0",
  "crc32fast",
  "fdeflate",
  "flate2",

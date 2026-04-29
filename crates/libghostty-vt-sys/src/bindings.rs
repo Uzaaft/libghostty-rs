@@ -91,7 +91,86 @@ pub mod Result {
     pub const OUT_OF_SPACE: Type = -3;
     #[doc = " The requested value has no value"]
     pub const NO_VALUE: Type = -4;
+    #[doc = " The requested value has no value"]
+    pub const RESULT_MAX_VALUE: Type = 2147483647;
 }
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct TerminalImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to a terminal instance.\n"]
+pub type Terminal = *mut TerminalImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct KittyGraphicsImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to a Kitty graphics image storage.\n\n Obtained via ghostty_terminal_get() with\n GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS. The pointer is borrowed from\n the terminal and remains valid until the next mutating terminal call\n (e.g. ghostty_terminal_vt_write() or ghostty_terminal_reset()).\n"]
+pub type KittyGraphics = *mut KittyGraphicsImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct KittyGraphicsImageImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to a Kitty graphics image.\n\n Obtained via ghostty_kitty_graphics_image() with an image ID. The\n pointer is borrowed from the storage and remains valid until the next\n mutating terminal call.\n"]
+pub type KittyGraphicsImage = *const KittyGraphicsImageImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct KittyGraphicsPlacementIteratorImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to a Kitty graphics placement iterator.\n"]
+pub type KittyGraphicsPlacementIterator = *mut KittyGraphicsPlacementIteratorImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RenderStateImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to a render state instance.\n"]
+pub type RenderState = *mut RenderStateImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RenderStateRowIteratorImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to a render-state row iterator.\n"]
+pub type RenderStateRowIterator = *mut RenderStateRowIteratorImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct RenderStateRowCellsImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to render-state row cells.\n"]
+pub type RenderStateRowCells = *mut RenderStateRowCellsImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SgrParserImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to an SGR parser instance.\n\n This handle represents an SGR (Select Graphic Rendition) parser that can\n be used to parse SGR sequences and extract individual text attributes.\n"]
+pub type SgrParser = *mut SgrParserImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct FormatterImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to a formatter instance.\n"]
+pub type Formatter = *mut FormatterImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct OscParserImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to an OSC parser instance.\n\n This handle represents an OSC (Operating System Command) parser that can\n be used to parse the contents of OSC sequences.\n"]
+pub type OscParser = *mut OscParserImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct OscCommandImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to a single OSC command.\n\n This handle represents a parsed OSC (Operating System Command) command.\n The command can be queried for its type and associated data.\n"]
+pub type OscCommand = *mut OscCommandImpl;
 #[doc = " A borrowed byte string (pointer + length).\n\n The memory is not owned by this struct. The pointer is only valid\n for the lifetime documented by the API that produces or consumes it."]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -116,6 +195,10 @@ impl Default for String {
             s.assume_init()
         }
     }
+}
+unsafe extern "C" {
+    #[doc = " Return a pointer to a null-terminated JSON string describing the\n layout of every C API struct for the current target.\n\n This is primarily useful for language bindings that can't easily\n set C struct fields and need to do so via byte offsets. For example,\n WebAssembly modules can't share struct definitions with the host.\n\n Example (abbreviated):\n {\n   \"GhosttyMouseEncoderSize\": {\n     \"size\": 40,\n     \"align\": 8,\n     \"fields\": {\n       \"size\":           { \"offset\": 0,  \"size\": 8, \"type\": \"u64\" },\n       \"screen_width\":   { \"offset\": 8,  \"size\": 4, \"type\": \"u32\" },\n       \"screen_height\":  { \"offset\": 12, \"size\": 4, \"type\": \"u32\" },\n       \"cell_width\":     { \"offset\": 16, \"size\": 4, \"type\": \"u32\" },\n       \"cell_height\":    { \"offset\": 20, \"size\": 4, \"type\": \"u32\" },\n       \"padding_top\":    { \"offset\": 24, \"size\": 4, \"type\": \"u32\" },\n       \"padding_bottom\": { \"offset\": 28, \"size\": 4, \"type\": \"u32\" },\n       \"padding_right\":  { \"offset\": 32, \"size\": 4, \"type\": \"u32\" },\n       \"padding_left\":   { \"offset\": 36, \"size\": 4, \"type\": \"u32\" }\n     }\n   }\n }\n\n The returned pointer is valid for the lifetime of the process.\n"]
+    pub fn ghostty_type_json() -> *const ::std::os::raw::c_char;
 }
 #[doc = " Function table for custom memory allocator operations.\n\n This vtable defines the interface for a custom memory allocator. All\n function pointers must be valid and non-NULL.\n\n\n If you're not going to use a custom allocator, you can ignore all of\n this. All functions that take an allocator pointer allow NULL to use a\n default allocator.\n\n The interface is based on the Zig allocator interface. I'll say up front\n that it is easy to look at this interface and think \"wow, this is really\n overcomplicated\". The reason for this complexity is well thought out by\n the Zig folks, and it enables a diverse set of allocation strategies\n as shown by the Zig ecosystem. As a consolation, please note that many\n of the arguments are only needed for advanced use cases and can be\n safely ignored in simple implementations. For example, if you look at\n the Zig implementation of the libc allocator in `lib/std/heap.zig`\n (search for CAllocator), you'll see it is very simple.\n\n We chose to align with the Zig allocator interface because:\n\n   1. It is a proven interface that serves a wide variety of use cases\n      in the real world via the Zig ecosystem. It's shown to work.\n\n   2. Our core implementation itself is Zig, and this lets us very\n      cheaply and easily convert between C and Zig allocators.\n\n NOTE(mitchellh): In the future, we can have default implementations of\n resize/remap and allow those to be null."]
 #[repr(C)]
@@ -216,6 +299,7 @@ pub mod OptimizeMode {
     pub const RELEASE_SAFE: Type = 1;
     pub const RELEASE_SMALL: Type = 2;
     pub const RELEASE_FAST: Type = 3;
+    pub const MODE_MAX_VALUE: Type = 2147483647;
 }
 pub mod BuildInfo {
     #[doc = " Build info data types that can be queried.\n\n Each variant documents the expected output pointer type."]
@@ -238,8 +322,12 @@ pub mod BuildInfo {
     pub const VERSION_MINOR: Type = 7;
     #[doc = " The patch version number.\n\n Output type: size_t *"]
     pub const VERSION_PATCH: Type = 8;
+    #[doc = " The pre metadata string (e.g. \"alpha\", \"beta\", \"dev\"). Has zero length if\n no pre metadata is present.\n\n Output type: GhosttyString *"]
+    pub const VERSION_PRE: Type = 9;
     #[doc = " The build metadata string (e.g. commit hash). Has zero length if\n no build metadata is present.\n\n Output type: GhosttyString *"]
-    pub const VERSION_BUILD: Type = 9;
+    pub const VERSION_BUILD: Type = 10;
+    #[doc = " The build metadata string (e.g. commit hash). Has zero length if\n no build metadata is present.\n\n Output type: GhosttyString *"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Query a compile-time build configuration value.\n\n The caller must pass a pointer to the correct output type for the\n requested data (see GhosttyBuildInfo variants for types).\n\n         data type is invalid\n"]
@@ -278,6 +366,7 @@ pub mod ColorScheme {
     pub type Type = ::std::os::raw::c_uint;
     pub const LIGHT: Type = 0;
     pub const DARK: Type = 1;
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Primary device attributes (DA1) response data.\n\n Returned as part of GhosttyDeviceAttributes in response to a CSI c query.\n The conformance_level is the Pp parameter and features contains the Ps\n feature codes.\n"]
 #[repr(C)]
@@ -387,85 +476,13 @@ pub mod FocusEvent {
     pub const GAINED: Type = 0;
     #[doc = " Terminal window lost focus"]
     pub const LOST: Type = 1;
+    #[doc = " Terminal window lost focus"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Encode a focus event into a terminal escape sequence.\n\n Encodes a focus gained (CSI I) or focus lost (CSI O) report into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
     pub fn ghostty_focus_encode(
         event: FocusEvent::Type,
-        buf: *mut ::std::os::raw::c_char,
-        buf_len: usize,
-        out_written: *mut usize,
-    ) -> Result::Type;
-}
-#[doc = " A packed 16-bit terminal mode.\n\n Encodes a mode value (bits 0–14) and an ANSI flag (bit 15) into a\n single 16-bit integer. Use the inline helper functions to construct\n and inspect modes rather than manipulating bits directly."]
-pub type Mode = u16;
-pub mod ModeReportState {
-    #[doc = " DECRPM report state values.\n\n These correspond to the Ps2 parameter in a DECRPM response\n sequence (CSI ? Ps1 ; Ps2 $ y)."]
-    pub type Type = ::std::os::raw::c_uint;
-    #[doc = " Mode is not recognized"]
-    pub const NOT_RECOGNIZED: Type = 0;
-    #[doc = " Mode is set (enabled)"]
-    pub const SET: Type = 1;
-    #[doc = " Mode is reset (disabled)"]
-    pub const RESET: Type = 2;
-    #[doc = " Mode is permanently set"]
-    pub const PERMANENTLY_SET: Type = 3;
-    #[doc = " Mode is permanently reset"]
-    pub const PERMANENTLY_RESET: Type = 4;
-}
-unsafe extern "C" {
-    #[doc = " Encode a DECRPM (DEC Private Mode Report) response sequence.\n\n Writes a mode report escape sequence into the provided buffer.\n The generated sequence has the form:\n - DEC private mode: CSI ? Ps1 ; Ps2 $ y\n - ANSI mode:        CSI Ps1 ; Ps2 $ y\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
-    pub fn ghostty_mode_report_encode(
-        mode: Mode,
-        state: ModeReportState::Type,
-        buf: *mut ::std::os::raw::c_char,
-        buf_len: usize,
-        out_written: *mut usize,
-    ) -> Result::Type;
-}
-pub mod SizeReportStyle {
-    #[doc = " Size report style.\n\n Determines the output format for the terminal size report."]
-    pub type Type = ::std::os::raw::c_uint;
-    #[doc = " In-band size report (mode 2048): ESC [ 48 ; rows ; cols ; height ; width t"]
-    pub const MODE_2048: Type = 0;
-    #[doc = " XTWINOPS text area size in pixels: ESC [ 4 ; height ; width t"]
-    pub const CSI_14_T: Type = 1;
-    #[doc = " XTWINOPS cell size in pixels: ESC [ 6 ; height ; width t"]
-    pub const CSI_16_T: Type = 2;
-    #[doc = " XTWINOPS text area size in characters: ESC [ 8 ; rows ; cols t"]
-    pub const CSI_18_T: Type = 3;
-}
-#[doc = " Terminal size information for encoding size reports."]
-#[repr(C)]
-#[derive(Debug, Default, Copy, Clone)]
-pub struct SizeReportSize {
-    #[doc = " Terminal row count in cells."]
-    pub rows: u16,
-    #[doc = " Terminal column count in cells."]
-    pub columns: u16,
-    #[doc = " Width of a single terminal cell in pixels."]
-    pub cell_width: u32,
-    #[doc = " Height of a single terminal cell in pixels."]
-    pub cell_height: u32,
-}
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SizeReportSize"][::std::mem::size_of::<SizeReportSize>() - 12usize];
-    ["Alignment of SizeReportSize"][::std::mem::align_of::<SizeReportSize>() - 4usize];
-    ["Offset of field: SizeReportSize::rows"]
-        [::std::mem::offset_of!(SizeReportSize, rows) - 0usize];
-    ["Offset of field: SizeReportSize::columns"]
-        [::std::mem::offset_of!(SizeReportSize, columns) - 2usize];
-    ["Offset of field: SizeReportSize::cell_width"]
-        [::std::mem::offset_of!(SizeReportSize, cell_width) - 4usize];
-    ["Offset of field: SizeReportSize::cell_height"]
-        [::std::mem::offset_of!(SizeReportSize, cell_height) - 8usize];
-};
-unsafe extern "C" {
-    #[doc = " Encode a terminal size report into an escape sequence.\n\n Encodes a size report in the format specified by @p style into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
-    pub fn ghostty_size_report_encode(
-        style: SizeReportStyle::Type,
-        size: SizeReportSize,
         buf: *mut ::std::os::raw::c_char,
         buf_len: usize,
         out_written: *mut usize,
@@ -486,6 +503,8 @@ pub mod CellContentTag {
     pub const BG_COLOR_PALETTE: Type = 2;
     #[doc = " No text; background color as RGB."]
     pub const BG_COLOR_RGB: Type = 3;
+    #[doc = " No text; background color as RGB."]
+    pub const TAG_MAX_VALUE: Type = 2147483647;
 }
 pub mod CellWide {
     #[doc = " Cell wide property.\n\n Describes the width behavior of a cell.\n"]
@@ -498,6 +517,8 @@ pub mod CellWide {
     pub const SPACER_TAIL: Type = 2;
     #[doc = " Spacer at end of soft-wrapped line for a wide character."]
     pub const SPACER_HEAD: Type = 3;
+    #[doc = " Spacer at end of soft-wrapped line for a wide character."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod CellSemanticContent {
     #[doc = " Semantic content type of a cell.\n\n Set by semantic prompt sequences (OSC 133) to distinguish between\n command output, user input, and shell prompt text.\n"]
@@ -508,6 +529,8 @@ pub mod CellSemanticContent {
     pub const INPUT: Type = 1;
     #[doc = " Content that is part of a shell prompt."]
     pub const PROMPT: Type = 2;
+    #[doc = " Content that is part of a shell prompt."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod CellData {
     #[doc = " Cell data types.\n\n These values specify what type of data to extract from a cell\n using `ghostty_cell_get`.\n"]
@@ -536,6 +559,8 @@ pub mod CellData {
     pub const COLOR_PALETTE: Type = 10;
     #[doc = " The RGB value for the cell's background color.\n Only valid when content_tag is GHOSTTY_CELL_CONTENT_BG_COLOR_RGB.\n\n Output type: GhosttyColorRgb *"]
     pub const COLOR_RGB: Type = 11;
+    #[doc = " The RGB value for the cell's background color.\n Only valid when content_tag is GHOSTTY_CELL_CONTENT_BG_COLOR_RGB.\n\n Output type: GhosttyColorRgb *"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RowSemanticPrompt {
     #[doc = " Row semantic prompt state.\n\n Indicates whether any cells in a row are part of a shell prompt,\n as reported by OSC 133 sequences.\n"]
@@ -546,6 +571,8 @@ pub mod RowSemanticPrompt {
     pub const PROMPT: Type = 1;
     #[doc = " Prompt cells exist and this is a continuation line."]
     pub const PROMPT_CONTINUATION: Type = 2;
+    #[doc = " Prompt cells exist and this is a continuation line."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RowData {
     #[doc = " Row data types.\n\n These values specify what type of data to extract from a row\n using `ghostty_row_get`.\n"]
@@ -568,6 +595,8 @@ pub mod RowData {
     pub const KITTY_VIRTUAL_PLACEHOLDER: Type = 7;
     #[doc = " Whether this row is dirty and requires a redraw.\n\n Output type: bool *"]
     pub const DIRTY: Type = 8;
+    #[doc = " Whether this row is dirty and requires a redraw.\n\n Output type: bool *"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Get data from a cell.\n\n Extracts typed data from the given cell based on the specified\n data type. The output pointer must be of the appropriate type for the\n requested data kind. Valid data types and output types are documented\n in the `GhosttyCellData` enum.\n\n         data type is invalid\n"]
@@ -578,11 +607,31 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " Get multiple data fields from a cell in a single call.\n\n Each element in the keys array specifies a data kind, and the\n corresponding element in the values array receives the result.\n\n Processing stops at the first error; on success out_written\n is set to count, on error it is set to the index of the\n failing key (i.e. the number of values successfully written).\n\n               documented output type)\n             successfully written (may be NULL)\n"]
+    pub fn ghostty_cell_get_multi(
+        cell: Cell,
+        count: usize,
+        keys: *const CellData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Get data from a row.\n\n Extracts typed data from the given row based on the specified\n data type. The output pointer must be of the appropriate type for the\n requested data kind. Valid data types and output types are documented\n in the `GhosttyRowData` enum.\n\n         data type is invalid\n"]
     pub fn ghostty_row_get(
         row: Row,
         data: RowData::Type,
         out: *mut ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Get multiple data fields from a row in a single call.\n\n Each element in the keys array specifies a data kind, and the\n corresponding element in the values array receives the result.\n\n Processing stops at the first error; on success out_written\n is set to count, on error it is set to the index of the\n failing key (i.e. the number of values successfully written).\n\n               documented output type)\n             successfully written (may be NULL)\n"]
+    pub fn ghostty_row_get_multi(
+        row: Row,
+        count: usize,
+        keys: *const RowData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
     ) -> Result::Type;
 }
 #[doc = " Style identifier type.\n\n Used to look up the full style from a grid reference.\n Obtain this from a cell via GHOSTTY_CELL_DATA_STYLE_ID.\n"]
@@ -593,6 +642,7 @@ pub mod StyleColorTag {
     pub const NONE: Type = 0;
     pub const PALETTE: Type = 1;
     pub const RGB: Type = 2;
+    pub const TAG_MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Style color value union.\n\n Use the tag to determine which field is active.\n"]
 #[repr(C)]
@@ -746,8 +796,420 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " Get the hyperlink URI for the cell at the grid reference's position.\n\n Writes the URI bytes into the provided buffer. If the cell has no\n hyperlink, out_len is set to 0 and GHOSTTY_SUCCESS is returned.\n\n If the buffer is too small (or NULL), the function returns\n GHOSTTY_OUT_OF_SPACE and writes the required number of bytes to\n out_len. The caller can then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size in bytes.\n         node is NULL, GHOSTTY_OUT_OF_SPACE if the buffer is too small\n"]
+    pub fn ghostty_grid_ref_hyperlink_uri(
+        ref_: *const GridRef,
+        buf: *mut u8,
+        buf_len: usize,
+        out_len: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Get the style of the cell at the grid reference's position.\n\n         node is NULL\n"]
     pub fn ghostty_grid_ref_style(ref_: *const GridRef, out_style: *mut Style) -> Result::Type;
+}
+#[doc = " A selection range defined by two grid references.\n\n This is a sized struct. Use GHOSTTY_INIT_SIZED() to initialize it.\n"]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Selection {
+    #[doc = " Size of this struct in bytes. Must be set to sizeof(GhosttySelection)."]
+    pub size: usize,
+    #[doc = " Start of the selection range (inclusive)."]
+    pub start: GridRef,
+    #[doc = " End of the selection range (inclusive)."]
+    pub end: GridRef,
+    #[doc = " Whether the selection is rectangular (block) rather than linear."]
+    pub rectangle: bool,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of Selection"][::std::mem::size_of::<Selection>() - 64usize];
+    ["Alignment of Selection"][::std::mem::align_of::<Selection>() - 8usize];
+    ["Offset of field: Selection::size"][::std::mem::offset_of!(Selection, size) - 0usize];
+    ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 8usize];
+    ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 32usize];
+    ["Offset of field: Selection::rectangle"]
+        [::std::mem::offset_of!(Selection, rectangle) - 56usize];
+};
+impl Default for Selection {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[doc = " A packed 16-bit terminal mode.\n\n Encodes a mode value (bits 0–14) and an ANSI flag (bit 15) into a\n single 16-bit integer. Use the inline helper functions to construct\n and inspect modes rather than manipulating bits directly."]
+pub type Mode = u16;
+pub mod ModeReportState {
+    #[doc = " DECRPM report state values.\n\n These correspond to the Ps2 parameter in a DECRPM response\n sequence (CSI ? Ps1 ; Ps2 $ y)."]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Mode is not recognized"]
+    pub const NOT_RECOGNIZED: Type = 0;
+    #[doc = " Mode is set (enabled)"]
+    pub const SET: Type = 1;
+    #[doc = " Mode is reset (disabled)"]
+    pub const RESET: Type = 2;
+    #[doc = " Mode is permanently set"]
+    pub const PERMANENTLY_SET: Type = 3;
+    #[doc = " Mode is permanently reset"]
+    pub const PERMANENTLY_RESET: Type = 4;
+    #[doc = " Mode is permanently reset"]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+unsafe extern "C" {
+    #[doc = " Encode a DECRPM (DEC Private Mode Report) response sequence.\n\n Writes a mode report escape sequence into the provided buffer.\n The generated sequence has the form:\n - DEC private mode: CSI ? Ps1 ; Ps2 $ y\n - ANSI mode:        CSI Ps1 ; Ps2 $ y\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
+    pub fn ghostty_mode_report_encode(
+        mode: Mode,
+        state: ModeReportState::Type,
+        buf: *mut ::std::os::raw::c_char,
+        buf_len: usize,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+pub mod SizeReportStyle {
+    #[doc = " Size report style.\n\n Determines the output format for the terminal size report."]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " In-band size report (mode 2048): ESC [ 48 ; rows ; cols ; height ; width t"]
+    pub const MODE_2048: Type = 0;
+    #[doc = " XTWINOPS text area size in pixels: ESC [ 4 ; height ; width t"]
+    pub const CSI_14_T: Type = 1;
+    #[doc = " XTWINOPS cell size in pixels: ESC [ 6 ; height ; width t"]
+    pub const CSI_16_T: Type = 2;
+    #[doc = " XTWINOPS text area size in characters: ESC [ 8 ; rows ; cols t"]
+    pub const CSI_18_T: Type = 3;
+    #[doc = " XTWINOPS text area size in characters: ESC [ 8 ; rows ; cols t"]
+    pub const STYLE_MAX_VALUE: Type = 2147483647;
+}
+#[doc = " Terminal size information for encoding size reports."]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct SizeReportSize {
+    #[doc = " Terminal row count in cells."]
+    pub rows: u16,
+    #[doc = " Terminal column count in cells."]
+    pub columns: u16,
+    #[doc = " Width of a single terminal cell in pixels."]
+    pub cell_width: u32,
+    #[doc = " Height of a single terminal cell in pixels."]
+    pub cell_height: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of SizeReportSize"][::std::mem::size_of::<SizeReportSize>() - 12usize];
+    ["Alignment of SizeReportSize"][::std::mem::align_of::<SizeReportSize>() - 4usize];
+    ["Offset of field: SizeReportSize::rows"]
+        [::std::mem::offset_of!(SizeReportSize, rows) - 0usize];
+    ["Offset of field: SizeReportSize::columns"]
+        [::std::mem::offset_of!(SizeReportSize, columns) - 2usize];
+    ["Offset of field: SizeReportSize::cell_width"]
+        [::std::mem::offset_of!(SizeReportSize, cell_width) - 4usize];
+    ["Offset of field: SizeReportSize::cell_height"]
+        [::std::mem::offset_of!(SizeReportSize, cell_height) - 8usize];
+};
+unsafe extern "C" {
+    #[doc = " Encode a terminal size report into an escape sequence.\n\n Encodes a size report in the format specified by @p style into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
+    pub fn ghostty_size_report_encode(
+        style: SizeReportStyle::Type,
+        size: SizeReportSize,
+        buf: *mut ::std::os::raw::c_char,
+        buf_len: usize,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+pub mod KittyGraphicsData {
+    #[doc = " Queryable data kinds for ghostty_kitty_graphics_get().\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Invalid / sentinel value."]
+    pub const INVALID: Type = 0;
+    #[doc = " Populate a pre-allocated placement iterator with placement data from\n the storage. Iterator data is only valid as long as the underlying\n terminal is not mutated.\n\n Output type: GhosttyKittyGraphicsPlacementIterator *"]
+    pub const PLACEMENT_ITERATOR: Type = 1;
+    #[doc = " Populate a pre-allocated placement iterator with placement data from\n the storage. Iterator data is only valid as long as the underlying\n terminal is not mutated.\n\n Output type: GhosttyKittyGraphicsPlacementIterator *"]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod KittyGraphicsPlacementData {
+    #[doc = " Queryable data kinds for ghostty_kitty_graphics_placement_get().\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Invalid / sentinel value."]
+    pub const INVALID: Type = 0;
+    #[doc = " The image ID this placement belongs to.\n\n Output type: uint32_t *"]
+    pub const IMAGE_ID: Type = 1;
+    #[doc = " The placement ID.\n\n Output type: uint32_t *"]
+    pub const PLACEMENT_ID: Type = 2;
+    #[doc = " Whether this is a virtual placement (unicode placeholder).\n\n Output type: bool *"]
+    pub const IS_VIRTUAL: Type = 3;
+    #[doc = " Pixel offset from the left edge of the cell.\n\n Output type: uint32_t *"]
+    pub const X_OFFSET: Type = 4;
+    #[doc = " Pixel offset from the top edge of the cell.\n\n Output type: uint32_t *"]
+    pub const Y_OFFSET: Type = 5;
+    #[doc = " Source rectangle x origin in pixels.\n\n Output type: uint32_t *"]
+    pub const SOURCE_X: Type = 6;
+    #[doc = " Source rectangle y origin in pixels.\n\n Output type: uint32_t *"]
+    pub const SOURCE_Y: Type = 7;
+    #[doc = " Source rectangle width in pixels (0 = full image width).\n\n Output type: uint32_t *"]
+    pub const SOURCE_WIDTH: Type = 8;
+    #[doc = " Source rectangle height in pixels (0 = full image height).\n\n Output type: uint32_t *"]
+    pub const SOURCE_HEIGHT: Type = 9;
+    #[doc = " Number of columns this placement occupies.\n\n Output type: uint32_t *"]
+    pub const COLUMNS: Type = 10;
+    #[doc = " Number of rows this placement occupies.\n\n Output type: uint32_t *"]
+    pub const ROWS: Type = 11;
+    #[doc = " Z-index for this placement.\n\n Output type: int32_t *"]
+    pub const Z: Type = 12;
+    #[doc = " Z-index for this placement.\n\n Output type: int32_t *"]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod KittyPlacementLayer {
+    #[doc = " Z-layer classification for kitty graphics placements.\n\n Based on the kitty protocol z-index conventions:\n - BELOW_BG:   z < INT32_MIN/2  (drawn below cell background)\n - BELOW_TEXT:  INT32_MIN/2 <= z < 0  (above background, below text)\n - ABOVE_TEXT:  z >= 0  (above text)\n - ALL:         no filtering (current behavior)\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    pub const ALL: Type = 0;
+    pub const BELOW_BG: Type = 1;
+    pub const BELOW_TEXT: Type = 2;
+    pub const ABOVE_TEXT: Type = 3;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod KittyGraphicsPlacementIteratorOption {
+    #[doc = " Settable options for ghostty_kitty_graphics_placement_iterator_set().\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Set the z-layer filter for the iterator.\n\n Input type: GhosttyKittyPlacementLayer *"]
+    pub const LAYER: Type = 0;
+    #[doc = " Set the z-layer filter for the iterator.\n\n Input type: GhosttyKittyPlacementLayer *"]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod KittyImageFormat {
+    #[doc = " Pixel format of a Kitty graphics image.\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    pub const RGB: Type = 0;
+    pub const RGBA: Type = 1;
+    pub const PNG: Type = 2;
+    pub const GRAY_ALPHA: Type = 3;
+    pub const GRAY: Type = 4;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod KittyImageCompression {
+    #[doc = " Compression of a Kitty graphics image.\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    pub const NONE: Type = 0;
+    pub const ZLIB_DEFLATE: Type = 1;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod KittyGraphicsImageData {
+    #[doc = " Queryable data kinds for ghostty_kitty_graphics_image_get().\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Invalid / sentinel value."]
+    pub const INVALID: Type = 0;
+    #[doc = " The image ID.\n\n Output type: uint32_t *"]
+    pub const ID: Type = 1;
+    #[doc = " The image number.\n\n Output type: uint32_t *"]
+    pub const NUMBER: Type = 2;
+    #[doc = " Image width in pixels.\n\n Output type: uint32_t *"]
+    pub const WIDTH: Type = 3;
+    #[doc = " Image height in pixels.\n\n Output type: uint32_t *"]
+    pub const HEIGHT: Type = 4;
+    #[doc = " Pixel format of the image.\n\n Output type: GhosttyKittyImageFormat *"]
+    pub const FORMAT: Type = 5;
+    #[doc = " Compression of the image.\n\n Output type: GhosttyKittyImageCompression *"]
+    pub const COMPRESSION: Type = 6;
+    #[doc = " Borrowed pointer to the raw pixel data. Valid as long as the\n underlying terminal is not mutated.\n\n Output type: const uint8_t **"]
+    pub const DATA_PTR: Type = 7;
+    #[doc = " Length of the raw pixel data in bytes.\n\n Output type: size_t *"]
+    pub const DATA_LEN: Type = 8;
+    #[doc = " Length of the raw pixel data in bytes.\n\n Output type: size_t *"]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+#[doc = " Combined rendering geometry for a placement in a single sized struct.\n\n Combines the results of ghostty_kitty_graphics_placement_pixel_size(),\n ghostty_kitty_graphics_placement_grid_size(),\n ghostty_kitty_graphics_placement_viewport_pos(), and\n ghostty_kitty_graphics_placement_source_rect() into one call. This is\n an optimization over calling those four functions individually,\n particularly useful in environments with high per-call overhead such\n as FFI or Cgo.\n\n This struct uses the sized-struct ABI pattern. Initialize with\n GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsPlacementRenderInfo) before calling\n ghostty_kitty_graphics_placement_render_info().\n"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct KittyGraphicsPlacementRenderInfo {
+    #[doc = " Size of this struct in bytes. Must be set to sizeof(GhosttyKittyGraphicsPlacementRenderInfo)."]
+    pub size: usize,
+    #[doc = " Rendered width in pixels."]
+    pub pixel_width: u32,
+    #[doc = " Rendered height in pixels."]
+    pub pixel_height: u32,
+    #[doc = " Number of grid columns the placement occupies."]
+    pub grid_cols: u32,
+    #[doc = " Number of grid rows the placement occupies."]
+    pub grid_rows: u32,
+    #[doc = " Viewport-relative column (may be negative for partially visible placements)."]
+    pub viewport_col: i32,
+    #[doc = " Viewport-relative row (may be negative for partially visible placements)."]
+    pub viewport_row: i32,
+    #[doc = " False when the placement is fully off-screen or virtual."]
+    pub viewport_visible: bool,
+    #[doc = " Resolved source rectangle x origin in pixels."]
+    pub source_x: u32,
+    #[doc = " Resolved source rectangle y origin in pixels."]
+    pub source_y: u32,
+    #[doc = " Resolved source rectangle width in pixels."]
+    pub source_width: u32,
+    #[doc = " Resolved source rectangle height in pixels."]
+    pub source_height: u32,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of KittyGraphicsPlacementRenderInfo"]
+        [::std::mem::size_of::<KittyGraphicsPlacementRenderInfo>() - 56usize];
+    ["Alignment of KittyGraphicsPlacementRenderInfo"]
+        [::std::mem::align_of::<KittyGraphicsPlacementRenderInfo>() - 8usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::size"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, size) - 0usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::pixel_width"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, pixel_width) - 8usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::pixel_height"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, pixel_height) - 12usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::grid_cols"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, grid_cols) - 16usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::grid_rows"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, grid_rows) - 20usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_col"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_col) - 24usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_row"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_row) - 28usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_visible"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_visible) - 32usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::source_x"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_x) - 36usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::source_y"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_y) - 40usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::source_width"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_width) - 44usize];
+    ["Offset of field: KittyGraphicsPlacementRenderInfo::source_height"]
+        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_height) - 48usize];
+};
+unsafe extern "C" {
+    #[doc = " Get data from a kitty graphics storage instance.\n\n The output pointer must be of the appropriate type for the requested\n data kind.\n\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n"]
+    pub fn ghostty_kitty_graphics_get(
+        graphics: KittyGraphics,
+        data: KittyGraphicsData::Type,
+        out: *mut ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Look up a Kitty graphics image by its image ID.\n\n Returns NULL if no image with the given ID exists or if Kitty graphics\n are disabled at build time.\n\n"]
+    pub fn ghostty_kitty_graphics_image(
+        graphics: KittyGraphics,
+        image_id: u32,
+    ) -> KittyGraphicsImage;
+}
+unsafe extern "C" {
+    #[doc = " Get data from a Kitty graphics image.\n\n The output pointer must be of the appropriate type for the requested\n data kind.\n\n"]
+    pub fn ghostty_kitty_graphics_image_get(
+        image: KittyGraphicsImage,
+        data: KittyGraphicsImageData::Type,
+        out: *mut ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Get multiple data fields from a Kitty graphics image in a single call.\n\n This is an optimization over calling ghostty_kitty_graphics_image_get()\n repeatedly, particularly useful in environments with high per-call\n overhead such as FFI or Cgo.\n\n Each element in the keys array specifies a data kind, and the\n corresponding element in the values array receives the result.\n The type of each values[i] pointer must match the output type\n documented for keys[i].\n\n Processing stops at the first error; on success out_written\n is set to count, on error it is set to the index of the\n failing key (i.e. the number of values successfully written).\n\n               documented output type)\n             successfully written (may be NULL)\n"]
+    pub fn ghostty_kitty_graphics_image_get_multi(
+        image: KittyGraphicsImage,
+        count: usize,
+        keys: *const KittyGraphicsImageData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Create a new placement iterator instance.\n\n All fields except the allocator are left undefined until populated\n via ghostty_kitty_graphics_get() with\n GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR.\n\n         failure\n"]
+    pub fn ghostty_kitty_graphics_placement_iterator_new(
+        allocator: *const Allocator,
+        out_iterator: *mut KittyGraphicsPlacementIterator,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Free a placement iterator.\n\n"]
+    pub fn ghostty_kitty_graphics_placement_iterator_free(iterator: KittyGraphicsPlacementIterator);
+}
+unsafe extern "C" {
+    #[doc = " Set an option on a placement iterator.\n\n Use GHOSTTY_KITTY_GRAPHICS_PLACEMENT_ITERATOR_OPTION_LAYER with a\n GhosttyKittyPlacementLayer value to filter placements by z-layer.\n The filter is applied during iteration: ghostty_kitty_graphics_placement_next()\n will skip placements that do not match the configured layer.\n\n The default layer is GHOSTTY_KITTY_PLACEMENT_LAYER_ALL (no filtering).\n\n              GHOSTTY_INVALID_VALUE)\n"]
+    pub fn ghostty_kitty_graphics_placement_iterator_set(
+        iterator: KittyGraphicsPlacementIterator,
+        option: KittyGraphicsPlacementIteratorOption::Type,
+        value: *const ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Advance the placement iterator to the next placement.\n\n If a layer filter has been set via\n ghostty_kitty_graphics_placement_iterator_set(), only placements\n matching that layer are returned.\n\n"]
+    pub fn ghostty_kitty_graphics_placement_next(iterator: KittyGraphicsPlacementIterator) -> bool;
+}
+unsafe extern "C" {
+    #[doc = " Get data from the current placement in a placement iterator.\n\n Call ghostty_kitty_graphics_placement_next() at least once before\n calling this function.\n\n         iterator is NULL or not positioned on a placement\n"]
+    pub fn ghostty_kitty_graphics_placement_get(
+        iterator: KittyGraphicsPlacementIterator,
+        data: KittyGraphicsPlacementData::Type,
+        out: *mut ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Get multiple data fields from the current placement in a single call.\n\n This is an optimization over calling ghostty_kitty_graphics_placement_get()\n repeatedly, particularly useful in environments with high per-call\n overhead such as FFI or Cgo.\n\n Each element in the keys array specifies a data kind, and the\n corresponding element in the values array receives the result.\n The type of each values[i] pointer must match the output type\n documented for keys[i].\n\n Processing stops at the first error; on success out_written\n is set to count, on error it is set to the index of the\n failing key (i.e. the number of values successfully written).\n\n               documented output type)\n             successfully written (may be NULL)\n"]
+    pub fn ghostty_kitty_graphics_placement_get_multi(
+        iterator: KittyGraphicsPlacementIterator,
+        count: usize,
+        keys: *const KittyGraphicsPlacementData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Compute the grid rectangle occupied by the current placement.\n\n Uses the placement's pin, the image dimensions, and the terminal's\n cell/pixel geometry to calculate the bounding rectangle. Virtual\n placements (unicode placeholders) return GHOSTTY_NO_VALUE.\n\n             as a selection with rectangle=true\n         is NULL or the iterator is not positioned, GHOSTTY_NO_VALUE for\n         virtual placements or when Kitty graphics are disabled\n"]
+    pub fn ghostty_kitty_graphics_placement_rect(
+        iterator: KittyGraphicsPlacementIterator,
+        image: KittyGraphicsImage,
+        terminal: Terminal,
+        out_selection: *mut Selection,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Compute the rendered pixel size of the current placement.\n\n Takes into account the placement's source rectangle, specified\n columns/rows, and aspect ratio to calculate the final rendered\n pixel dimensions.\n\n         is NULL or the iterator is not positioned, GHOSTTY_NO_VALUE when\n         Kitty graphics are disabled\n"]
+    pub fn ghostty_kitty_graphics_placement_pixel_size(
+        iterator: KittyGraphicsPlacementIterator,
+        image: KittyGraphicsImage,
+        terminal: Terminal,
+        out_width: *mut u32,
+        out_height: *mut u32,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Compute the grid cell size of the current placement.\n\n Returns the number of columns and rows that the placement occupies\n in the terminal grid. If the placement specifies explicit columns\n and rows, those are returned directly; otherwise they are calculated\n from the pixel size and cell dimensions.\n\n         is NULL or the iterator is not positioned, GHOSTTY_NO_VALUE when\n         Kitty graphics are disabled\n"]
+    pub fn ghostty_kitty_graphics_placement_grid_size(
+        iterator: KittyGraphicsPlacementIterator,
+        image: KittyGraphicsImage,
+        terminal: Terminal,
+        out_cols: *mut u32,
+        out_rows: *mut u32,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Get the viewport-relative grid position of the current placement.\n\n Converts the placement's internal pin to viewport-relative column and\n row coordinates. The returned coordinates represent the top-left\n corner of the placement in the viewport's grid coordinate space.\n\n The row value can be negative when the placement's origin has\n scrolled above the top of the viewport. For example, a 4-row\n image that has scrolled up by 2 rows returns row=-2, meaning\n its top 2 rows are above the visible area but its bottom 2 rows\n are still on screen. Embedders should use these coordinates\n directly when computing the destination rectangle for rendering;\n the embedder is responsible for clipping the portion of the image\n that falls outside the viewport.\n\n Returns GHOSTTY_SUCCESS for any placement that is at least\n partially visible in the viewport. Returns GHOSTTY_NO_VALUE when\n the placement is completely outside the viewport (its bottom edge\n is above the viewport or its top edge is at or below the last\n viewport row), or when the placement is a virtual (unicode\n placeholder) placement.\n\n             (may be negative for partially visible placements)\n         off-screen or virtual, GHOSTTY_INVALID_VALUE if any handle\n         is NULL or the iterator is not positioned\n"]
+    pub fn ghostty_kitty_graphics_placement_viewport_pos(
+        iterator: KittyGraphicsPlacementIterator,
+        image: KittyGraphicsImage,
+        terminal: Terminal,
+        out_col: *mut i32,
+        out_row: *mut i32,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Get the resolved source rectangle for the current placement.\n\n Applies kitty protocol semantics: a width or height of 0 in the\n placement means \"use the full image dimension\", and the resulting\n rectangle is clamped to the actual image bounds. The returned\n values are in pixels and are ready to use for texture sampling.\n\n         handle is NULL or the iterator is not positioned\n"]
+    pub fn ghostty_kitty_graphics_placement_source_rect(
+        iterator: KittyGraphicsPlacementIterator,
+        image: KittyGraphicsImage,
+        out_x: *mut u32,
+        out_y: *mut u32,
+        out_width: *mut u32,
+        out_height: *mut u32,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Get all rendering geometry for a placement in a single call.\n\n Combines pixel size, grid size, viewport position, and source\n rectangle into one struct. Initialize with\n GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsPlacementRenderInfo).\n\n When viewport_visible is false, the placement is fully off-screen\n or is a virtual placement; viewport_col and viewport_row may\n contain meaningless values in that case.\n\n"]
+    pub fn ghostty_kitty_graphics_placement_render_info(
+        iterator: KittyGraphicsPlacementIterator,
+        image: KittyGraphicsImage,
+        terminal: Terminal,
+        out_info: *mut KittyGraphicsPlacementRenderInfo,
+    ) -> Result::Type;
 }
 #[doc = " A coordinate in the terminal grid.\n"]
 #[repr(C)]
@@ -776,6 +1238,8 @@ pub mod PointTag {
     pub const SCREEN: Type = 2;
     #[doc = " Scrollback history only (before active area)."]
     pub const HISTORY: Type = 3;
+    #[doc = " Scrollback history only (before active area)."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Point value union.\n"]
 #[repr(C)]
@@ -827,13 +1291,6 @@ impl Default for Point {
         }
     }
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct TerminalImpl {
-    _unused: [u8; 0],
-}
-#[doc = " Opaque handle to a terminal instance.\n"]
-pub type Terminal = *mut TerminalImpl;
 #[doc = " Terminal initialization options.\n"]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -865,6 +1322,8 @@ pub mod TerminalScrollViewportTag {
     pub const BOTTOM: Type = 1;
     #[doc = " Scroll by a delta amount (up is negative)."]
     pub const DELTA: Type = 2;
+    #[doc = " Scroll by a delta amount (up is negative)."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Scroll viewport value.\n"]
 #[repr(C)]
@@ -928,6 +1387,8 @@ pub mod TerminalScreen {
     pub const PRIMARY: Type = 0;
     #[doc = " The alternate screen."]
     pub const ALTERNATE: Type = 1;
+    #[doc = " The alternate screen."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Scrollbar state for the terminal viewport.\n\n Represents the scrollable area dimensions needed to render a scrollbar.\n"]
 #[repr(C)]
@@ -1033,6 +1494,20 @@ pub mod TerminalOption {
     pub const COLOR_CURSOR: Type = 13;
     #[doc = " Set the default 256-color palette.\n\n The value must point to an array of exactly 256 GhosttyColorRgb values.\n A NULL value pointer resets to the built-in default palette.\n\n Input type: GhosttyColorRgb[256]*"]
     pub const COLOR_PALETTE: Type = 14;
+    #[doc = " Set the Kitty image storage limit in bytes.\n\n Applied to all initialized screens (primary and alternate).\n A value of zero disables the Kitty graphics protocol entirely,\n deleting all stored images and placements. A NULL value pointer\n is equivalent to zero (disables). Has no effect when Kitty graphics\n are disabled at build time.\n\n Input type: uint64_t*"]
+    pub const KITTY_IMAGE_STORAGE_LIMIT: Type = 15;
+    #[doc = " Enable or disable Kitty image loading via the file medium.\n\n A NULL value pointer is a no-op. Has no effect when Kitty graphics\n are disabled at build time.\n\n Input type: bool*"]
+    pub const KITTY_IMAGE_MEDIUM_FILE: Type = 16;
+    #[doc = " Enable or disable Kitty image loading via the temporary file medium.\n\n A NULL value pointer is a no-op. Has no effect when Kitty graphics\n are disabled at build time.\n\n Input type: bool*"]
+    pub const KITTY_IMAGE_MEDIUM_TEMP_FILE: Type = 17;
+    #[doc = " Enable or disable Kitty image loading via the shared memory medium.\n\n A NULL value pointer is a no-op. Has no effect when Kitty graphics\n are disabled at build time.\n\n Input type: bool*"]
+    pub const KITTY_IMAGE_MEDIUM_SHARED_MEM: Type = 18;
+    #[doc = " Set the maximum bytes the APC handler will buffer for all protocols.\n This prevents malicious input from causing unbounded memory allocation.\n A NULL value pointer removes all overrides, reverting to the built-in\n defaults.\n\n Input type: size_t*"]
+    pub const APC_MAX_BYTES: Type = 19;
+    #[doc = " Set the maximum bytes the APC handler will buffer for Kitty graphics\n protocol data. A NULL value pointer removes the override, reverting\n to the built-in default.\n\n Input type: size_t*"]
+    pub const APC_MAX_BYTES_KITTY: Type = 20;
+    #[doc = " Set the maximum bytes the APC handler will buffer for Kitty graphics\n protocol data. A NULL value pointer removes the override, reverting\n to the built-in default.\n\n Input type: size_t*"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod TerminalData {
     #[doc = " Terminal data types.\n\n These values specify what type of data to extract from a terminal\n using `ghostty_terminal_get`.\n"]
@@ -1089,6 +1564,18 @@ pub mod TerminalData {
     pub const COLOR_CURSOR_DEFAULT: Type = 24;
     #[doc = " The default 256-color palette (ignoring any OSC overrides).\n\n Output type: GhosttyColorRgb[256] *"]
     pub const COLOR_PALETTE_DEFAULT: Type = 25;
+    #[doc = " The Kitty image storage limit in bytes for the active screen.\n\n A value of zero means the Kitty graphics protocol is disabled.\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n Output type: uint64_t *"]
+    pub const KITTY_IMAGE_STORAGE_LIMIT: Type = 26;
+    #[doc = " Whether the file medium is enabled for Kitty image loading on the\n active screen.\n\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n Output type: bool *"]
+    pub const KITTY_IMAGE_MEDIUM_FILE: Type = 27;
+    #[doc = " Whether the temporary file medium is enabled for Kitty image loading\n on the active screen.\n\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n Output type: bool *"]
+    pub const KITTY_IMAGE_MEDIUM_TEMP_FILE: Type = 28;
+    #[doc = " Whether the shared memory medium is enabled for Kitty image loading\n on the active screen.\n\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n Output type: bool *"]
+    pub const KITTY_IMAGE_MEDIUM_SHARED_MEM: Type = 29;
+    #[doc = " The Kitty graphics image storage for the active screen.\n\n Returns a borrowed pointer to the image storage. The pointer is valid\n until the next mutating terminal call (e.g. ghostty_terminal_vt_write()\n or ghostty_terminal_reset()).\n\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n Output type: GhosttyKittyGraphics *"]
+    pub const KITTY_GRAPHICS: Type = 30;
+    #[doc = " The Kitty graphics image storage for the active screen.\n\n Returns a borrowed pointer to the image storage. The pointer is valid\n until the next mutating terminal call (e.g. ghostty_terminal_vt_write()\n or ghostty_terminal_reset()).\n\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n Output type: GhosttyKittyGraphics *"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Create a new terminal instance.\n\n"]
@@ -1153,11 +1640,30 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " Get multiple data fields from a terminal in a single call.\n\n This is an optimization over calling ghostty_terminal_get()\n repeatedly, particularly useful in environments with high per-call\n overhead such as FFI or Cgo.\n\n Each element in the keys array specifies a data kind, and the\n corresponding element in the values array receives the result.\n The type of each values[i] pointer must match the output type\n documented for keys[i].\n\n Processing stops at the first error; on success out_written\n is set to count, on error it is set to the index of the\n failing key (i.e. the number of values successfully written).\n\n               documented output type)\n             successfully written (may be NULL)\n"]
+    pub fn ghostty_terminal_get_multi(
+        terminal: Terminal,
+        count: usize,
+        keys: *const TerminalData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Resolve a point in the terminal grid to a grid reference.\n\n Resolves the given point (which can be in active, viewport, screen,\n or history coordinates) to a grid reference for that location. Use\n ghostty_grid_ref_cell() and ghostty_grid_ref_row() to extract the cell\n and row.\n\n Lookups using the `active` and `viewport` tags are fast. The `screen`\n and `history` tags may require traversing the full scrollback page list\n to resolve the y coordinate, so they can be expensive for large\n scrollback buffers.\n\n This function isn't meant to be used as the core of render loop. It\n isn't built to sustain the framerates needed for rendering large screens.\n Use the render state API for that. This API is instead meant for less\n strictly performance-sensitive use cases.\n\n         is NULL or the point is out of bounds\n"]
     pub fn ghostty_terminal_grid_ref(
         terminal: Terminal,
         point: Point,
         out_ref: *mut GridRef,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Convert a grid reference back to a point in the given coordinate system.\n\n This is the inverse of ghostty_terminal_grid_ref(): given a grid reference,\n it returns the x/y coordinates in the requested coordinate system (active,\n viewport, screen, or history).\n\n The grid reference must have been obtained from the same terminal instance.\n Like all grid references, it is only valid until the next mutating terminal\n call.\n\n Not every grid reference is representable in every coordinate system. For\n example, a cell in scrollback history cannot be expressed in active\n coordinates, and a cell that has scrolled off the visible area cannot be\n expressed in viewport coordinates. In these cases, the function returns\n GHOSTTY_NO_VALUE.\n\n         or ref is NULL/invalid, GHOSTTY_NO_VALUE if the ref falls outside\n         the requested coordinate system\n"]
+    pub fn ghostty_terminal_point_from_grid_ref(
+        terminal: Terminal,
+        ref_: *const GridRef,
+        tag: PointTag::Type,
+        out: *mut PointCoordinate,
     ) -> Result::Type;
 }
 pub mod FormatterFormat {
@@ -1169,6 +1675,8 @@ pub mod FormatterFormat {
     pub const VT: Type = 1;
     #[doc = " HTML with inline styles."]
     pub const HTML: Type = 2;
+    #[doc = " HTML with inline styles."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Extra screen state to include in styled output.\n"]
 #[repr(C)]
@@ -1251,13 +1759,6 @@ const _: () = {
     ["Offset of field: FormatterTerminalExtra::screen"]
         [::std::mem::offset_of!(FormatterTerminalExtra, screen) - 16usize];
 };
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct FormatterImpl {
-    _unused: [u8; 0],
-}
-#[doc = " Opaque handle to a formatter instance.\n"]
-pub type Formatter = *mut FormatterImpl;
 #[doc = " Options for creating a terminal formatter.\n"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1272,11 +1773,13 @@ pub struct FormatterTerminalOptions {
     pub trim: bool,
     #[doc = " Extra terminal state to include in styled output."]
     pub extra: FormatterTerminalExtra,
+    #[doc = " Optional selection to restrict output to a range.\n  If NULL, the entire screen is formatted."]
+    pub selection: *const Selection,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of FormatterTerminalOptions"]
-        [::std::mem::size_of::<FormatterTerminalOptions>() - 48usize];
+        [::std::mem::size_of::<FormatterTerminalOptions>() - 56usize];
     ["Alignment of FormatterTerminalOptions"]
         [::std::mem::align_of::<FormatterTerminalOptions>() - 8usize];
     ["Offset of field: FormatterTerminalOptions::size"]
@@ -1289,6 +1792,8 @@ const _: () = {
         [::std::mem::offset_of!(FormatterTerminalOptions, trim) - 13usize];
     ["Offset of field: FormatterTerminalOptions::extra"]
         [::std::mem::offset_of!(FormatterTerminalOptions, extra) - 16usize];
+    ["Offset of field: FormatterTerminalOptions::selection"]
+        [::std::mem::offset_of!(FormatterTerminalOptions, selection) - 48usize];
 };
 impl Default for FormatterTerminalOptions {
     fn default() -> Self {
@@ -1330,27 +1835,6 @@ unsafe extern "C" {
     #[doc = " Free a formatter instance.\n\n Releases all resources associated with the formatter. After this call,\n the formatter handle becomes invalid.\n\n"]
     pub fn ghostty_formatter_free(formatter: Formatter);
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct RenderStateImpl {
-    _unused: [u8; 0],
-}
-#[doc = " Opaque handle to a render state instance.\n"]
-pub type RenderState = *mut RenderStateImpl;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct RenderStateRowIteratorImpl {
-    _unused: [u8; 0],
-}
-#[doc = " Opaque handle to a render-state row iterator.\n"]
-pub type RenderStateRowIterator = *mut RenderStateRowIteratorImpl;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct RenderStateRowCellsImpl {
-    _unused: [u8; 0],
-}
-#[doc = " Opaque handle to render-state row cells.\n"]
-pub type RenderStateRowCells = *mut RenderStateRowCellsImpl;
 pub mod RenderStateDirty {
     #[doc = " Dirty state of a render state after update.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -1360,6 +1844,8 @@ pub mod RenderStateDirty {
     pub const PARTIAL: Type = 1;
     #[doc = " Global state changed; renderer should redraw everything."]
     pub const FULL: Type = 2;
+    #[doc = " Global state changed; renderer should redraw everything."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RenderStateCursorVisualStyle {
     #[doc = " Visual style of the cursor.\n"]
@@ -1372,6 +1858,8 @@ pub mod RenderStateCursorVisualStyle {
     pub const UNDERLINE: Type = 2;
     #[doc = " Hollow block cursor."]
     pub const BLOCK_HOLLOW: Type = 3;
+    #[doc = " Hollow block cursor."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RenderStateData {
     #[doc = " Queryable data kinds for ghostty_render_state_get().\n"]
@@ -1412,12 +1900,16 @@ pub mod RenderStateData {
     pub const CURSOR_VIEWPORT_Y: Type = 16;
     #[doc = " Whether the cursor is on the tail of a wide character (bool).\n  Only valid when CURSOR_VIEWPORT_HAS_VALUE is true."]
     pub const CURSOR_VIEWPORT_WIDE_TAIL: Type = 17;
+    #[doc = " Whether the cursor is on the tail of a wide character (bool).\n  Only valid when CURSOR_VIEWPORT_HAS_VALUE is true."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RenderStateOption {
     #[doc = " Settable options for ghostty_render_state_set().\n"]
     pub type Type = ::std::os::raw::c_uint;
     #[doc = " Set dirty state (GhosttyRenderStateDirty)."]
     pub const DIRTY: Type = 0;
+    #[doc = " Set dirty state (GhosttyRenderStateDirty)."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RenderStateRowData {
     #[doc = " Queryable data kinds for ghostty_render_state_row_get().\n"]
@@ -1430,12 +1922,16 @@ pub mod RenderStateRowData {
     pub const RAW: Type = 2;
     #[doc = " Populate a pre-allocated GhosttyRenderStateRowCells with cell data for\n  the current row (GhosttyRenderStateRowCells). Cell data is only\n  valid as long as the underlying render state is not updated.\n  It is unsafe to use cell data after updating the render state."]
     pub const CELLS: Type = 3;
+    #[doc = " Populate a pre-allocated GhosttyRenderStateRowCells with cell data for\n  the current row (GhosttyRenderStateRowCells). Cell data is only\n  valid as long as the underlying render state is not updated.\n  It is unsafe to use cell data after updating the render state."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod RenderStateRowOption {
     #[doc = " Settable options for ghostty_render_state_row_set().\n"]
     pub type Type = ::std::os::raw::c_uint;
     #[doc = " Set dirty state for the current row (bool)."]
     pub const DIRTY: Type = 0;
+    #[doc = " Set dirty state for the current row (bool)."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Render-state color information.\n\n This struct uses the sized-struct ABI pattern. Initialize with\n GHOSTTY_INIT_SIZED(GhosttyRenderStateColors) before calling\n ghostty_render_state_colors_get().\n\n Example:\n GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);\n GhosttyResult result = ghostty_render_state_colors_get(state, &colors);\n"]
 #[repr(C)]
@@ -1504,6 +2000,16 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " Get multiple data fields from a render state in a single call.\n\n Each element in the keys array specifies a data kind, and the\n corresponding element in the values array receives the result.\n\n Processing stops at the first error; on success out_written\n is set to count, on error it is set to the index of the\n failing key (i.e. the number of values successfully written).\n\n               documented output type)\n             successfully written (may be NULL)\n"]
+    pub fn ghostty_render_state_get_multi(
+        state: RenderState,
+        count: usize,
+        keys: *const RenderStateData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Set an option on a render state.\n\n The `value` pointer must point to a value of the type corresponding to the\n requested option kind (see GhosttyRenderStateOption).\n\n            GHOSTTY_INVALID_VALUE)\n         `value` is NULL\n"]
     pub fn ghostty_render_state_set(
         state: RenderState,
@@ -1542,6 +2048,16 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " Get multiple data fields from the current row in a single call.\n\n Each element in the keys array specifies a data kind, and the\n corresponding element in the values array receives the result.\n\n Processing stops at the first error; on success out_written\n is set to count, on error it is set to the index of the\n failing key (i.e. the number of values successfully written).\n\n               documented output type)\n             successfully written (may be NULL)\n"]
+    pub fn ghostty_render_state_row_get_multi(
+        iterator: RenderStateRowIterator,
+        count: usize,
+        keys: *const RenderStateRowData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Set an option on the current row in a render-state row iterator.\n\n The `value` pointer must point to a value of the type corresponding to the\n requested option kind (see GhosttyRenderStateRowOption).\n Call ghostty_render_state_row_iterator_next() at least once before\n calling this function.\n\n            GHOSTTY_INVALID_VALUE)\n         `iterator` is NULL or the iterator is not positioned on a row\n"]
     pub fn ghostty_render_state_row_set(
         iterator: RenderStateRowIterator,
@@ -1573,6 +2089,8 @@ pub mod RenderStateRowCellsData {
     pub const BG_COLOR: Type = 5;
     #[doc = " The resolved foreground color of the cell (GhosttyColorRgb).\n  Resolves palette indices through the palette. Bold color handling\n  is not applied; the caller should handle bold styling separately.\n  Returns GHOSTTY_INVALID_VALUE if the cell has no explicit foreground\n  color, in which case the caller should use whatever default foreground\n  color it wants (e.g. the terminal foreground)."]
     pub const FG_COLOR: Type = 6;
+    #[doc = " The resolved foreground color of the cell (GhosttyColorRgb).\n  Resolves palette indices through the palette. Bold color handling\n  is not applied; the caller should handle bold styling separately.\n  Returns GHOSTTY_INVALID_VALUE if the cell has no explicit foreground\n  color, in which case the caller should use whatever default foreground\n  color it wants (e.g. the terminal foreground)."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Move a render-state row cells iterator to the next cell.\n\n Returns true if the iterator moved successfully and cell data is\n available to read at the new position.\n\n         NULL or if the iterator has reached the end\n"]
@@ -1594,23 +2112,19 @@ unsafe extern "C" {
     ) -> Result::Type;
 }
 unsafe extern "C" {
+    #[doc = " Get multiple data fields from the current cell in a single call.\n\n Each element in the keys array specifies a data kind, and the\n corresponding element in the values array receives the result.\n\n Processing stops at the first error; on success out_written\n is set to count, on error it is set to the index of the\n failing key (i.e. the number of values successfully written).\n\n               documented output type)\n             successfully written (may be NULL)\n"]
+    pub fn ghostty_render_state_row_cells_get_multi(
+        cells: RenderStateRowCells,
+        count: usize,
+        keys: *const RenderStateRowCellsData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
     #[doc = " Free a row cells instance.\n\n"]
     pub fn ghostty_render_state_row_cells_free(cells: RenderStateRowCells);
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct OscParserImpl {
-    _unused: [u8; 0],
-}
-#[doc = " Opaque handle to an OSC parser instance.\n\n This handle represents an OSC (Operating System Command) parser that can\n be used to parse the contents of OSC sequences.\n"]
-pub type OscParser = *mut OscParserImpl;
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct OscCommandImpl {
-    _unused: [u8; 0],
-}
-#[doc = " Opaque handle to a single OSC command.\n\n This handle represents a parsed OSC (Operating System Command) command.\n The command can be queried for its type and associated data.\n"]
-pub type OscCommand = *mut OscCommandImpl;
 pub mod OscCommandType {
     #[doc = " OSC command types.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -1637,6 +2151,7 @@ pub mod OscCommandType {
     pub const CONEMU_XTERM_EMULATION: Type = 20;
     pub const CONEMU_COMMENT: Type = 21;
     pub const KITTY_TEXT_SIZING: Type = 22;
+    pub const TYPE_MAX_VALUE: Type = 2147483647;
 }
 pub mod OscCommandData {
     #[doc = " OSC command data types.\n\n These values specify what type of data to extract from an OSC command\n using `ghostty_osc_command_data`.\n"]
@@ -1645,6 +2160,8 @@ pub mod OscCommandData {
     pub const INVALID: Type = 0;
     #[doc = " Window title string data.\n\n Valid for: GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE\n\n Output type: const char ** (pointer to null-terminated string)\n\n Lifetime: Valid until the next call to any ghostty_osc_* function with\n the same parser instance. Memory is owned by the parser."]
     pub const CHANGE_WINDOW_TITLE_STR: Type = 1;
+    #[doc = " Window title string data.\n\n Valid for: GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE\n\n Output type: const char ** (pointer to null-terminated string)\n\n Lifetime: Valid until the next call to any ghostty_osc_* function with\n the same parser instance. Memory is owned by the parser."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Create a new OSC parser instance.\n\n Creates a new OSC (Operating System Command) parser using the provided\n allocator. The parser must be freed using ghostty_vt_osc_free() when\n no longer needed.\n\n"]
@@ -1678,13 +2195,6 @@ unsafe extern "C" {
         out: *mut ::std::os::raw::c_void,
     ) -> bool;
 }
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct SgrParserImpl {
-    _unused: [u8; 0],
-}
-#[doc = " Opaque handle to an SGR parser instance.\n\n This handle represents an SGR (Select Graphic Rendition) parser that can\n be used to parse SGR sequences and extract individual text attributes.\n"]
-pub type SgrParser = *mut SgrParserImpl;
 pub mod SgrAttributeTag {
     #[doc = " SGR attribute tags.\n\n These values identify the type of an SGR attribute in a tagged union.\n Use the tag to determine which field in the attribute value union to access.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -1719,6 +2229,7 @@ pub mod SgrAttributeTag {
     pub const BRIGHT_FG_8: Type = 28;
     pub const BG_256: Type = 29;
     pub const FG_256: Type = 30;
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod SgrUnderline {
     #[doc = " Underline style types.\n"]
@@ -1729,6 +2240,7 @@ pub mod SgrUnderline {
     pub const CURLY: Type = 3;
     pub const DOTTED: Type = 4;
     pub const DASHED: Type = 5;
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Unknown SGR attribute data.\n\n Contains the full parameter list and the partial list where parsing\n encountered an unknown or invalid sequence.\n"]
 #[repr(C)]
@@ -1883,6 +2395,97 @@ unsafe extern "C" {
     #[doc = " Get the value from an SGR attribute.\n\n This function returns a pointer to the value union from an SGR attribute. Use\n the tag to determine which field of the union is valid. Primarily useful in\n WebAssembly environments where accessing struct fields directly is difficult.\n\n"]
     pub fn ghostty_sgr_attribute_value(attr: *mut SgrAttribute) -> *mut SgrAttributeValue;
 }
+#[doc = " Result of decoding an image.\n\n The `data` buffer must be allocated through the allocator provided to\n the decode callback. The library takes ownership and will free it\n with the same allocator."]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SysImage {
+    #[doc = " Image width in pixels."]
+    pub width: u32,
+    #[doc = " Image height in pixels."]
+    pub height: u32,
+    #[doc = " Pointer to the decoded RGBA pixel data."]
+    pub data: *mut u8,
+    #[doc = " Length of the pixel data in bytes."]
+    pub data_len: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of SysImage"][::std::mem::size_of::<SysImage>() - 24usize];
+    ["Alignment of SysImage"][::std::mem::align_of::<SysImage>() - 8usize];
+    ["Offset of field: SysImage::width"][::std::mem::offset_of!(SysImage, width) - 0usize];
+    ["Offset of field: SysImage::height"][::std::mem::offset_of!(SysImage, height) - 4usize];
+    ["Offset of field: SysImage::data"][::std::mem::offset_of!(SysImage, data) - 8usize];
+    ["Offset of field: SysImage::data_len"][::std::mem::offset_of!(SysImage, data_len) - 16usize];
+};
+impl Default for SysImage {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+pub mod SysLogLevel {
+    #[doc = " Log severity levels for the log callback."]
+    pub type Type = ::std::os::raw::c_uint;
+    pub const ERROR: Type = 0;
+    pub const WARNING: Type = 1;
+    pub const INFO: Type = 2;
+    pub const DEBUG: Type = 3;
+    pub const MAX_VALUE: Type = 2147483647;
+}
+#[doc = " Callback type for logging.\n\n When installed, internal library log messages are delivered through\n this callback instead of being discarded. The embedder is responsible\n for formatting and routing log output.\n\n When the log is unscoped (default scope), @p scope_len is 0.\n\n All pointer arguments are only valid for the duration of the callback.\n The callback must be safe to call from any thread.\n"]
+pub type SysLogFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        userdata: *mut ::std::os::raw::c_void,
+        level: SysLogLevel::Type,
+        scope: *const u8,
+        scope_len: usize,
+        message: *const u8,
+        message_len: usize,
+    ),
+>;
+#[doc = " Callback type for PNG decoding.\n\n Decodes raw PNG data into RGBA pixels. The output pixel data must be\n allocated through the provided allocator. The library takes ownership\n of the buffer and will free it with the same allocator.\n"]
+pub type SysDecodePngFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        userdata: *mut ::std::os::raw::c_void,
+        allocator: *const Allocator,
+        data: *const u8,
+        data_len: usize,
+        out: *mut SysImage,
+    ) -> bool,
+>;
+pub mod SysOption {
+    #[doc = " System option identifiers for ghostty_sys_set()."]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Set the userdata pointer passed to all sys callbacks.\n\n Input type: void* (or NULL)"]
+    pub const GHOSTTY_SYS_OPT_USERDATA: Type = 0;
+    #[doc = " Set the PNG decode function.\n\n When set, the terminal can accept PNG images via the Kitty\n Graphics Protocol. When cleared (NULL value), PNG decoding is\n unsupported and PNG image data will be rejected.\n\n Input type: GhosttySysDecodePngFn (function pointer, or NULL)"]
+    pub const GHOSTTY_SYS_OPT_DECODE_PNG: Type = 1;
+    #[doc = " Set the log callback.\n\n When set, internal library log messages are delivered to this\n callback. When cleared (NULL value), log messages are silently\n discarded.\n\n Use ghostty_sys_log_stderr as a convenience callback that\n writes formatted messages to stderr.\n\n Which log levels are emitted depends on the build mode of the\n library and is not configurable at runtime. Debug builds emit\n all levels (debug and above). Release builds emit info and\n above; debug-level messages are compiled out entirely and will\n never reach the callback.\n\n Input type: GhosttySysLogFn (function pointer, or NULL)"]
+    pub const GHOSTTY_SYS_OPT_LOG: Type = 2;
+    #[doc = " Set the log callback.\n\n When set, internal library log messages are delivered to this\n callback. When cleared (NULL value), log messages are silently\n discarded.\n\n Use ghostty_sys_log_stderr as a convenience callback that\n writes formatted messages to stderr.\n\n Which log levels are emitted depends on the build mode of the\n library and is not configurable at runtime. Debug builds emit\n all levels (debug and above). Release builds emit info and\n above; debug-level messages are compiled out entirely and will\n never reach the callback.\n\n Input type: GhosttySysLogFn (function pointer, or NULL)"]
+    pub const GHOSTTY_SYS_OPT_MAX_VALUE: Type = 2147483647;
+}
+unsafe extern "C" {
+    #[doc = " Set a system-level option.\n\n Configures a process-global implementation function. These should be\n set once at startup before using any terminal functionality that\n depends on them.\n\n               or NULL to clear it\n         option is not recognized"]
+    pub fn ghostty_sys_set(
+        option: SysOption::Type,
+        value: *const ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Built-in log callback that writes to stderr.\n\n Formats each message as \"[level](scope): message\\n\".\n Can be passed directly to ghostty_sys_set():\n\n ghostty_sys_set(GHOSTTY_SYS_OPT_LOG, &ghostty_sys_log_stderr);"]
+    pub fn ghostty_sys_log_stderr(
+        userdata: *mut ::std::os::raw::c_void,
+        level: SysLogLevel::Type,
+        scope: *const u8,
+        scope_len: usize,
+        message: *const u8,
+        message_len: usize,
+    );
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct KeyEventImpl {
@@ -1899,6 +2502,8 @@ pub mod KeyAction {
     pub const PRESS: Type = 1;
     #[doc = " Key is being repeated (held down)"]
     pub const REPEAT: Type = 2;
+    #[doc = " Key is being repeated (held down)"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Keyboard modifier keys bitmask.\n\n A bitmask representing all keyboard modifiers. This tracks which modifier keys\n are pressed and, where supported by the platform, which side (left or right)\n of each modifier is active.\n\n Use the GHOSTTY_MODS_* constants to test and set individual modifiers.\n\n Modifier side bits are only meaningful when the corresponding modifier bit is set.\n Not all platforms support distinguishing between left and right modifier\n keys and Ghostty is built to expect that some platforms may not provide this\n information.\n"]
 pub type Mods = u16;
@@ -2081,6 +2686,7 @@ pub mod Key {
     pub const COPY: Type = 173;
     pub const CUT: Type = 174;
     pub const PASTE: Type = 175;
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Create a new key event instance.\n\n Creates a new key event with default values. The event must be freed using\n ghostty_key_event_free() when no longer needed.\n\n"]
@@ -2174,6 +2780,8 @@ pub mod OptionAsAlt {
     pub const LEFT: Type = 2;
     #[doc = " Only right option key is treated as alt"]
     pub const RIGHT: Type = 3;
+    #[doc = " Only right option key is treated as alt"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod KeyEncoderOption {
     #[doc = " Key encoder option identifiers.\n\n These values are used with ghostty_key_encoder_setopt() to configure\n the behavior of the key encoder.\n"]
@@ -2192,6 +2800,10 @@ pub mod KeyEncoderOption {
     pub const KITTY_FLAGS: Type = 5;
     #[doc = " macOS option-as-alt setting (value: GhosttyOptionAsAlt)"]
     pub const MACOS_OPTION_AS_ALT: Type = 6;
+    #[doc = " Backarrow key mode (value: bool)\n See https://vt100.net/dec/ek-vt3xx-tp-002.pdf page 170\n If `false` (the default), `backspace` emits 0x7f\n If `true`, `backspace` emits 0x08"]
+    pub const BACKARROW_KEY_MODE: Type = 7;
+    #[doc = " Backarrow key mode (value: bool)\n See https://vt100.net/dec/ek-vt3xx-tp-002.pdf page 170\n If `false` (the default), `backspace` emits 0x7f\n If `true`, `backspace` emits 0x08"]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Create a new key encoder instance.\n\n Creates a new key encoder with default options. The encoder can be configured\n using ghostty_key_encoder_setopt() and must be freed using\n ghostty_key_encoder_free() when no longer needed.\n\n"]
@@ -2242,6 +2854,8 @@ pub mod MouseAction {
     pub const RELEASE: Type = 1;
     #[doc = " Mouse moved."]
     pub const MOTION: Type = 2;
+    #[doc = " Mouse moved."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod MouseButton {
     #[doc = " Mouse button identity.\n"]
@@ -2258,6 +2872,7 @@ pub mod MouseButton {
     pub const NINE: Type = 9;
     pub const TEN: Type = 10;
     pub const ELEVEN: Type = 11;
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Mouse position in surface-space pixels.\n"]
 #[repr(C)]
@@ -2343,6 +2958,8 @@ pub mod MouseTrackingMode {
     pub const BUTTON: Type = 3;
     #[doc = " Any-event tracking mode."]
     pub const ANY: Type = 4;
+    #[doc = " Any-event tracking mode."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod MouseFormat {
     #[doc = " Mouse output format.\n"]
@@ -2352,6 +2969,7 @@ pub mod MouseFormat {
     pub const SGR: Type = 2;
     pub const URXVT: Type = 3;
     pub const SGR_PIXELS: Type = 4;
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Mouse encoder size and geometry context.\n\n This describes the rendered terminal geometry used to convert\n surface-space positions into encoded coordinates.\n"]
 #[repr(C)]
@@ -2412,6 +3030,8 @@ pub mod MouseEncoderOption {
     pub const ANY_BUTTON_PRESSED: Type = 3;
     #[doc = " Whether to enable motion deduplication by last cell (value: bool)."]
     pub const TRACK_LAST_CELL: Type = 4;
+    #[doc = " Whether to enable motion deduplication by last cell (value: bool)."]
+    pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
     #[doc = " Create a new mouse encoder instance.\n\n"]
