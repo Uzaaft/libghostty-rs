@@ -30,7 +30,7 @@
           overlays = [(import rust-overlay)];
         };
 
-        rustVersion = "1.93.0";
+        rustVersion = "1.92.0";
         rustExtensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
 
         toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
