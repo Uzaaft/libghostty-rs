@@ -145,17 +145,17 @@ VM. They are not installed on macOS because upstream valgrind is broken on
 
 `fuzz/afl/valgrind.sh` builds the harness in non-fuzzing mode (it consumes one
 input from stdin per process) and runs every file under `fuzz/afl/in/` through
-`valgrind --leak-check=full --track-origins=yes`. Per-input logs land in
-`target/valgrind-fuzz/` and the script exits non-zero on the first definite or
-possible leak.
+`valgrind --leak-check=full --track-origins=yes`. The harness pulls in
+`libghostty-vt` with the `link-static` feature so there is no `LD_LIBRARY_PATH`
+dance. Per-input logs land in `target/valgrind-fuzz/` and the script exits
+non-zero on the first definite or possible leak.
 
 ```sh
 fuzz/afl/valgrind.sh
 ```
 
-The script resolves `libghostty-vt` under `target/$PROFILE/build/` and exports
-`LD_LIBRARY_PATH` itself. Set `PROFILE=release` to sweep the optimised build
-and `LOG_DIR=...` to redirect logs.
+Set `PROFILE=release` to sweep the optimised build and `LOG_DIR=...` to
+redirect logs.
 
 ### Running the example
 

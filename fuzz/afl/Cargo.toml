@@ -8,7 +8,11 @@ version.workspace = true
 
 [dependencies]
 afl = "0.18.1"
-libghostty-vt.workspace = true
+# Statically link libghostty-vt so the harness has no runtime LD_LIBRARY_PATH
+# dependency. AFL spawns thousands of short-lived processes per second, and
+# valgrind aborts before main() if the loader cannot find libghostty-vt.so;
+# linking the .a removes both classes of operational footgun.
+libghostty-vt = { workspace = true, features = ["link-static"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }
