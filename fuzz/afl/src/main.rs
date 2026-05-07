@@ -72,6 +72,15 @@ fn main() -> std::io::Result<()> {
         .unwrap_or(1);
     assert!(repeat > 0, "{ENV_REPEAT} must be > 0");
 
+    // Print resolved configuration to stderr so wrappers like valgrind.sh can
+    // confirm env vars actually propagated. Cheap (one syscall per process).
+    eprintln!(
+        "[libghostty-vt-afl-fuzz] repeat={repeat} cols={cols:?} rows={rows:?} input_bytes={bytes}",
+        cols = forced_cols(),
+        rows = forced_rows(),
+        bytes = data.len(),
+    );
+
     for _ in 0..repeat {
         fuzz_terminal(&data);
     }
