@@ -16,7 +16,7 @@ fn main() {
     let include_dir = if let Ok(dir) = env::var("GHOSTTY_INCLUDE_DIR") {
         PathBuf::from(dir)
     } else if let Ok(src) = env::var("GHOSTTY_SOURCE_DIR") {
-        PathBuf::from(src).join("zig-out").join("include")
+        PathBuf::from(src).join("include")
     } else {
         // Walk target/debug/build/ to find the libghostty-vt-sys output.
         let manifest_dir =
@@ -62,12 +62,14 @@ fn main() {
     let mut builder = bindgen::Builder::default()
         .header(header.to_string_lossy())
         .clang_arg(format!("-I{}", include_dir.to_string_lossy()))
+        .clang_arg("-D__wasm__")
         .allowlist_function("[Gg]hostty.*")
         .allowlist_type("[Gg]hostty.*")
         .allowlist_var("GHOSTTY_.*")
         .generate_cstr(true)
         .derive_default(true)
         .size_t_is_usize(true)
+        .layout_tests(false)
         .default_enum_style(EnumVariation::ModuleConsts)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .parse_callbacks(Box::new(Callbacks));

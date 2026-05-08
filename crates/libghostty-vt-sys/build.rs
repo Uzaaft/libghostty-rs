@@ -105,6 +105,11 @@ fn build_vendored(link_mode: LinkMode) {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let target = env::var("TARGET").expect("TARGET must be set");
     let host = env::var("HOST").expect("HOST must be set");
+    if target.starts_with("wasm32") && matches!(link_mode, LinkMode::Dynamic) {
+        panic!(
+            "wasm32 targets do not support dynamic linking; do not enable the `link-dynamic` feature"
+        );
+    }
 
     // Locate ghostty source: env override > fetch into OUT_DIR.
     let ghostty_dir = match env::var("GHOSTTY_SOURCE_DIR") {
@@ -171,7 +176,7 @@ fn build_vendored(link_mode: LinkMode) {
     run(build, "zig build");
 
     let lib_dir = install_prefix.join("lib");
-    let include_dir = install_prefix.join("include");
+    let include_dir = ghostty_dir.join("include");
     let search_dirs = library_search_dirs(&target, &install_prefix);
     warn_unused_xcframework(&lib_dir);
 
@@ -389,6 +394,7 @@ fn zig_target(target: &str) -> String {
         "aarch64-pc-windows-gnullvm" => "aarch64-windows-gnu",
         "x86_64-pc-windows-msvc" => "x86_64-windows-msvc",
         "aarch64-pc-windows-msvc" => "aarch64-windows-msvc",
+        "wasm32-unknown-unknown" => "wasm32-freestanding",
         other => panic!("unsupported Rust target for vendored build: {other}"),
     };
     value.to_owned()
