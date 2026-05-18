@@ -305,6 +305,14 @@ pub enum TrackingMode {
     Any = ffi::MouseTrackingMode::ANY,
 }
 
+impl TrackingMode {
+    /// Whether this mode reports pointer motion events.
+    #[must_use]
+    pub fn sends_motion(self) -> bool {
+        matches!(self, Self::Button | Self::Any)
+    }
+}
+
 /// Mouse output format.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
@@ -316,6 +324,124 @@ pub enum Format {
     Sgr = ffi::MouseFormat::SGR,
     Urxvt = ffi::MouseFormat::URXVT,
     SgrPixels = ffi::MouseFormat::SGR_PIXELS,
+}
+
+/// Mouse cursor shape names accepted by OSC 22.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Shape {
+    /// Platform default cursor.
+    Default,
+    /// Context menu cursor.
+    ContextMenu,
+    /// Help cursor.
+    Help,
+    /// Pointer cursor.
+    Pointer,
+    /// Progress cursor.
+    Progress,
+    /// Wait cursor.
+    Wait,
+    /// Cell cursor.
+    Cell,
+    /// Crosshair cursor.
+    Crosshair,
+    /// Text cursor.
+    Text,
+    /// Vertical text cursor.
+    VerticalText,
+    /// Alias cursor.
+    Alias,
+    /// Copy cursor.
+    Copy,
+    /// Move cursor.
+    Move,
+    /// No-drop cursor.
+    NoDrop,
+    /// Not-allowed cursor.
+    NotAllowed,
+    /// Grab cursor.
+    Grab,
+    /// Grabbing cursor.
+    Grabbing,
+    /// All-scroll cursor.
+    AllScroll,
+    /// Column-resize cursor.
+    ColResize,
+    /// Row-resize cursor.
+    RowResize,
+    /// North-resize cursor.
+    NResize,
+    /// East-resize cursor.
+    EResize,
+    /// South-resize cursor.
+    SResize,
+    /// West-resize cursor.
+    WResize,
+    /// Northeast-resize cursor.
+    NeResize,
+    /// Northwest-resize cursor.
+    NwResize,
+    /// Southeast-resize cursor.
+    SeResize,
+    /// Southwest-resize cursor.
+    SwResize,
+    /// East-west-resize cursor.
+    EwResize,
+    /// North-south-resize cursor.
+    NsResize,
+    /// Northeast-southwest-resize cursor.
+    NeswResize,
+    /// Northwest-southeast-resize cursor.
+    NwseResize,
+    /// Zoom-in cursor.
+    ZoomIn,
+    /// Zoom-out cursor.
+    ZoomOut,
+}
+
+impl Shape {
+    /// Parse a W3C, xterm, or Foot cursor shape name.
+    #[must_use]
+    pub fn from_name(value: &str) -> Option<Self> {
+        Some(match value {
+            "default" | "left_ptr" => Self::Default,
+            "context-menu" => Self::ContextMenu,
+            "help" | "question_arrow" => Self::Help,
+            "pointer" | "hand" => Self::Pointer,
+            "progress" | "left_ptr_watch" => Self::Progress,
+            "wait" | "watch" => Self::Wait,
+            "cell" => Self::Cell,
+            "crosshair" | "cross" => Self::Crosshair,
+            "text" | "xterm" => Self::Text,
+            "vertical-text" => Self::VerticalText,
+            "alias" | "dnd-link" => Self::Alias,
+            "copy" | "dnd-copy" => Self::Copy,
+            "move" | "dnd-move" => Self::Move,
+            "no-drop" | "dnd-no-drop" => Self::NoDrop,
+            "not-allowed" | "crossed_circle" => Self::NotAllowed,
+            "grab" | "hand1" => Self::Grab,
+            "grabbing" => Self::Grabbing,
+            "all-scroll" | "fleur" => Self::AllScroll,
+            "col-resize" => Self::ColResize,
+            "row-resize" => Self::RowResize,
+            "n-resize" | "top_side" => Self::NResize,
+            "e-resize" | "right_side" => Self::EResize,
+            "s-resize" | "bottom_side" => Self::SResize,
+            "w-resize" | "left_side" => Self::WResize,
+            "ne-resize" | "top_right_corner" => Self::NeResize,
+            "nw-resize" | "top_left_corner" => Self::NwResize,
+            "se-resize" | "bottom_right_corner" => Self::SeResize,
+            "sw-resize" | "bottom_left_corner" => Self::SwResize,
+            "ew-resize" => Self::EwResize,
+            "ns-resize" => Self::NsResize,
+            "nesw-resize" => Self::NeswResize,
+            "nwse-resize" => Self::NwseResize,
+            "zoom-in" => Self::ZoomIn,
+            "zoom-out" => Self::ZoomOut,
+            _ => return None,
+        })
+    }
 }
 
 /// Mouse encoder size and geometry context.
@@ -389,4 +515,30 @@ pub enum Button {
     Nine = ffi::MouseButton::NINE,
     Ten = ffi::MouseButton::TEN,
     Eleven = ffi::MouseButton::ELEVEN,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Shape, TrackingMode};
+
+    #[test]
+    fn tracking_mode_motion_policy_matches_ghostty() {
+        assert!(!TrackingMode::None.sends_motion());
+        assert!(!TrackingMode::X10.sends_motion());
+        assert!(!TrackingMode::Normal.sends_motion());
+        assert!(TrackingMode::Button.sends_motion());
+        assert!(TrackingMode::Any.sends_motion());
+    }
+
+    #[test]
+    fn cursor_shape_from_name_accepts_w3c_and_xterm_aliases() {
+        assert_eq!(Shape::from_name("default"), Some(Shape::Default));
+        assert_eq!(Shape::from_name("pointer"), Some(Shape::Pointer));
+        assert_eq!(Shape::from_name("left_ptr"), Some(Shape::Default));
+        assert_eq!(Shape::from_name("question_arrow"), Some(Shape::Help));
+        assert_eq!(Shape::from_name("hand"), Some(Shape::Pointer));
+        assert_eq!(Shape::from_name("left_ptr_watch"), Some(Shape::Progress));
+        assert_eq!(Shape::from_name("top_right_corner"), Some(Shape::NeResize));
+        assert_eq!(Shape::from_name("nosuchshape"), None);
+    }
 }
