@@ -1153,7 +1153,7 @@ handlers! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::mem::ManuallyDrop;
     use std::rc::Rc;
 
@@ -1225,6 +1225,41 @@ mod tests {
             // so it now owns exactly one initialized T allocation.
             (Box::from_raw(dst_ptr), src_addr, dst_addr)
         }
+    }
+
+    /// Send an OSC 2 title sequence, then verify `term.title()` returns the
+    /// correct value inside the `on_title_changed` callback.
+    #[test]
+    fn title_changed_callback_returns_correct_title() {
+        // The callback bound on `on_title_changed` is `'cb`, not `'static`,
+        // so the closure can borrow stack locals directly – no Rc needed.
+        let captured_title: RefCell<String> = RefCell::new(String::new());
+        let callback_count: Cell<usize> = Cell::new(0);
+
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+
+        terminal
+            .on_title_changed(|term| {
+                callback_count.set(callback_count.get() + 1);
+                let title = term.title().expect("title() should succeed inside callback");
+                *captured_title.borrow_mut() = title.to_owned();
+            })
+            .expect("callback should register");
+
+        // OSC 2 (set title) should invoke on_title_changed.
+        terminal.vt_write(b"\x1b]2;Hello Effects\x1b\\");
+        assert_eq!(callback_count.get(), 1);
+        assert_eq!(*captured_title.borrow(), "Hello Effects");
+
+        // A second title change should fire the callback again.
+        terminal.vt_write(b"\x1b]2;Second Title\x1b\\");
+        assert_eq!(callback_count.get(), 2);
+        assert_eq!(*captured_title.borrow(), "Second Title");
     }
 
     /// Explicitly relocate the Terminal into distinct storage, then verify the
