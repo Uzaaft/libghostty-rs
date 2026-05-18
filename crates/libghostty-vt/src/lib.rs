@@ -38,6 +38,7 @@ pub use libghostty_vt_sys as ffi;
 
 pub mod alloc;
 pub mod build_info;
+pub mod dcs;
 pub mod error;
 pub mod fmt;
 pub mod focus;
