@@ -4,11 +4,11 @@
 #![allow(clippy::all)]
 #![allow(rustdoc::all)]
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 mod bindings;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod bindings_wasm;
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use bindings_wasm as bindings;
 
 use std::ops::Deref;
