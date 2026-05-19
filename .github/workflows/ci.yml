@@ -34,6 +34,9 @@ jobs:
       - name: Build
         run: nix develop -c cargo build
 
+      - name: Check wasm32 static link path
+        run: nix develop -c cargo check -p libghostty-vt --target wasm32-unknown-unknown --features link-static
+
       - name: Check pkg-config path
         run: |
           PKG_CONFIG_PATH=$(find target/debug/build -path '*/out/ghostty-install/share/pkgconfig' | head -1)

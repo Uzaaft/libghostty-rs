@@ -1,4 +1,5 @@
 use std::env;
+use std::path::Path;
 use std::path::PathBuf;
 
 use bindgen::EnumVariation;
@@ -16,7 +17,17 @@ fn main() {
     let include_dir = if let Ok(dir) = env::var("GHOSTTY_INCLUDE_DIR") {
         PathBuf::from(dir)
     } else if let Ok(src) = env::var("GHOSTTY_SOURCE_DIR") {
-        PathBuf::from(src).join("zig-out").join("include")
+        let src = PathBuf::from(src);
+        let zig_out_include = src.join("zig-out").join("include");
+        if zig_out_include.join("ghostty").join("vt.h").exists() {
+            zig_out_include
+        } else {
+            eprintln!(
+                "gen-bindings: GHOSTTY_SOURCE_DIR/zig-out/include is missing ghostty/vt.h; falling back to {}",
+                src.join("include").display()
+            );
+            src.join("include")
+        }
     } else {
         // Walk target/debug/build/ to find the libghostty-vt-sys output.
         let manifest_dir =
@@ -57,8 +68,18 @@ fn main() {
     let header = include_dir.join("ghostty").join("vt.h");
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
-    let out = manifest_dir.join("src").join("bindings.rs");
+    let out_dir = manifest_dir.join("src");
 
+    generate_bindings(&header, &include_dir, &out_dir.join("bindings.rs"), None);
+    generate_bindings(
+        &header,
+        &include_dir,
+        &out_dir.join("bindings_wasm.rs"),
+        Some("wasm32-unknown-unknown"),
+    );
+}
+
+fn generate_bindings(header: &Path, include_dir: &Path, out: &Path, target: Option<&str>) {
     let mut builder = bindgen::Builder::default()
         .header(header.to_string_lossy())
         .clang_arg(format!("-I{}", include_dir.to_string_lossy()))
@@ -72,8 +93,12 @@ fn main() {
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .parse_callbacks(Box::new(Callbacks));
 
-    if cfg!(target_os = "linux") {
+    if cfg!(target_os = "linux") && target.is_none() {
         builder = builder.clang_arg("-I/usr/include");
+    }
+
+    if let Some(target) = target {
+        builder = builder.clang_arg(format!("--target={target}"));
     }
 
     let bindings = builder
@@ -81,7 +106,7 @@ fn main() {
         .expect("failed to generate bindings from include/ghostty/vt.h");
 
     bindings
-        .write_to_file(&out)
+        .write_to_file(out)
         .unwrap_or_else(|error| panic!("failed to write bindings to {}: {error}", out.display()));
 }
 
