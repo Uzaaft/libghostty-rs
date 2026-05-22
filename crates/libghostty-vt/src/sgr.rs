@@ -1,9 +1,7 @@
 //! Handling SGR (Select Graphic Rendition) escape sequences.
 
-use std::{marker::PhantomData, ptr::NonNull};
-
 use crate::{
-    alloc::Allocator,
+    alloc::{Allocator, Object},
     error::{Error, Result, from_result},
     ffi,
     style::{PaletteIndex, RgbColor, Underline},
@@ -38,10 +36,7 @@ use crate::{
 /// }
 /// ```
 #[derive(Debug)]
-pub struct Parser<'alloc> {
-    ptr: NonNull<ffi::GhosttySgrParser>,
-    _phan: PhantomData<&'alloc ffi::GhosttyAllocator>,
-}
+pub struct Parser<'alloc>(Object<'alloc, ffi::SgrParserImpl>);
 
 impl<'alloc> Parser<'alloc> {
     /// Create a new SGR parser.
@@ -54,20 +49,16 @@ impl<'alloc> Parser<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc, Ctx>(alloc: &'alloc Allocator<'ctx, Ctx>) -> Result<Self> {
+    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
 
-    unsafe fn new_inner(alloc: *const ffi::GhosttyAllocator) -> Result<Self> {
-        let mut raw: ffi::GhosttySgrParser_ptr = std::ptr::null_mut();
+    unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        let mut raw: ffi::SgrParser = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_sgr_new(alloc, &raw mut raw) };
         from_result(result)?;
-        let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
-        Ok(Self {
-            ptr,
-            _phan: PhantomData,
-        })
+        Ok(Self(Object::new(raw)?))
     }
 
     /// Set SGR parameters for parsing.
@@ -89,18 +80,18 @@ impl<'alloc> Parser<'alloc> {
     ///
     /// **Panics** if `separators` is not `None` and is not the same length as `params`.
     pub fn set_params(&mut self, params: &[u16], separators: Option<&[u8]>) -> Result<()> {
-        let sep_ptr = match separators {
+        let sep = match separators {
             Some(seps) => {
                 assert!(
                     seps.len() == params.len(),
                     "separators length must equal params length"
                 );
-                seps.as_ptr().cast::<std::os::raw::c_char>()
+                seps.as_ptr().cast()
             }
             None => std::ptr::null(),
         };
         let result = unsafe {
-            ffi::ghostty_sgr_set_params(self.ptr.as_ptr(), params.as_ptr(), sep_ptr, params.len())
+            ffi::ghostty_sgr_set_params(self.0.as_raw(), params.as_ptr(), sep, params.len())
         };
         from_result(result)
     }
@@ -118,8 +109,8 @@ impl<'alloc> Parser<'alloc> {
         reason = "lending `next` cannot implement trait"
     )]
     pub fn next(&mut self) -> Result<Option<Attribute<'_>>> {
-        let mut raw_attr = ffi::GhosttySgrAttribute::default();
-        let has_next = unsafe { ffi::ghostty_sgr_next(self.ptr.as_ptr(), &raw mut raw_attr) };
+        let mut raw_attr = ffi::SgrAttribute::default();
+        let has_next = unsafe { ffi::ghostty_sgr_next(self.0.as_raw(), &raw mut raw_attr) };
         if has_next {
             // This shouldn't really *ever* fail, so the fact it failed
             // suggests we should stop anyways.
@@ -135,13 +126,13 @@ impl<'alloc> Parser<'alloc> {
     /// After calling this, [`Parser::next`] will start from the beginning of the
     /// parameter list again.
     pub fn reset(&mut self) {
-        unsafe { ffi::ghostty_sgr_reset(self.ptr.as_ptr()) }
+        unsafe { ffi::ghostty_sgr_reset(self.0.as_raw()) }
     }
 }
 
 impl Drop for Parser<'_> {
     fn drop(&mut self) {
-        unsafe { ffi::ghostty_sgr_free(self.ptr.as_ptr()) }
+        unsafe { ffi::ghostty_sgr_free(self.0.as_raw()) }
     }
 }
 
@@ -185,7 +176,7 @@ pub enum Attribute<'p> {
 
 impl Attribute<'_> {
     /// This should never return None, but just to be safe.
-    fn from_raw(value: ffi::GhosttySgrAttribute) -> Result<Self> {
+    fn from_raw(value: ffi::SgrAttribute) -> Result<Self> {
         Ok(match value.tag {
             0 => Self::Unset,
             1 => Self::Unknown(unsafe { value.value.unknown }.into()),
@@ -235,8 +226,8 @@ pub struct Unknown<'p> {
     pub partial: &'p [u16],
 }
 
-impl From<ffi::GhosttySgrUnknown> for Unknown<'_> {
-    fn from(value: ffi::GhosttySgrUnknown) -> Self {
+impl From<ffi::SgrUnknown> for Unknown<'_> {
+    fn from(value: ffi::SgrUnknown) -> Self {
         // SAFETY: We trust libghostty to give us two valid slices
         // of u16s that last at least as long as the current iteration,
         // which is guaranteed by Rust's mutation XOR sharability property

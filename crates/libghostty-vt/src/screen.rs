@@ -11,6 +11,19 @@ use crate::{
     style::{self, PaletteIndex, RgbColor, Style},
 };
 
+/// Terminal screen identifier.
+///
+/// Identifies which screen buffer is active in the terminal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum Screen {
+    /// The primary (normal) screen.
+    #[default]
+    Primary = ffi::TerminalScreen::PRIMARY,
+    /// The alternate screen.
+    Alternate = ffi::TerminalScreen::ALTERNATE,
+}
+
 /// Resolved reference to a terminal cell position.
 ///
 /// A grid reference is a resolved reference to a specific cell position in
@@ -29,28 +42,37 @@ use crate::{
 /// Use the render state API for that.
 #[derive(Clone, Debug)]
 pub struct GridRef<'t> {
-    pub(crate) inner: ffi::GhosttyGridRef,
-    pub(crate) _phan: PhantomData<&'t ffi::GhosttyTerminal>,
+    pub(crate) inner: ffi::GridRef,
+    pub(crate) _phan: PhantomData<&'t ffi::Terminal>,
 }
 
 impl GridRef<'_> {
+    pub(crate) unsafe fn from_raw(inner: ffi::GridRef) -> Self {
+        Self {
+            inner,
+            _phan: PhantomData,
+        }
+    }
+
     /// Get the row from a grid reference.
     pub fn row(&self) -> Result<Row> {
-        let mut v = ffi::GhosttyRow::default();
-        let result = unsafe { ffi::ghostty_grid_ref_row(std::ptr::from_ref(&self.inner), &raw mut v) };
+        let mut v = ffi::Row::default();
+        let result =
+            unsafe { ffi::ghostty_grid_ref_row(std::ptr::from_ref(&self.inner), &raw mut v) };
         from_result(result)?;
         Ok(Row(v))
     }
     /// Get the cell from a grid reference.
     pub fn cell(&self) -> Result<Cell> {
-        let mut v = ffi::GhosttyCell::default();
-        let result = unsafe { ffi::ghostty_grid_ref_cell(std::ptr::from_ref(&self.inner), &raw mut v) };
+        let mut v = ffi::Cell::default();
+        let result =
+            unsafe { ffi::ghostty_grid_ref_cell(std::ptr::from_ref(&self.inner), &raw mut v) };
         from_result(result)?;
         Ok(Cell(v))
     }
     /// Get the style of the cell at the grid reference's position.
     pub fn style(&self) -> Result<Style> {
-        let mut v = ffi::GhosttyStyle::default();
+        let mut v = ffi::Style::default();
         let result =
             unsafe { ffi::ghostty_grid_ref_style(std::ptr::from_ref(&self.inner), &raw mut v) };
         from_result(result)?;
@@ -80,6 +102,28 @@ impl GridRef<'_> {
         };
         from_result_with_len(result, len)
     }
+
+    /// Get the hyperlink URI for the cell at the grid reference's position.
+    ///
+    /// Writes the URI bytes into the provided buffer.
+    /// If the cell has no hyperlink, `Ok(0)` is returned.
+    ///
+    /// If the buffer is too small, the function returns
+    /// `Err(Error::OutOfSpace { required })` where `required` is the
+    /// required number of codepoints. The caller can then retry with
+    /// a sufficiently sized buffer.
+    pub fn hyperlink_uri(&self, buf: &mut [u8]) -> Result<usize> {
+        let mut len = 0;
+        let result = unsafe {
+            ffi::ghostty_grid_ref_hyperlink_uri(
+                std::ptr::from_ref(&self.inner),
+                std::ptr::from_mut(buf).cast(),
+                buf.len(),
+                &raw mut len,
+            )
+        };
+        from_result_with_len(result, len)
+    }
 }
 
 /// Represents a single terminal row.
@@ -87,10 +131,10 @@ impl GridRef<'_> {
 /// The internal layout is opaque and must be queried via its methods.
 /// Obtain cell values from terminal query APIs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Row(pub(crate) ffi::GhosttyRow);
+pub struct Row(pub(crate) ffi::Row);
 
 impl Row {
-    fn get<T>(&self, tag: ffi::GhosttyRowData) -> Result<T> {
+    fn get<T>(&self, tag: ffi::RowData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe { ffi::ghostty_row_get(self.0, tag, value.as_mut_ptr().cast()) };
         // Since we manually model every possible query, this should never fail.
@@ -101,38 +145,36 @@ impl Row {
 
     /// Whether this row is soft-wrapped.
     pub fn is_wrapped(self) -> Result<bool> {
-        self.get(ffi::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP)
+        self.get(ffi::RowData::WRAP)
     }
     /// Whether this row is a continuation of a soft-wrapped row.
     pub fn is_wrap_continuation(self) -> Result<bool> {
-        self.get(ffi::GhosttyRowData_GHOSTTY_ROW_DATA_WRAP_CONTINUATION)
+        self.get(ffi::RowData::WRAP_CONTINUATION)
     }
     /// Whether any cells in this row have grapheme clusters.
     pub fn has_grapheme_cluster(self) -> Result<bool> {
-        self.get(ffi::GhosttyRowData_GHOSTTY_ROW_DATA_GRAPHEME)
+        self.get(ffi::RowData::GRAPHEME)
     }
     /// Whether any cells in this row have styling (may have false positives).
     pub fn is_styled(self) -> Result<bool> {
-        self.get(ffi::GhosttyRowData_GHOSTTY_ROW_DATA_STYLED)
+        self.get(ffi::RowData::STYLED)
     }
     /// Whether any cells in this row have hyperlinks (may have false positives).
     pub fn has_hyperlink(self) -> Result<bool> {
-        self.get(ffi::GhosttyRowData_GHOSTTY_ROW_DATA_HYPERLINK)
+        self.get(ffi::RowData::HYPERLINK)
     }
     /// The semantic prompt state of this row.
     pub fn semantic_prompt(self) -> Result<RowSemanticPrompt> {
-        self.get::<ffi::GhosttyRowSemanticPrompt>(
-            ffi::GhosttyRowData_GHOSTTY_ROW_DATA_SEMANTIC_PROMPT,
-        )
-        .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+        self.get::<ffi::RowSemanticPrompt::Type>(ffi::RowData::SEMANTIC_PROMPT)
+            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
     /// Whether this row contains a Kitty virtual placeholder.
     pub fn has_kitty_virtual_placeholder(self) -> Result<bool> {
-        self.get(ffi::GhosttyRowData_GHOSTTY_ROW_DATA_KITTY_VIRTUAL_PLACEHOLDER)
+        self.get(ffi::RowData::KITTY_VIRTUAL_PLACEHOLDER)
     }
     /// Whether this row is dirty and requires a redraw.
     pub fn is_dirty(self) -> Result<bool> {
-        self.get(ffi::GhosttyRowData_GHOSTTY_ROW_DATA_DIRTY)
+        self.get(ffi::RowData::DIRTY)
     }
 }
 
@@ -141,10 +183,10 @@ impl Row {
 /// The internal layout is opaque and must be queried via its methods.
 /// Obtain cell values from terminal query APIs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Cell(pub(crate) ffi::GhosttyCell);
+pub struct Cell(pub(crate) ffi::Cell);
 
 impl Cell {
-    fn get<T>(&self, tag: ffi::GhosttyCellData) -> Result<T> {
+    fn get<T>(&self, tag: ffi::CellData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe { ffi::ghostty_cell_get(self.0, tag, value.as_mut_ptr().cast()) };
         // Since we manually model every possible query, this should never fail.
@@ -155,61 +197,85 @@ impl Cell {
 
     /// The codepoint of the cell (0 if empty or bg-color-only).
     pub fn codepoint(self) -> Result<u32> {
-        self.get(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_CODEPOINT)
+        self.get(ffi::CellData::CODEPOINT)
     }
     /// The content tag describing what kind of content is in the cell.
     pub fn content_tag(self) -> Result<CellContentTag> {
-        self.get::<ffi::GhosttyCellContentTag>(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_CONTENT_TAG)
+        self.get::<ffi::CellContentTag::Type>(ffi::CellData::CONTENT_TAG)
             .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
     /// The wide property of the cell.
     pub fn wide(self) -> Result<CellWide> {
-        self.get::<ffi::GhosttyCellWide>(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_WIDE)
+        self.get::<ffi::CellWide::Type>(ffi::CellData::WIDE)
             .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
     /// Whether the cell has text to render.
     pub fn has_text(self) -> Result<bool> {
-        self.get(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_HAS_TEXT)
+        self.get(ffi::CellData::HAS_TEXT)
     }
     /// Whether the cell has non-default styling.
     pub fn has_styling(self) -> Result<bool> {
-        self.get(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_HAS_STYLING)
+        self.get(ffi::CellData::HAS_STYLING)
     }
     /// The style ID for the cell (for use with style lookups).
     pub fn style_id(self) -> Result<style::Id> {
-        self.get(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_STYLE_ID)
-            .map(style::Id)
+        self.get(ffi::CellData::STYLE_ID).map(style::Id)
     }
     /// Whether the cell has a hyperlink.
     pub fn has_hyperlink(self) -> Result<bool> {
-        self.get(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_HAS_HYPERLINK)
+        self.get(ffi::CellData::HAS_HYPERLINK)
     }
     /// Whether the cell is protected.
     pub fn is_protected(self) -> Result<bool> {
-        self.get(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_PROTECTED)
+        self.get(ffi::CellData::PROTECTED)
     }
     /// The semantic content type of the cell (from OSC 133).
     pub fn semantic_content(self) -> Result<CellSemanticContent> {
-        self.get::<ffi::GhosttyCellSemanticContent>(
-            ffi::GhosttyCellData_GHOSTTY_CELL_DATA_SEMANTIC_CONTENT,
-        )
-        .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+        self.get::<ffi::CellSemanticContent::Type>(ffi::CellData::SEMANTIC_CONTENT)
+            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
 
     /// The palette index for the cell's background color.
     ///
     /// Only valid when [`Cell::content_tag`] is [`CellContentTag::BgColorPalette`].
     pub fn bg_color_palette(self) -> Result<PaletteIndex> {
-        self.get(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_COLOR_PALETTE)
-            .map(PaletteIndex)
+        self.get(ffi::CellData::COLOR_PALETTE).map(PaletteIndex)
     }
     /// The RGB color value for the cell's background color.
     ///
     /// Only valid when [`Cell::content_tag`] is [`CellContentTag::BgColorRgb`].
     pub fn bg_color_rgb(self) -> Result<RgbColor> {
-        Ok(self
-            .get::<ffi::GhosttyColorRgb>(ffi::GhosttyCellData_GHOSTTY_CELL_DATA_COLOR_RGB)?
-            .into())
+        Ok(self.get::<ffi::ColorRgb>(ffi::CellData::COLOR_RGB)?.into())
+    }
+}
+
+/// A selection range defined by two grid references.
+#[derive(Debug)]
+pub struct Selection<'t> {
+    /// Start of the selection range (inclusive).
+    pub start: GridRef<'t>,
+    /// End of the selection range (inclusive).
+    pub end: GridRef<'t>,
+    /// Whether the selection is rectangular (block) rather than linear.
+    pub rectangle: bool,
+}
+impl From<Selection<'_>> for ffi::Selection {
+    fn from(value: Selection<'_>) -> Self {
+        Self {
+            start: value.start.inner,
+            end: value.end.inner,
+            rectangle: value.rectangle,
+            ..ffi::sized!(ffi::Selection)
+        }
+    }
+}
+impl Selection<'_> {
+    pub(crate) unsafe fn from_raw(value: ffi::Selection) -> Self {
+        Self {
+            start: unsafe { GridRef::from_raw(value.start) },
+            end: unsafe { GridRef::from_raw(value.end) },
+            rectangle: value.rectangle,
+        }
     }
 }
 
@@ -220,11 +286,11 @@ impl Cell {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 pub enum RowSemanticPrompt {
     /// No prompt cells in this row.
-    None = ffi::GhosttyRowSemanticPrompt_GHOSTTY_ROW_SEMANTIC_NONE,
+    None = ffi::RowSemanticPrompt::NONE,
     /// Prompt cells exist and this is a primary prompt line.
-    Prompt = ffi::GhosttyRowSemanticPrompt_GHOSTTY_ROW_SEMANTIC_PROMPT,
+    Prompt = ffi::RowSemanticPrompt::PROMPT,
     /// Prompt cells exist and this is a continuation line.
-    Continuation = ffi::GhosttyRowSemanticPrompt_GHOSTTY_ROW_SEMANTIC_PROMPT_CONTINUATION,
+    Continuation = ffi::RowSemanticPrompt::PROMPT_CONTINUATION,
 }
 
 /// Cell content tag.
@@ -234,13 +300,13 @@ pub enum RowSemanticPrompt {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 pub enum CellContentTag {
     /// A single codepoint (may be zero for empty).
-    Codepoint = ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_CODEPOINT,
+    Codepoint = ffi::CellContentTag::CODEPOINT,
     /// A codepoint that is part of a multi-codepoint grapheme cluster.
-    CodepointGrapheme = ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_CODEPOINT_GRAPHEME,
+    CodepointGrapheme = ffi::CellContentTag::CODEPOINT_GRAPHEME,
     /// No text; background color from palette.
-    BgColorPalette = ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE,
+    BgColorPalette = ffi::CellContentTag::BG_COLOR_PALETTE,
     /// No text; background color as RGB.
-    BgColorRgb = ffi::GhosttyCellContentTag_GHOSTTY_CELL_CONTENT_BG_COLOR_RGB,
+    BgColorRgb = ffi::CellContentTag::BG_COLOR_RGB,
 }
 
 /// Cell wide property.
@@ -250,13 +316,13 @@ pub enum CellContentTag {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 pub enum CellWide {
     /// Not a wide character, cell width 1.
-    Narrow = ffi::GhosttyCellWide_GHOSTTY_CELL_WIDE_NARROW,
+    Narrow = ffi::CellWide::NARROW,
     /// Wide character, cell width 2.  
-    Wide = ffi::GhosttyCellWide_GHOSTTY_CELL_WIDE_WIDE,
+    Wide = ffi::CellWide::WIDE,
     /// Spacer after wide character. Do not render.
-    SpacerTail = ffi::GhosttyCellWide_GHOSTTY_CELL_WIDE_SPACER_TAIL,
+    SpacerTail = ffi::CellWide::SPACER_TAIL,
     /// Spacer at end of soft-wrapped line for a wide character.
-    SpacerHead = ffi::GhosttyCellWide_GHOSTTY_CELL_WIDE_SPACER_HEAD,
+    SpacerHead = ffi::CellWide::SPACER_HEAD,
 }
 
 /// Semantic content type of a cell.
@@ -267,9 +333,9 @@ pub enum CellWide {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 pub enum CellSemanticContent {
     /// Regular output content, such as command output.
-    Output = ffi::GhosttyCellSemanticContent_GHOSTTY_CELL_SEMANTIC_OUTPUT,
+    Output = ffi::CellSemanticContent::OUTPUT,
     /// Content that is part of user input.
-    Input = ffi::GhosttyCellSemanticContent_GHOSTTY_CELL_SEMANTIC_INPUT,
+    Input = ffi::CellSemanticContent::INPUT,
     /// Content that is part of a shell prompt.
-    Prompt = ffi::GhosttyCellSemanticContent_GHOSTTY_CELL_SEMANTIC_PROMPT,
+    Prompt = ffi::CellSemanticContent::PROMPT,
 }

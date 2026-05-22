@@ -54,7 +54,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Building
 
-Requires [Zig](https://ziglang.org/) 0.15.x on PATH. The ghostty source is fetched automatically at build time (pinned commit in `build.rs`). Set `GHOSTTY_SOURCE_DIR` to use a local checkout instead.
+Requires [Zig](https://ziglang.org/) 0.15.x on PATH. By default, the ghostty
+source is fetched automatically at build time from the pinned commit in
+`build.rs`. Set `GHOSTTY_SOURCE_DIR` to make the build use a local Ghostty
+checkout instead. Package managers that need network-free builds can also set
+`GHOSTTY_ZIG_SYSTEM_DIR` to a pre-fetched Zig package directory; this is passed
+to `zig build --system` so Zig does not download package dependencies during
+the Cargo build script.
+
+Vendored builds derive Zig's optimize mode from Cargo's profile: dev builds use
+`Debug`, size-optimized builds use `ReleaseSmall`, and other release builds use
+`ReleaseFast`. Set `LIBGHOSTTY_VT_SYS_OPTIMIZE` to `Debug`, `ReleaseSafe`,
+`ReleaseFast`, or `ReleaseSmall` to override that choice explicitly.
+
+The `pkg-config` path is opt-in. If you enable `libghostty-vt-sys/pkg-config`,
+the build will prefer an installed `libghostty-vt` discovered through
+`pkg-config` when `GHOSTTY_SOURCE_DIR` is unset. libghostty-vt is pre-1.0, so
+the checked-in bindings are expected to move with the pinned Ghostty source and
+do not guarantee compatibility with arbitrary installed C API revisions. An
+explicit `GHOSTTY_SOURCE_DIR` always wins.
+
+Nix builds in this repository prefetch the pinned Ghostty source and Ghostty's
+Zig package dependencies up front, then set `GHOSTTY_SOURCE_DIR` and
+`GHOSTTY_ZIG_SYSTEM_DIR` for the Cargo build. Downstream Nix packaging should
+use the same contract rather than adding `git` or allowing network access in
+the sandbox.
+
+Enable `libghostty-vt/link-static` or `libghostty-vt-sys/link-static` to link
+`libghostty-vt.a` instead of the shared library. This statically links the
+Ghostty VT archive, but the final binary may still depend on platform runtime
+libraries.
 
 ```sh
 nix develop
@@ -74,3 +103,6 @@ LD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -nam
 DYLD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) \
   cargo run -p ghostling_rs
 ```
+
+When `link-static` is enabled, the example does not need `LD_LIBRARY_PATH` or
+`DYLD_LIBRARY_PATH` for `libghostty-vt`.

@@ -1,12 +1,16 @@
 [workspace]
-members = ["crates/libghostty-vt", "crates/libghostty-vt-sys", "example/ghostling_rs"]
+members = [
+  "crates/libghostty-vt",
+  "crates/libghostty-vt-sys",
+  "example/ghostling_rs",
+]
 resolver = "2"
 
 [workspace.package]
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/uzaaft/libghostty-rs"
-rust-version = "1.93"
+rust-version = "1.90"
 version = "0.1.1"
 
 [workspace.dependencies]

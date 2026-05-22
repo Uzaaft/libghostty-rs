@@ -1,17 +1,18 @@
 //! Types and functions around terminal state management.
 
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::mem::MaybeUninit;
 
 use crate::{
     alloc::{Allocator, Object},
-    error::{Error, Result, from_result},
-    ffi, key,
-    screen::GridRef,
-    style,
+    error::{Error, Result, from_optional_result, from_result},
+    ffi::{self, TerminalData as Data, TerminalOption as Opt},
+    key,
+    screen::{GridRef, Screen},
+    style::{self, RgbColor},
 };
 
 #[doc(inline)]
-pub use ffi::GhosttySizeReportSize as SizeReportSize;
+pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 
 /// Complete terminal emulator state and rendering.
 ///
@@ -107,8 +108,10 @@ pub use ffi::GhosttySizeReportSize as SizeReportSize;
 /// ```
 #[derive(Debug)]
 pub struct Terminal<'alloc: 'cb, 'cb> {
-    pub(crate) inner: Object<'alloc, ffi::GhosttyTerminal>,
-    vtable: VTable<'alloc, 'cb>,
+    pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
+    // Keep callbacks in a heap allocation so C can store a userdata pointer
+    // to the VTable itself. That pointer remains stable even if Terminal moves.
+    vtable: Box<VTable<'alloc, 'cb>>,
 }
 
 /// Terminal initialization options.
@@ -122,7 +125,7 @@ pub struct Options {
     pub max_scrollback: usize,
 }
 
-impl From<Options> for ffi::GhosttyTerminalOptions {
+impl From<Options> for ffi::TerminalOptions {
     fn from(value: Options) -> Self {
         Self {
             cols: value.cols,
@@ -143,21 +146,21 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc, Ctx>(
-        alloc: &'alloc Allocator<'ctx, Ctx>,
+    pub fn new_with_alloc<'ctx: 'alloc>(
+        alloc: &'alloc Allocator<'ctx>,
         opts: Options,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw(), opts) }
     }
 
-    unsafe fn new_inner(alloc: *const ffi::GhosttyAllocator, opts: Options) -> Result<Self> {
-        let mut raw: ffi::GhosttyTerminal_ptr = std::ptr::null_mut();
+    unsafe fn new_inner(alloc: *const ffi::Allocator, opts: Options) -> Result<Self> {
+        let mut raw: ffi::Terminal = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_terminal_new(alloc, &raw mut raw, opts.into()) };
         from_result(result)?;
         Ok(Self {
             inner: Object::new(raw)?,
-            vtable: VTable::default(),
+            vtable: Box::new(VTable::default()),
         })
     }
 
@@ -238,15 +241,12 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// that. This API is instead meant for less strictly performance-sensitive
     /// use cases.
     pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
-        let mut grid_ref = ffi::sized!(ffi::GhosttyGridRef);
+        let mut grid_ref = ffi::sized!(ffi::GridRef);
         let result = unsafe {
             ffi::ghostty_terminal_grid_ref(self.inner.as_raw(), point.into(), &raw mut grid_ref)
         };
         from_result(result)?;
-        Ok(GridRef {
-            inner: grid_ref,
-            _phan: PhantomData,
-        })
+        Ok(unsafe { GridRef::from_raw(grid_ref) })
     }
 
     /// Get the current value of a terminal mode.
@@ -260,13 +260,14 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// Set the value of a terminal mode.
-    pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<()> {
+    pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
         let result =
             unsafe { ffi::ghostty_terminal_mode_set(self.inner.as_raw(), mode.into(), value) };
-        from_result(result)
+        from_result(result)?;
+        Ok(self)
     }
 
-    fn get<T>(&self, tag: ffi::GhosttyTerminalData) -> Result<T> {
+    pub(crate) fn get<T>(&self, tag: ffi::TerminalData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_terminal_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
@@ -275,51 +276,79 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         // SAFETY: Value should be initialized after successful call.
         Ok(unsafe { value.assume_init() })
     }
-
-    fn set<T>(&self, tag: ffi::GhosttyTerminalOption, v: &T) -> Result<()> {
+    pub(crate) fn get_optional<T>(&self, tag: ffi::TerminalData::Type) -> Result<Option<T>> {
+        let mut value = MaybeUninit::<T>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_terminal_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
+        };
+        from_optional_result(result, value)
+    }
+    pub(crate) fn set<T>(&self, tag: ffi::TerminalOption::Type, v: &T) -> Result<()> {
         let result = unsafe {
             ffi::ghostty_terminal_set(self.inner.as_raw(), tag, std::ptr::from_ref(v).cast())
         };
         from_result(result)
     }
+    /// Set an option whose ABI expects the pointer value itself, not a pointer
+    /// to Rust storage containing that value.
+    pub(crate) fn set_ptr(
+        &self,
+        tag: ffi::TerminalOption::Type,
+        ptr: *const std::ffi::c_void,
+    ) -> Result<()> {
+        let result = unsafe { ffi::ghostty_terminal_set(self.inner.as_raw(), tag, ptr) };
+        from_result(result)
+    }
+    pub(crate) fn set_optional<T>(
+        &mut self,
+        tag: ffi::TerminalOption::Type,
+        v: Option<&T>,
+    ) -> Result<()> {
+        let ptr = if let Some(v) = v {
+            std::ptr::from_ref(v)
+        } else {
+            std::ptr::null()
+        };
+
+        let result = unsafe { ffi::ghostty_terminal_set(self.inner.as_raw(), tag, ptr.cast()) };
+        from_result(result)
+    }
 
     /// Get the terminal width in cells.
     pub fn cols(&self) -> Result<u16> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_COLS)
+        self.get(Data::COLS)
     }
     /// Get the terminal height in cells.
     pub fn rows(&self) -> Result<u16> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_ROWS)
+        self.get(Data::ROWS)
     }
     /// Get the cursor column position (inner-indexed).
     pub fn cursor_x(&self) -> Result<u16> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_X)
+        self.get(Data::CURSOR_X)
     }
     /// Get the cursor row position within the active area (inner-indexed).
     pub fn cursor_y(&self) -> Result<u16> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_Y)
+        self.get(Data::CURSOR_Y)
     }
     /// Get whether the cursor has a pending wrap (next print will soft-wrap).
     pub fn is_cursor_pending_wrap(&self) -> Result<bool> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_PENDING_WRAP)
+        self.get(Data::CURSOR_PENDING_WRAP)
     }
     /// Get whether the cursor is visible (DEC mode 25).
     pub fn is_cursor_visible(&self) -> Result<bool> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE)
+        self.get(Data::CURSOR_VISIBLE)
     }
     /// Get the current SGR style of the cursor.
     ///
     /// This is the style that will be applied to newly printed characters.
     pub fn cursor_style(&self) -> Result<style::Style> {
-        self.get::<ffi::GhosttyStyle>(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_CURSOR_STYLE)
+        self.get::<ffi::Style>(Data::CURSOR_STYLE)
             .and_then(std::convert::TryInto::try_into)
     }
     /// Get the current Kitty keyboard protocol flags.
     pub fn kitty_keyboard_flags(&self) -> Result<key::KittyKeyFlags> {
-        self.get::<ffi::GhosttyKittyKeyFlags>(
-            ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_KITTY_KEYBOARD_FLAGS,
-        )
-        .map(key::KittyKeyFlags::from_bits_retain)
+        self.get::<ffi::KittyKeyFlags>(Data::KITTY_KEYBOARD_FLAGS)
+            .map(key::KittyKeyFlags::from_bits_retain)
     }
 
     /// Get the scrollbar state for the terminal viewport.
@@ -327,19 +356,19 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// This may be expensive to calculate depending on where the viewport is
     /// (arbitrary pins are expensive). The caller should take care to only call
     /// this as needed and not too frequently.
-    pub fn scrollbar(&self) -> Result<ffi::GhosttyTerminalScrollbar> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBAR)
+    pub fn scrollbar(&self) -> Result<Scrollbar> {
+        self.get(Data::SCROLLBAR)
     }
     /// Get the currently active screen.
-    pub fn active_screen(&self) -> Result<ffi::GhosttyTerminalScreen> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_ACTIVE_SCREEN)
+    pub fn active_screen(&self) -> Result<Screen> {
+        self.get(Data::ACTIVE_SCREEN)
     }
     /// Get whether any mouse tracking mode is active.
     ///
     /// Returns true if any of the mouse tracking modes (X1inner, normal, button,
     /// or any-event) are enabled.
     pub fn is_mouse_tracking(&self) -> Result<bool> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_MOUSE_TRACKING)
+        self.get(Data::MOUSE_TRACKING)
     }
     /// Get the terminal title as set by escape sequences (e.g. OSC inner/2).
     ///
@@ -347,8 +376,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
     /// returned when no title has been set.
     pub fn title(&self) -> Result<&str> {
-        let str =
-            self.get::<ffi::GhosttyString>(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_TITLE)?;
+        let str = self.get::<ffi::String>(Data::TITLE)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
         // while we uphold that no mutation could happen during its lifetime.
         let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
@@ -361,8 +389,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
     /// returned when no title has been set.
     pub fn pwd(&self) -> Result<&str> {
-        let str =
-            self.get::<ffi::GhosttyString>(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_PWD)?;
+        let str = self.get::<ffi::String>(Data::PWD)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
         // while we uphold that no mutation could happen during its lifetime.
         let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
@@ -370,14 +397,89 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
     /// The total number of rows in the active screen including scrollback.
     pub fn total_rows(&self) -> Result<usize> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_TOTAL_ROWS)
+        self.get(Data::TOTAL_ROWS)
     }
     ///  The number of scrollback rows (total rows minus viewport rows).
     pub fn scrollback_rows(&self) -> Result<usize> {
-        self.get(ffi::GhosttyTerminalData_GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS)
+        self.get(Data::SCROLLBACK_ROWS)
+    }
+
+    /// The effective foreground color (override or default).
+    pub fn fg_color(&self) -> Result<Option<RgbColor>> {
+        self.get_optional::<ffi::ColorRgb>(Data::COLOR_FOREGROUND)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default foreground color (ignoring any OSC override).
+    pub fn default_fg_color(&self) -> Result<Option<RgbColor>> {
+        self.get_optional::<ffi::ColorRgb>(Data::COLOR_FOREGROUND_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default foreground color.
+    pub fn set_default_fg_color(&mut self, v: Option<RgbColor>) -> Result<&mut Self> {
+        self.set_optional(Opt::COLOR_FOREGROUND, v.map(ffi::ColorRgb::from).as_ref())?;
+        Ok(self)
+    }
+
+    /// The effective background color (override or default).
+    pub fn bg_color(&self) -> Result<Option<RgbColor>> {
+        self.get_optional::<ffi::ColorRgb>(Data::COLOR_BACKGROUND)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default background color (ignoring any OSC override).
+    pub fn default_bg_color(&self) -> Result<Option<RgbColor>> {
+        self.get_optional::<ffi::ColorRgb>(Data::COLOR_BACKGROUND_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default background color.
+    pub fn set_default_bg_color(&mut self, v: Option<RgbColor>) -> Result<&mut Self> {
+        self.set_optional(Opt::COLOR_BACKGROUND, v.map(ffi::ColorRgb::from).as_ref())?;
+        Ok(self)
+    }
+
+    /// The effective cursor color (override or default).
+    pub fn cursor_color(&self) -> Result<Option<RgbColor>> {
+        self.get_optional::<ffi::ColorRgb>(Data::COLOR_CURSOR)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default cursor color (ignoring any OSC override).
+    pub fn default_cursor_color(&self) -> Result<Option<RgbColor>> {
+        self.get_optional::<ffi::ColorRgb>(Data::COLOR_CURSOR_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default cursor color.
+    pub fn set_default_cursor_color(&mut self, v: Option<RgbColor>) -> Result<&mut Self> {
+        self.set_optional(Opt::COLOR_CURSOR, v.map(ffi::ColorRgb::from).as_ref())?;
+        Ok(self)
+    }
+
+    /// The current 256-color palette.
+    pub fn color_palette(&self) -> Result<[RgbColor; 256]> {
+        self.get::<[ffi::ColorRgb; 256]>(Data::COLOR_PALETTE)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default 256-color palette (ignoring any OSC overrides).
+    pub fn default_color_palette(&self) -> Result<[RgbColor; 256]> {
+        self.get::<[ffi::ColorRgb; 256]>(Data::COLOR_PALETTE_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default 256-color palette.
+    pub fn set_default_color_palette(&mut self, v: Option<[RgbColor; 256]>) -> Result<&mut Self> {
+        self.set_optional(
+            Opt::COLOR_PALETTE,
+            v.map(|v| v.map(ffi::ColorRgb::from)).as_ref(),
+        )?;
+        Ok(self)
+    }
+
+    /// Set the maximum bytes the APC handler will buffer for all protocols.
+    ///
+    /// This prevents malicious input from causing unbounded memory allocation.
+    /// A `None` value removes all overrides, reverting to the built-in defaults.
+    pub fn set_apc_max_bytes(&mut self, max: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(ffi::TerminalOption::APC_MAX_BYTES, max.as_ref())?;
+        Ok(self)
     }
 }
-
 impl Drop for Terminal<'_, '_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_terminal_free(self.inner.as_raw()) }
@@ -397,30 +499,30 @@ pub enum Point {
     History(PointCoordinate),
 }
 
-impl From<Point> for ffi::GhosttyPoint {
+impl From<Point> for ffi::Point {
     fn from(value: Point) -> Self {
         match value {
             Point::Active(coord) => Self {
-                tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_ACTIVE,
-                value: ffi::GhosttyPointValue {
+                tag: ffi::PointTag::ACTIVE,
+                value: ffi::PointValue {
                     coordinate: coord.into(),
                 },
             },
             Point::Viewport(coord) => Self {
-                tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_VIEWPORT,
-                value: ffi::GhosttyPointValue {
+                tag: ffi::PointTag::VIEWPORT,
+                value: ffi::PointValue {
                     coordinate: coord.into(),
                 },
             },
             Point::Screen(coord) => Self {
-                tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_SCREEN,
-                value: ffi::GhosttyPointValue {
+                tag: ffi::PointTag::SCREEN,
+                value: ffi::PointValue {
                     coordinate: coord.into(),
                 },
             },
             Point::History(coord) => Self {
-                tag: ffi::GhosttyPointTag_GHOSTTY_POINT_TAG_HISTORY,
-                value: ffi::GhosttyPointValue {
+                tag: ffi::PointTag::HISTORY,
+                value: ffi::PointValue {
                     coordinate: coord.into(),
                 },
             },
@@ -432,19 +534,19 @@ impl From<Point> for ffi::GhosttyPoint {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PointCoordinate {
     /// Column (0-indexed).
-    x: u16,
+    pub x: u16,
     /// Row (0-indexed). May exceed page size for screen/history tags.
-    y: u32,
+    pub y: u32,
 }
-impl From<PointCoordinate> for ffi::GhosttyPointCoordinate {
+impl From<PointCoordinate> for ffi::PointCoordinate {
     fn from(value: PointCoordinate) -> Self {
         let PointCoordinate { x, y } = value;
         Self { x, y }
     }
 }
-impl From<ffi::GhosttyPointCoordinate> for PointCoordinate {
-    fn from(value: ffi::GhosttyPointCoordinate) -> Self {
-        let ffi::GhosttyPointCoordinate { x, y } = value;
+impl From<ffi::PointCoordinate> for PointCoordinate {
+    fn from(value: ffi::PointCoordinate) -> Self {
+        let ffi::PointCoordinate { x, y } = value;
         Self { x, y }
     }
 }
@@ -459,21 +561,21 @@ pub enum ScrollViewport {
     /// Scroll by a delta amount (up is negative).
     Delta(isize),
 }
-impl From<ScrollViewport> for ffi::GhosttyTerminalScrollViewport {
+impl From<ScrollViewport> for ffi::TerminalScrollViewport {
     fn from(value: ScrollViewport) -> Self {
         match value {
             ScrollViewport::Top => Self {
-                tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_TOP,
-                value: ffi::GhosttyTerminalScrollViewportValue::default(),
+                tag: ffi::TerminalScrollViewportTag::TOP,
+                value: ffi::TerminalScrollViewportValue::default(),
             },
             ScrollViewport::Bottom => Self {
-                tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_BOTTOM,
-                value: ffi::GhosttyTerminalScrollViewportValue::default(),
+                tag: ffi::TerminalScrollViewportTag::BOTTOM,
+                value: ffi::TerminalScrollViewportValue::default(),
             },
             ScrollViewport::Delta(delta) => Self {
-                tag: ffi::GhosttyTerminalScrollViewportTag_GHOSTTY_SCROLL_VIEWPORT_DELTA,
+                tag: ffi::TerminalScrollViewportTag::DELTA,
                 value: {
-                    let mut v = ffi::GhosttyTerminalScrollViewportValue::default();
+                    let mut v = ffi::TerminalScrollViewportValue::default();
                     v.delta = delta;
                     v
                 },
@@ -484,7 +586,7 @@ impl From<ScrollViewport> for ffi::GhosttyTerminalScrollViewport {
 
 /// A terminal mode consisting of its value and its kind (DEC/ANSI).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct Mode(pub ffi::GhosttyMode);
+pub struct Mode(pub ffi::Mode);
 
 impl Mode {
     #![expect(missing_docs, reason = "no upstream documentation provided")]
@@ -567,7 +669,7 @@ pub enum ModeKind {
     Ansi,
 }
 
-impl From<Mode> for ffi::GhosttyMode {
+impl From<Mode> for ffi::Mode {
     fn from(value: Mode) -> Self {
         value.0
     }
@@ -587,7 +689,7 @@ pub struct DeviceAttributes {
     pub tertiary: TertiaryDeviceAttributes,
 }
 
-impl From<DeviceAttributes> for ffi::GhosttyDeviceAttributes {
+impl From<DeviceAttributes> for ffi::DeviceAttributes {
     fn from(value: DeviceAttributes) -> Self {
         Self {
             primary: value.primary.into(),
@@ -601,7 +703,7 @@ impl From<DeviceAttributes> for ffi::GhosttyDeviceAttributes {
 ///
 /// Returned as part of [`DeviceAttributes`] in response to a CSI c query.
 #[derive(Debug, Clone, Copy)]
-pub struct PrimaryDeviceAttributes(ffi::GhosttyDeviceAttributesPrimary);
+pub struct PrimaryDeviceAttributes(ffi::DeviceAttributesPrimary);
 
 impl PrimaryDeviceAttributes {
     /// Construct primary device attributes from a conformance level
@@ -620,7 +722,7 @@ impl PrimaryDeviceAttributes {
         let mut f = [0u16; 64];
         f[..N].copy_from_slice(features.map(|f| f.0).as_slice());
 
-        Self(ffi::GhosttyDeviceAttributesPrimary {
+        Self(ffi::DeviceAttributesPrimary {
             conformance_level: conformance_level.0,
             features: f,
             num_features: N,
@@ -628,7 +730,7 @@ impl PrimaryDeviceAttributes {
     }
 }
 
-impl From<PrimaryDeviceAttributes> for ffi::GhosttyDeviceAttributesPrimary {
+impl From<PrimaryDeviceAttributes> for ffi::DeviceAttributesPrimary {
     fn from(value: PrimaryDeviceAttributes) -> Self {
         value.0
     }
@@ -640,30 +742,30 @@ impl From<PrimaryDeviceAttributes> for ffi::GhosttyDeviceAttributesPrimary {
 pub struct ConformanceLevel(pub u16);
 
 impl ConformanceLevel {
-    #![allow(clippy::cast_possible_truncation, reason = "bindgen ain't perfect")]
+    #![expect(clippy::doc_markdown, reason = "false positive")]
     #![expect(missing_docs, reason = "self-explanatory")]
-    pub const VT100: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT100 as u16);
-    pub const VT101: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT101 as u16);
-    pub const VT102: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT102 as u16);
-    pub const VT125: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT125 as u16);
-    pub const VT131: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT131 as u16);
-    pub const VT132: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT132 as u16);
-    pub const VT220: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT220 as u16);
-    pub const VT240: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT240 as u16);
-    pub const VT320: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT320 as u16);
-    pub const VT340: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT340 as u16);
-    pub const VT420: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT420 as u16);
-    pub const VT510: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT510 as u16);
-    pub const VT520: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT520 as u16);
-    pub const VT525: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_VT525 as u16);
+    pub const VT100: Self = Self(ffi::DA_CONFORMANCE_VT100);
+    pub const VT101: Self = Self(ffi::DA_CONFORMANCE_VT101);
+    pub const VT102: Self = Self(ffi::DA_CONFORMANCE_VT102);
+    pub const VT125: Self = Self(ffi::DA_CONFORMANCE_VT125);
+    pub const VT131: Self = Self(ffi::DA_CONFORMANCE_VT131);
+    pub const VT132: Self = Self(ffi::DA_CONFORMANCE_VT132);
+    pub const VT220: Self = Self(ffi::DA_CONFORMANCE_VT220);
+    pub const VT240: Self = Self(ffi::DA_CONFORMANCE_VT240);
+    pub const VT320: Self = Self(ffi::DA_CONFORMANCE_VT320);
+    pub const VT340: Self = Self(ffi::DA_CONFORMANCE_VT340);
+    pub const VT420: Self = Self(ffi::DA_CONFORMANCE_VT420);
+    pub const VT510: Self = Self(ffi::DA_CONFORMANCE_VT510);
+    pub const VT520: Self = Self(ffi::DA_CONFORMANCE_VT520);
+    pub const VT525: Self = Self(ffi::DA_CONFORMANCE_VT525);
     /// Equivalent to a VT2xx terminal.
-    pub const LEVEL_2: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_LEVEL_2 as u16);
+    pub const LEVEL_2: Self = Self(ffi::DA_CONFORMANCE_LEVEL_2);
     /// Equivalent to a VT3xx terminal.
-    pub const LEVEL_3: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_LEVEL_3 as u16);
+    pub const LEVEL_3: Self = Self(ffi::DA_CONFORMANCE_LEVEL_3);
     /// Equivalent to a VT4xx terminal.
-    pub const LEVEL_4: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_LEVEL_4 as u16);
+    pub const LEVEL_4: Self = Self(ffi::DA_CONFORMANCE_LEVEL_4);
     /// Equivalent to a VT5xx terminal.
-    pub const LEVEL_5: Self = Self(ffi::GHOSTTY_DA_CONFORMANCE_LEVEL_5 as u16);
+    pub const LEVEL_5: Self = Self(ffi::DA_CONFORMANCE_LEVEL_5);
 }
 
 /// A feature that a terminal can report to support.
@@ -671,27 +773,23 @@ impl ConformanceLevel {
 pub struct DeviceAttributeFeature(pub u16);
 
 impl DeviceAttributeFeature {
-    #![expect(clippy::cast_possible_truncation, reason = "bindgen ain't perfect")]
     #![expect(missing_docs, reason = "no upstream documentation provided")]
-    pub const COLUMNS_132: Self = Self(ffi::GHOSTTY_DA_FEATURE_COLUMNS_132 as u16);
-    pub const PRINTER: Self = Self(ffi::GHOSTTY_DA_FEATURE_PRINTER as u16);
-    pub const REGIS: Self = Self(ffi::GHOSTTY_DA_FEATURE_REGIS as u16);
-    pub const SIXEL: Self = Self(ffi::GHOSTTY_DA_FEATURE_SIXEL as u16);
-    pub const SELECTIVE_ERASE: Self = Self(ffi::GHOSTTY_DA_FEATURE_SELECTIVE_ERASE as u16);
-    pub const USER_DEFINED_KEYS: Self = Self(ffi::GHOSTTY_DA_FEATURE_USER_DEFINED_KEYS as u16);
-    pub const NATIONAL_REPLACEMENT: Self =
-        Self(ffi::GHOSTTY_DA_FEATURE_NATIONAL_REPLACEMENT as u16);
-    pub const TECHNICAL_CHARACTERS: Self =
-        Self(ffi::GHOSTTY_DA_FEATURE_TECHNICAL_CHARACTERS as u16);
-    pub const LOCATOR: Self = Self(ffi::GHOSTTY_DA_FEATURE_LOCATOR as u16);
-    pub const TERMINAL_STATE: Self = Self(ffi::GHOSTTY_DA_FEATURE_TERMINAL_STATE as u16);
-    pub const WINDOWING: Self = Self(ffi::GHOSTTY_DA_FEATURE_WINDOWING as u16);
-    pub const HORIZONTAL_SCROLLING: Self =
-        Self(ffi::GHOSTTY_DA_FEATURE_HORIZONTAL_SCROLLING as u16);
-    pub const ANSI_COLOR: Self = Self(ffi::GHOSTTY_DA_FEATURE_ANSI_COLOR as u16);
-    pub const RECTANGULAR_EDITING: Self = Self(ffi::GHOSTTY_DA_FEATURE_RECTANGULAR_EDITING as u16);
-    pub const ANSI_TEXT_LOCATOR: Self = Self(ffi::GHOSTTY_DA_FEATURE_ANSI_TEXT_LOCATOR as u16);
-    pub const CLIPBOARD: Self = Self(ffi::GHOSTTY_DA_FEATURE_CLIPBOARD as u16);
+    pub const COLUMNS_132: Self = Self(ffi::DA_FEATURE_COLUMNS_132);
+    pub const PRINTER: Self = Self(ffi::DA_FEATURE_PRINTER);
+    pub const REGIS: Self = Self(ffi::DA_FEATURE_REGIS);
+    pub const SIXEL: Self = Self(ffi::DA_FEATURE_SIXEL);
+    pub const SELECTIVE_ERASE: Self = Self(ffi::DA_FEATURE_SELECTIVE_ERASE);
+    pub const USER_DEFINED_KEYS: Self = Self(ffi::DA_FEATURE_USER_DEFINED_KEYS);
+    pub const NATIONAL_REPLACEMENT: Self = Self(ffi::DA_FEATURE_NATIONAL_REPLACEMENT);
+    pub const TECHNICAL_CHARACTERS: Self = Self(ffi::DA_FEATURE_TECHNICAL_CHARACTERS);
+    pub const LOCATOR: Self = Self(ffi::DA_FEATURE_LOCATOR);
+    pub const TERMINAL_STATE: Self = Self(ffi::DA_FEATURE_TERMINAL_STATE);
+    pub const WINDOWING: Self = Self(ffi::DA_FEATURE_WINDOWING);
+    pub const HORIZONTAL_SCROLLING: Self = Self(ffi::DA_FEATURE_HORIZONTAL_SCROLLING);
+    pub const ANSI_COLOR: Self = Self(ffi::DA_FEATURE_ANSI_COLOR);
+    pub const RECTANGULAR_EDITING: Self = Self(ffi::DA_FEATURE_RECTANGULAR_EDITING);
+    pub const ANSI_TEXT_LOCATOR: Self = Self(ffi::DA_FEATURE_ANSI_TEXT_LOCATOR);
+    pub const CLIPBOARD: Self = Self(ffi::DA_FEATURE_CLIPBOARD);
 }
 
 /// Secondary device attributes (DA2) response data.
@@ -708,7 +806,7 @@ pub struct SecondaryDeviceAttributes {
     pub rom_cartridge: u16,
 }
 
-impl From<SecondaryDeviceAttributes> for ffi::GhosttyDeviceAttributesSecondary {
+impl From<SecondaryDeviceAttributes> for ffi::DeviceAttributesSecondary {
     fn from(value: SecondaryDeviceAttributes) -> Self {
         Self {
             device_type: value.device_type.0,
@@ -723,19 +821,18 @@ impl From<SecondaryDeviceAttributes> for ffi::GhosttyDeviceAttributesSecondary {
 pub struct DeviceType(pub u16);
 
 impl DeviceType {
-    #![expect(clippy::cast_possible_truncation, reason = "bindgen ain't perfect")]
     #![expect(missing_docs, reason = "self-explanatory")]
-    pub const VT100: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT100 as u16);
-    pub const VT220: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT220 as u16);
-    pub const VT240: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT240 as u16);
-    pub const VT330: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT330 as u16);
-    pub const VT340: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT340 as u16);
-    pub const VT320: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT320 as u16);
-    pub const VT382: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT382 as u16);
-    pub const VT420: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT420 as u16);
-    pub const VT510: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT510 as u16);
-    pub const VT520: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT520 as u16);
-    pub const VT525: Self = Self(ffi::GHOSTTY_DA_DEVICE_TYPE_VT525 as u16);
+    pub const VT100: Self = Self(ffi::DA_DEVICE_TYPE_VT100);
+    pub const VT220: Self = Self(ffi::DA_DEVICE_TYPE_VT220);
+    pub const VT240: Self = Self(ffi::DA_DEVICE_TYPE_VT240);
+    pub const VT330: Self = Self(ffi::DA_DEVICE_TYPE_VT330);
+    pub const VT340: Self = Self(ffi::DA_DEVICE_TYPE_VT340);
+    pub const VT320: Self = Self(ffi::DA_DEVICE_TYPE_VT320);
+    pub const VT382: Self = Self(ffi::DA_DEVICE_TYPE_VT382);
+    pub const VT420: Self = Self(ffi::DA_DEVICE_TYPE_VT420);
+    pub const VT510: Self = Self(ffi::DA_DEVICE_TYPE_VT510);
+    pub const VT520: Self = Self(ffi::DA_DEVICE_TYPE_VT520);
+    pub const VT525: Self = Self(ffi::DA_DEVICE_TYPE_VT525);
 }
 
 /// Tertiary device attributes (DA3) response data.
@@ -748,12 +845,21 @@ pub struct TertiaryDeviceAttributes {
     pub unit_id: u32,
 }
 
-impl From<TertiaryDeviceAttributes> for ffi::GhosttyDeviceAttributesTertiary {
+impl From<TertiaryDeviceAttributes> for ffi::DeviceAttributesTertiary {
     fn from(value: TertiaryDeviceAttributes) -> Self {
         Self {
             unit_id: value.unit_id,
         }
     }
+}
+
+/// Color scheme reported in response to a CSI ? 996 n query.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+#[expect(missing_docs, reason = "self-explanatory")]
+pub enum ColorScheme {
+    Light = ffi::ColorScheme::LIGHT,
+    Dark = ffi::ColorScheme::DARK,
 }
 
 //---------------------------------------
@@ -772,7 +878,7 @@ impl From<TertiaryDeviceAttributes> for ffi::GhosttyDeviceAttributesTertiary {
 /// pub fn on_foobar(
 ///     &mut self,
 ///     // The corresponding GhosttyTerminalOption
-///     tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_FOOBAR,
+///     tag = FOOBAR,
 ///
 ///     // The name of the original function type in C,
 ///     // along with the extra C parameters and the expected C return type
@@ -813,39 +919,56 @@ macro_rules! handlers {
             $(#[$fmeta])*
             $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
                 unsafe extern "C" fn callback(
-                    t: *mut $crate::ffi::GhosttyTerminal,
+                    t: $crate::ffi::Terminal,
                     ud: *mut std::ffi::c_void,
                     $($rfname: $rfty),*
                 ) $(-> $rawrty)? {
-                    // SAFETY: We own the vtable, so it should never become invalid.
+                    // SAFETY: USERDATA is set to the boxed VTable pointee
+                    // (derived from a mutable reference for write provenance)
+                    // before the callback is registered. ghostty invokes
+                    // callbacks synchronously during vt_write, so the VTable
+                    // remains alive and exclusively accessed for the duration
+                    // of this call.
                     let vtable = unsafe { &mut *ud.cast::<VTable<'_, '_>>() };
 
                     let obj = $crate::alloc::Object::new(t).expect("received null terminal ptr in callback - this is a bug!");
-                    let $t = $crate::terminal::Terminal::<'_, '_> {
+                    // Build a temporary borrowed Terminal view for the callback
+                    // without taking ownership of the underlying ghostty terminal.
+                    let mut term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
                         inner: obj,
                         vtable: ::core::default::Default::default(),
-                    };
+                    });
+                    let $t: &$crate::terminal::Terminal = &term;
                     let $func = vtable.$name.as_deref_mut()
                         .expect("no handler set but callback is still called - this is a bug!");
                     let ret = $block;
 
-                    // IMPORTANT: Do NOT let the destructor run.
-                    ::core::mem::forget($t);
+                    // SAFETY: The temporary vtable was allocated solely to satisfy
+                    // the Terminal layout expected by the callback signature. Drop
+                    // it explicitly while intentionally leaving the borrowed
+                    // terminal handle itself untouched.
+                    unsafe { ::core::ptr::drop_in_place(&mut term.vtable) };
+
                     ret
                 }
 
                 self.vtable.$name = Some(::std::boxed::Box::new(f));
 
-                self.set(
-                    $crate::ffi::GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_USERDATA,
-                    &self.vtable
-                )?;
+                // USERDATA is a raw pointer option: pass the heap allocation
+                // itself, not the address of the Box smart pointer field stored
+                // inline in Terminal.
+                //
+                // Derive the pointer from a mutable reference so it carries
+                // write provenance – the callback later reborrows it as &mut.
+                let userdata = std::ptr::from_mut::<VTable<'alloc, 'cb>>(self.vtable.as_mut())
+                    as *const ::std::ffi::c_void;
+                self.set_ptr($crate::ffi::TerminalOption::USERDATA, userdata)?;
 
                 // The callback must be coerced into a function *pointer*
                 // and not a function *item* (which is a ZST whose address is meaningless).
                 // :)
                 let callback_ptr: unsafe extern "C" fn(
-                    *mut $crate::ffi::GhosttyTerminal,
+                    $crate::ffi::Terminal,
                     *mut ::std::ffi::c_void,
                     $($rfty),*
                 ) $(-> $rawrty)? = callback;
@@ -853,7 +976,7 @@ macro_rules! handlers {
                 let result = unsafe {
                     $crate::ffi::ghostty_terminal_set(
                         self.inner.as_raw(),
-                        $crate::ffi::$tag,
+                        $crate::ffi::TerminalOption::$tag,
                         callback_ptr as *const ::std::ffi::c_void
                     )
                 };
@@ -910,7 +1033,7 @@ handlers! {
     /// to the pty (e.g. in response to a DECRQM query or device status report).
     pub fn on_pty_write(
         &mut self,
-        tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_WRITE_PTY,
+        tag = WRITE_PTY,
         from = GhosttyTerminalWritePtyFn(ptr: *const u8, len: usize),
         to = <'t>PtyWriteFn(&'t [u8]),
     ) |term, func| {
@@ -925,7 +1048,7 @@ handlers! {
     /// a BEL character (0x07).
     pub fn on_bell(
         &mut self,
-        tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_BELL,
+        tag = BELL,
         from = GhosttyTerminalBellFn(),
         to = BellFn(),
     ) |term, func| {
@@ -936,8 +1059,8 @@ handlers! {
     /// an ENQ character (0x05).
     pub fn on_enquiry(
         &mut self,
-        tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_ENQUIRY,
-        from = GhosttyTerminalEnquiryFn() -> ffi::GhosttyString,
+        tag = ENQUIRY,
+        from = GhosttyTerminalEnquiryFn() -> ffi::String,
         to = <'t>EnquiryFn() -> Option<&'t str>,
     ) |term, func| {
         func(&term).unwrap_or("").into()
@@ -948,8 +1071,8 @@ handlers! {
     /// (e.g. "myterm 1.0").
     pub fn on_xtversion(
         &mut self,
-        tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_XTVERSION,
-        from = GhosttyTerminalXtversionFn() -> ffi::GhosttyString,
+        tag = XTVERSION,
+        from = GhosttyTerminalXtversionFn() -> ffi::String,
         to = <'t>XtversionFn() -> Option<&'t str>,
     ) |term, func| {
         func(&term).unwrap_or("").into()
@@ -962,9 +1085,9 @@ handlers! {
     /// the callback returns.
     pub fn on_title_changed(
         &mut self,
-        tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_TITLE_CHANGED,
+        tag = TITLE_CHANGED,
         from = GhosttyTerminalTitleChangedFn(),
-        to = TitleChanged(),
+        to = TitleChangedFn(),
     ) |term, func| {
         func(&term);
     }
@@ -973,9 +1096,9 @@ handlers! {
     /// (CSI 14/16/18 t).
     pub fn on_size(
         &mut self,
-        tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_SIZE,
-        from = GhosttyTerminalSizeFn(out: *mut ffi::GhosttySizeReportSize) -> bool,
-        to = SizeFn() -> Option<ffi::GhosttySizeReportSize>,
+        tag = SIZE,
+        from = GhosttyTerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
+        to = SizeFn() -> Option<SizeReportSize>,
     ) |term, func| {
         if let Some(size) = func(&term) {
             // SAFETY: Out pointer is assumed to be valid.
@@ -993,13 +1116,13 @@ handlers! {
     /// or return `None` to silently ignore.
     pub fn on_color_scheme(
         &mut self,
-        tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_COLOR_SCHEME,
-        from = GhosttyTerminalColorSchemeFn(out: *mut ffi::GhosttyColorScheme) -> bool,
-        to = ColorSchemeFn() -> Option<ffi::GhosttyColorScheme>,
+        tag = COLOR_SCHEME,
+        from = GhosttyTerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
+        to = ColorSchemeFn() -> Option<ColorScheme>,
     ) |term, func| {
         if let Some(size) = func(&term) {
             // SAFETY: Out pointer is assumed to be valid.
-            unsafe { *out = size };
+            unsafe { *out = size as ffi::ColorScheme::Type };
             true
         } else {
             false
@@ -1013,8 +1136,8 @@ handlers! {
     /// or return `None` to silently ignore.
     pub fn on_device_attributes(
         &mut self,
-        tag = GhosttyTerminalOption_GHOSTTY_TERMINAL_OPT_DEVICE_ATTRIBUTES,
-        from = GhosttyTerminalDeviceAttributesFn(out: *mut ffi::GhosttyDeviceAttributes) -> bool,
+        tag = DEVICE_ATTRIBUTES,
+        from = GhosttyTerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
         to = DeviceAttributesFn() -> Option<DeviceAttributes>,
     ) |term, func| {
         if let Some(size) = func(&term) {
@@ -1024,5 +1147,133 @@ handlers! {
         } else {
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::mem::ManuallyDrop;
+
+    #[inline(never)]
+    fn build_terminal<'cb>(callback_count: &'cb RefCell<usize>) -> Terminal<'static, 'cb> {
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 1000,
+        })
+        .expect("terminal should initialize");
+
+        terminal
+            .on_device_attributes(move |_term| {
+                *callback_count.borrow_mut() += 1;
+                Some(DeviceAttributes {
+                    primary: PrimaryDeviceAttributes::new(
+                        ConformanceLevel::VT220,
+                        [DeviceAttributeFeature::ANSI_COLOR],
+                    ),
+                    secondary: SecondaryDeviceAttributes {
+                        device_type: DeviceType::VT220,
+                        firmware_version: 1,
+                        rom_cartridge: 0,
+                    },
+                    tertiary: TertiaryDeviceAttributes { unit_id: 0 },
+                })
+            })
+            .expect("callback should register");
+
+        terminal
+    }
+
+    /// Move a value into distinct heap storage with an explicit byte-for-byte
+    /// relocation so the test does not rely on optimizer or allocator behavior.
+    fn relocate_into_new_box<T>(value: T) -> (Box<T>, usize, usize) {
+        // Keep the source allocation alive without running T's destructor.
+        // We need the bytes to remain initialized until after the copy.
+        let src = Box::new(ManuallyDrop::new(value));
+        let src_addr = std::ptr::from_ref(&**src).cast::<T>() as usize;
+
+        unsafe {
+            let dst_layout = std::alloc::Layout::new::<T>();
+            let dst_ptr = std::alloc::alloc(dst_layout).cast::<T>();
+            if dst_ptr.is_null() {
+                std::alloc::handle_alloc_error(dst_layout);
+            }
+
+            let dst_addr = dst_ptr as usize;
+            assert_ne!(
+                src_addr, dst_addr,
+                "test setup failed: source and destination storage unexpectedly match"
+            );
+
+            // SAFETY: src points to a fully initialized T wrapped in
+            // ManuallyDrop, dst points to distinct uninitialized storage for
+            // exactly one T, and the regions do not overlap.
+            std::ptr::copy_nonoverlapping(std::ptr::from_ref(&**src).cast::<T>(), dst_ptr, 1);
+
+            // SAFETY: src was allocated as Box<ManuallyDrop<T>> and must be
+            // freed without dropping T because ownership was transferred by
+            // the raw byte copy above.
+            std::alloc::dealloc(
+                Box::into_raw(src).cast::<u8>(),
+                std::alloc::Layout::new::<ManuallyDrop<T>>(),
+            );
+
+            // SAFETY: We just initialized dst_ptr by copying a valid T into it,
+            // so it now owns exactly one initialized T allocation.
+            (Box::from_raw(dst_ptr), src_addr, dst_addr)
+        }
+    }
+
+    /// Send an OSC 2 title sequence, then verify `term.title()` returns the
+    /// correct value inside the `on_title_changed` callback.
+    #[test]
+    fn title_changed_callback_returns_correct_title() {
+        // The callback bound on `on_title_changed` is `'cb`, not `'static`,
+        // so the closure can borrow stack locals directly – no Rc needed.
+        let captured_title: RefCell<String> = RefCell::new(String::new());
+        let callback_count: Cell<usize> = Cell::new(0);
+
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+
+        terminal
+            .on_title_changed(|term| {
+                callback_count.set(callback_count.get() + 1);
+                let title = term
+                    .title()
+                    .expect("title() should succeed inside callback");
+                *captured_title.borrow_mut() = title.to_owned();
+            })
+            .expect("callback should register");
+
+        // OSC 2 (set title) should invoke on_title_changed.
+        terminal.vt_write(b"\x1b]2;Hello Effects\x1b\\");
+        assert_eq!(callback_count.get(), 1);
+        assert_eq!(*captured_title.borrow(), "Hello Effects");
+
+        // A second title change should fire the callback again.
+        terminal.vt_write(b"\x1b]2;Second Title\x1b\\");
+        assert_eq!(callback_count.get(), 2);
+        assert_eq!(*captured_title.borrow(), "Second Title");
+    }
+
+    /// Explicitly relocate the Terminal into distinct storage, then verify the
+    /// callback still fires through the stable VTable userdata pointer.
+    #[test]
+    fn callbacks_survive_explicit_relocation() {
+        let callback_count = RefCell::new(0usize);
+        let terminal = build_terminal(&callback_count);
+        let (mut terminal, addr_before, addr_after) = relocate_into_new_box(terminal);
+        assert_ne!(addr_before, addr_after);
+
+        // Primary DA request (CSI c) should invoke on_device_attributes.
+        terminal.vt_write(b"\x1b[c");
+        assert_eq!(*callback_count.borrow(), 1);
     }
 }

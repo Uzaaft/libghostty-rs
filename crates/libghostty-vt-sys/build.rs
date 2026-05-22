@@ -4,7 +4,62 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "bebca84668947bfc92b9a30ed58712e1c34eee1d";
+const GHOSTTY_COMMIT: &str = "6590196661f769dd8f2b3e85d6c98262c4ec5b3b";
+
+#[derive(Clone, Copy)]
+enum LinkMode {
+    Dynamic,
+    Static,
+}
+
+impl LinkMode {
+    fn current() -> Self {
+        if cfg!(feature = "link-static") {
+            Self::Static
+        } else {
+            Self::Dynamic
+        }
+    }
+
+    fn artifact_kind(self) -> &'static str {
+        match self {
+            Self::Dynamic => "shared library",
+            Self::Static => "static library",
+        }
+    }
+
+    fn matches_library(self, target: &str, file_name: &str) -> bool {
+        match self {
+            Self::Dynamic => {
+                if target.contains("darwin") {
+                    file_name.starts_with("libghostty-vt") && file_name.ends_with(".dylib")
+                } else if target.contains("windows") {
+                    file_name == "ghostty-vt.lib"
+                        || file_name == "ghostty-vt.dll"
+                        || file_name == "libghostty-vt.dll.lib"
+                        || file_name == "libghostty-vt.dll.a"
+                } else {
+                    file_name == "libghostty-vt.so" || file_name.starts_with("libghostty-vt.so.")
+                }
+            }
+            Self::Static => {
+                if target.contains("windows") {
+                    file_name == "ghostty-vt-static.lib"
+                } else {
+                    file_name == "libghostty-vt.a"
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "pkg-config")]
+    fn pkg_config_name(self) -> &'static str {
+        match self {
+            Self::Dynamic => "libghostty-vt",
+            Self::Static => "libghostty-vt-static",
+        }
+    }
+}
 
 fn main() {
     // docs.rs has no Zig toolchain. The checked-in bindings in src/bindings.rs
@@ -14,12 +69,39 @@ fn main() {
         return;
     }
 
-    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_NO_VENDOR");
+    let link_mode = LinkMode::current();
+
+    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
+    println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=HOST");
+    println!("cargo:rerun-if-env-changed=DEBUG");
+    println!("cargo:rerun-if-env-changed=OPT_LEVEL");
     println!("cargo:rerun-if-changed=crates/libghostty-vt-sys/build.rs");
 
+    // An explicit source override should stay authoritative even when the
+    // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
+    // test against.
+    if env::var_os("GHOSTTY_SOURCE_DIR").is_some() {
+        build_vendored(link_mode);
+        return;
+    }
+
+    // When the pkg-config feature is enabled, prefer an installed library over
+    // fetching Ghostty. libghostty is pre-1.0, so this crate intentionally does
+    // not promise compatibility with every installed C API revision.
+    #[cfg(feature = "pkg-config")]
+    if try_pkg_config(link_mode) {
+        return;
+    }
+
+    build_vendored(link_mode);
+}
+
+/// Build libghostty-vt from source via zig. The zig build itself generates
+/// shared and static artifacts plus pkg-config files in `share/pkgconfig/`.
+fn build_vendored(link_mode: LinkMode) {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let target = env::var("TARGET").expect("TARGET must be set");
     let host = env::var("HOST").expect("HOST must be set");
@@ -40,14 +122,44 @@ fn main() {
 
     // Build libghostty-vt via zig.
     let install_prefix = out_dir.join("ghostty-install");
+    let zig_cache_dir = out_dir.join("zig-cache");
+    let zig_global_cache_dir = out_dir.join("zig-global-cache");
+
+    let optimize = zig_optimize_mode();
 
     let mut build = Command::new("zig");
     build
         .arg("build")
         .arg("-Demit-lib-vt")
+        .arg(format!("-Doptimize={optimize}"))
+        .arg("-Demit-xcframework=false")
+        .arg("-Dapp-runtime=none")
         .arg("--prefix")
         .arg(&install_prefix)
+        .arg("--cache-dir")
+        .arg(&zig_cache_dir)
         .current_dir(&ghostty_dir);
+
+    // Package managers can provide Ghostty's Zig package cache ahead of time
+    // and ask Zig to resolve packages from that immutable store path instead
+    // of fetching during this Cargo build script.
+    if let Ok(dir) = env::var("GHOSTTY_ZIG_SYSTEM_DIR") {
+        assert!(
+            !dir.is_empty(),
+            "GHOSTTY_ZIG_SYSTEM_DIR must not be empty when set"
+        );
+        let zig_system_dir = PathBuf::from(dir);
+        assert!(
+            zig_system_dir.exists(),
+            "GHOSTTY_ZIG_SYSTEM_DIR does not exist: {}",
+            zig_system_dir.display()
+        );
+        build
+            .arg("--system")
+            .arg(&zig_system_dir)
+            .arg("--global-cache-dir")
+            .arg(&zig_global_cache_dir);
+    }
 
     // Only pass -Dtarget when cross-compiling. For native builds, let zig
     // auto-detect the host (matches how ghostty's own CMakeLists.txt works).
@@ -58,17 +170,31 @@ fn main() {
 
     run(build, "zig build");
 
+    let lib_dir = install_prefix.join("lib");
     let include_dir = install_prefix.join("include");
     let search_dirs = library_search_dirs(&target, &install_prefix);
-    let candidates = library_artifact_candidates(&target);
+    warn_unused_xcframework(&lib_dir);
 
-    let found = search_dirs
-        .iter()
-        .any(|dir| candidates.iter().any(|name| dir.join(name).exists()));
+    let has_requested_library = search_dirs.iter().any(|dir| {
+        std::fs::read_dir(dir)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", dir.display()))
+            .any(|entry| {
+                let entry = entry.unwrap_or_else(|error| {
+                    panic!("failed to read entry from {}: {error}", dir.display())
+                });
+                let file_name = entry.file_name();
+                let Some(file_name) = file_name.to_str() else {
+                    return false;
+                };
+
+                link_mode.matches_library(&target, file_name)
+            })
+    });
     assert!(
-        found,
-        "no library artifact found; searched {:?} for {:?}",
-        search_dirs, candidates
+        has_requested_library,
+        "expected libghostty-vt {} in one of {:?}",
+        link_mode.artifact_kind(),
+        search_dirs
     );
     assert!(
         include_dir.join("ghostty").join("vt.h").exists(),
@@ -79,8 +205,115 @@ fn main() {
     for dir in &search_dirs {
         println!("cargo:rustc-link-search=native={}", dir.display());
     }
-    println!("cargo:rustc-link-lib=dylib=ghostty-vt");
-    println!("cargo:include={}", include_dir.display());
+    match link_mode {
+        LinkMode::Dynamic => println!("cargo:rustc-link-lib=dylib=ghostty-vt"),
+        LinkMode::Static => println!("cargo:rustc-link-lib=static=ghostty-vt"),
+    }
+    emit_include_metadata(&[include_dir]);
+}
+
+fn warn_unused_xcframework(lib_dir: &Path) {
+    let xcframework = lib_dir.join("ghostty-vt.xcframework");
+    if xcframework.exists() {
+        println!(
+            "cargo:warning=unused libghostty-vt XCFramework emitted at {}; Cargo links the dylib or archive directly",
+            xcframework.display()
+        );
+    }
+}
+
+#[cfg(feature = "pkg-config")]
+fn try_pkg_config(link_mode: LinkMode) -> bool {
+    let mut config = pkg_config::Config::new();
+    let lib = match link_mode {
+        LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
+        LinkMode::Static => config
+            .statik(true)
+            .cargo_metadata(false)
+            .probe(link_mode.pkg_config_name()),
+    };
+    let lib = match lib {
+        Ok(lib) => lib,
+        Err(_) => return false,
+    };
+
+    if let LinkMode::Static = link_mode {
+        emit_static_pkg_config_metadata(&lib);
+    }
+    emit_include_metadata(&lib.include_paths);
+    true
+}
+
+#[cfg(feature = "pkg-config")]
+fn emit_static_pkg_config_metadata(lib: &pkg_config::Library) {
+    for path in &lib.link_paths {
+        println!("cargo:rustc-link-search=native={}", path.display());
+    }
+    for path in &lib.link_files {
+        if let Some(parent) = path.parent() {
+            println!("cargo:rustc-link-search=native={}", parent.display());
+        }
+    }
+    for path in &lib.framework_paths {
+        println!("cargo:rustc-link-search=framework={}", path.display());
+    }
+    for framework in &lib.frameworks {
+        println!("cargo:rustc-link-lib=framework={framework}");
+    }
+
+    println!("cargo:rustc-link-lib=static=ghostty-vt");
+    for library in &lib.libs {
+        if library != "ghostty-vt" {
+            println!("cargo:rustc-link-lib={library}");
+        }
+    }
+    for args in &lib.ld_args {
+        if !args.is_empty() {
+            println!("cargo:rustc-link-arg=-Wl,{}", args.join(","));
+        }
+    }
+}
+
+fn emit_include_metadata(include_paths: &[PathBuf]) {
+    if include_paths.is_empty() {
+        return;
+    }
+
+    let joined = env::join_paths(include_paths)
+        .unwrap_or_else(|error| panic!("failed to join include paths for cargo metadata: {error}"));
+    println!("cargo:include={}", joined.to_string_lossy());
+}
+
+/// Decide which Zig `OptimizeMode` to pass to `zig build`.
+///
+/// The `LIBGHOSTTY_VT_SYS_OPTIMIZE` environment variable overrides this unconditionally; accepted
+/// values are the four Zig `OptimizeMode` names (`Debug`, `ReleaseSafe`, `ReleaseFast`,
+/// `ReleaseSmall`).
+///
+/// Defaults to `ReleaseFast` for optimized builds. If `DEBUG` is `true` (as cargo sets for the
+/// `dev` profile), `Debug` mode is used. Otherwise, if `OPT_LEVEL` is `s` or `z`, `ReleaseSmall`
+/// is used.
+fn zig_optimize_mode() -> &'static str {
+    if let Ok(override_mode) = env::var("LIBGHOSTTY_VT_SYS_OPTIMIZE") {
+        return match override_mode.as_str() {
+            "Debug" => "Debug",
+            "ReleaseSafe" => "ReleaseSafe",
+            "ReleaseFast" => "ReleaseFast",
+            "ReleaseSmall" => "ReleaseSmall",
+            other => panic!(
+                "LIBGHOSTTY_VT_SYS_OPTIMIZE must be one of Debug, ReleaseSafe, ReleaseFast, ReleaseSmall (got '{other}')"
+            ),
+        };
+    }
+
+    if env::var("DEBUG").as_deref() == Ok("true") {
+        return "Debug";
+    }
+
+    match env::var("OPT_LEVEL").as_deref() {
+        Ok("s") | Ok("z") => "ReleaseSmall",
+        _ => "ReleaseFast",
+    }
 }
 
 /// Clone ghostty at the pinned commit into OUT_DIR/ghostty-src.
@@ -92,9 +325,10 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     // Skip fetch if we already have the right commit.
     if stamp.exists()
         && let Ok(existing) = std::fs::read_to_string(&stamp)
-            && existing.trim() == GHOSTTY_COMMIT {
-                return src_dir;
-            }
+        && existing.trim() == GHOSTTY_COMMIT
+    {
+        return src_dir;
+    }
 
     // Clean and clone fresh.
     if src_dir.exists() {
@@ -141,21 +375,6 @@ fn library_search_dirs(target: &str, install_prefix: &Path) -> Vec<PathBuf> {
         dirs.push(install_prefix.join("bin"));
     }
     dirs
-}
-
-/// Returns candidate filenames for the shared library artifact, ordered by
-/// preference.  The build assertion succeeds if any one of these exists in
-/// any of the search directories.
-fn library_artifact_candidates(target: &str) -> &'static [&'static str] {
-    if target.contains("darwin") {
-        &["libghostty-vt.0.1.0.dylib", "libghostty-vt.dylib"]
-    } else if target.contains("windows-gnu") {
-        &["libghostty-vt.dll.a", "ghostty-vt.dll", "ghostty-vt.lib"]
-    } else if target.contains("windows-msvc") {
-        &["ghostty-vt.lib", "ghostty-vt.dll", "libghostty-vt.dll.lib"]
-    } else {
-        &["libghostty-vt.so.0.1.0", "libghostty-vt.so"]
-    }
 }
 
 fn zig_target(target: &str) -> String {

@@ -32,6 +32,8 @@
     reason = "underlying C API may return any error outside of expected and
     mitigated situations, and it is not feasible to document them all"
 )]
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
 pub use libghostty_vt_sys as ffi;
 
 pub mod alloc;
@@ -40,6 +42,8 @@ pub mod error;
 pub mod fmt;
 pub mod focus;
 pub mod key;
+pub mod kitty;
+pub mod log;
 pub mod mouse;
 pub mod osc;
 pub mod paste;
@@ -52,6 +56,12 @@ pub mod terminal;
 #[doc(inline)]
 pub use crate::{
     error::Error,
+    log::{Logger, set_logger},
     render::RenderState,
     terminal::{Options as TerminalOptions, Terminal},
 };
+
+pub(crate) fn sys_set<T>(opt: ffi::SysOption::Type, val: *const T) -> error::Result<()> {
+    let result = unsafe { ffi::ghostty_sys_set(opt, val.cast()) };
+    error::from_result(result)
+}

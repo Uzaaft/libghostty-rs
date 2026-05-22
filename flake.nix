@@ -30,7 +30,7 @@
           overlays = [(import rust-overlay)];
         };
 
-        rustVersion = "1.93.0";
+        rustVersion = "1.90.0";
         rustExtensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
 
         toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
@@ -45,38 +45,74 @@
         unfilteredRoot = ./.;
 
         zigPkg = zig.packages.${system}."0.15.2";
+        ghosttyCommit = "6590196661f769dd8f2b3e85d6c98262c4ec5b3b";
+
+        # Keep this in sync with GHOSTTY_COMMIT in
+        # crates/libghostty-vt-sys/build.rs. Nix must provide Ghostty sources
+        # up front because sandboxed builds cannot fetch from git.
+        ghosttySrc = pkgs.fetchFromGitHub {
+          owner = "ghostty-org";
+          repo = "ghostty";
+          rev = ghosttyCommit;
+          hash = "sha256-HHHgWuBssEBMfV5hOFdFxp0WUXiwfl20NfkjU/ZNuC8=";
+        };
+
+        # Ghostty ships a zon2nix-generated link farm for its Zig package
+        # dependencies. build.rs passes this through --system so Zig never
+        # downloads packages during the Cargo build script.
+        ghosttyZigDeps = pkgs.callPackage (ghosttySrc + "/build.zig.zon.nix") {
+          name = "ghostty-zig-deps-${builtins.substring 0 7 ghosttyCommit}";
+          zig_0_15 = zigPkg;
+        };
 
         src = pkgs.lib.fileset.toSource {
           root = unfilteredRoot;
           fileset = pkgs.lib.fileset.unions [
             (craneLib.fileset.commonCargoSources unfilteredRoot)
-            (pkgs.lib.fileset.fileFilter (file: file.hasExt "h" || file.hasExt "zig" || file.hasExt "zon" || file.hasExt "md") unfilteredRoot)
+            (pkgs.lib.fileset.fileFilter (
+              file:
+                file.hasExt "h"
+                || file.hasExt "zig"
+                || file.hasExt "zon"
+                || file.hasExt "md"
+                || file.hasExt "ttf"
+            ) unfilteredRoot)
           ];
         };
 
-        commonArgs = {
-          inherit src;
-          strictDeps = true;
+        commonArgs =
+          {
+            inherit src;
+            strictDeps = true;
+            GHOSTTY_SOURCE_DIR = "${ghosttySrc}";
+            GHOSTTY_ZIG_SYSTEM_DIR = "${ghosttyZigDeps}";
 
-          nativeBuildInputs = [
-            pkgs.pkg-config
-            zigPkg
-            pkgs.clang
-          ];
-
-          buildInputs =
-            [
-              pkgs.libclang
-              pkgs.openssl
-            ]
-            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-              pkgs.musl
-            ]
-            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-              pkgs.libiconv
-              pkgs.darwin.apple_sdk.frameworks.Security
+            nativeBuildInputs = [
+              pkgs.pkg-config
+              zigPkg
+              pkgs.clang
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              pkgs.cctools
+              pkgs.xcbuild
             ];
-        };
+
+            buildInputs =
+              [
+                pkgs.libclang
+                pkgs.openssl
+              ]
+              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+                pkgs.musl
+              ]
+              ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+                pkgs.apple-sdk
+                pkgs.libiconv
+              ];
+          }
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isDarwin {
+            DEVELOPER_DIR = "${pkgs.apple-sdk}";
+            SDKROOT = "${pkgs.apple-sdk.sdkroot}";
+          };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
