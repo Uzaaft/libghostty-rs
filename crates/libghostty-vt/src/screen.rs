@@ -4,7 +4,6 @@
 //! A [`Cell`] is a single grid cell and a [`Row`] is a single row.
 //! Both are opaque values whose fields are accessed via their methods.
 use std::{
-    cell::RefCell,
     marker::PhantomData,
     mem::MaybeUninit,
     ptr::NonNull,
@@ -171,7 +170,7 @@ impl TrackedGridRefState {
 
 /// Terminal-owned tracked grid reference registry.
 pub(crate) struct TrackedGridRefs {
-    refs: RefCell<Vec<Weak<TrackedGridRefState>>>,
+    refs: Vec<Weak<TrackedGridRefState>>,
 }
 
 impl std::fmt::Debug for TrackedGridRefs {
@@ -182,21 +181,18 @@ impl std::fmt::Debug for TrackedGridRefs {
 
 impl Default for TrackedGridRefs {
     fn default() -> Self {
-        Self {
-            refs: RefCell::new(Vec::new()),
-        }
+        Self { refs: Vec::new() }
     }
 }
 
 impl TrackedGridRefs {
-    pub(crate) fn register(&self, tracked: &TrackedGridRef) {
-        let mut refs = self.refs.borrow_mut();
-        refs.retain(|weak| weak.strong_count() > 0);
-        refs.push(Rc::downgrade(&tracked.state));
+    pub(crate) fn register(&mut self, tracked: &TrackedGridRef) {
+        self.refs.retain(|weak| weak.strong_count() > 0);
+        self.refs.push(Rc::downgrade(&tracked.state));
     }
 
-    pub(crate) fn free_all(&self) {
-        let refs = std::mem::take(&mut *self.refs.borrow_mut());
+    pub(crate) fn free_all(&mut self) {
+        let refs = std::mem::take(&mut self.refs);
         for weak in refs {
             if let Some(state) = weak.upgrade() {
                 state.free();
