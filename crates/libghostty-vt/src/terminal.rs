@@ -1,13 +1,13 @@
 //! Types and functions around terminal state management.
 
-use std::mem::MaybeUninit;
+use std::{mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     alloc::{Allocator, Object},
     error::{Error, Result, from_optional_result, from_result},
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
     key,
-    screen::{GridRef, Screen},
+    screen::{GridRef, Screen, TrackedGridRef, TrackedGridRefs},
     style::{self, RgbColor},
 };
 
@@ -109,6 +109,7 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 #[derive(Debug)]
 pub struct Terminal<'alloc: 'cb, 'cb> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
+    tracked_grid_refs: TrackedGridRefs,
     // Keep callbacks in a heap allocation so C can store a userdata pointer
     // to the VTable itself. That pointer remains stable even if Terminal moves.
     vtable: Box<VTable<'alloc, 'cb>>,
@@ -160,6 +161,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         from_result(result)?;
         Ok(Self {
             inner: Object::new(raw)?,
+            tracked_grid_refs: TrackedGridRefs::default(),
             vtable: Box::new(VTable::default()),
         })
     }
@@ -247,6 +249,57 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         };
         from_result(result)?;
         Ok(unsafe { GridRef::from_raw(grid_ref) })
+    }
+
+    /// Create an owned grid reference that follows terminal mutations.
+    ///
+    /// The returned handle is backed by libghostty's tracked grid ref API and
+    /// follows its resolved cell across terminal mutations that preserve the
+    /// underlying location. It can still lose its semantic location if the
+    /// underlying grid storage is reset or discarded; in that case its
+    /// snapshot and point conversion methods return `Ok(None)`.
+    ///
+    /// The reference is attached to the terminal screen/page-list that is
+    /// active when this method is called. The Rust wrapper owns the handle and
+    /// ensures it is freed before the terminal is freed, so callers do not need
+    /// to manually manage the C API's drop-order requirement.
+    ///
+    /// Each tracked reference adds bookkeeping to terminal mutations. Use
+    /// [`Terminal::grid_ref`] for immediate one-shot cell inspection.
+    pub fn track_grid_ref(&mut self, point: Point) -> Result<TrackedGridRef> {
+        let mut raw: ffi::TrackedGridRef = std::ptr::null_mut();
+        let result = unsafe {
+            ffi::ghostty_terminal_grid_ref_track(self.inner.as_raw(), point.into(), &raw mut raw)
+        };
+        from_result(result)?;
+
+        let inner = NonNull::new(raw).ok_or(Error::InvalidValue)?;
+        let tracked = TrackedGridRef::new(inner, self.inner.ptr);
+        self.tracked_grid_refs.register(&tracked);
+        Ok(tracked)
+    }
+
+    /// Convert a grid reference back to a point in the requested space.
+    ///
+    /// Returns `Ok(None)` if the referenced cell cannot be represented in the
+    /// requested coordinate space, such as asking for active-area coordinates
+    /// for a cell that has scrolled into history.
+    pub fn point_from_grid_ref(
+        &self,
+        grid_ref: &GridRef<'_>,
+        space: PointSpace,
+    ) -> Result<Option<PointCoordinate>> {
+        let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_terminal_point_from_grid_ref(
+                self.inner.as_raw(),
+                std::ptr::from_ref(&grid_ref.inner),
+                space.into_raw(),
+                point.as_mut_ptr(),
+            )
+        };
+
+        from_optional_result(result, point).map(|value| value.map(Into::into))
     }
 
     /// Get the current value of a terminal mode.
@@ -482,6 +535,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 }
 impl Drop for Terminal<'_, '_> {
     fn drop(&mut self) {
+        self.tracked_grid_refs.free_all();
         unsafe { ffi::ghostty_terminal_free(self.inner.as_raw()) }
     }
 }
@@ -526,6 +580,30 @@ impl From<Point> for ffi::Point {
                     coordinate: coord.into(),
                 },
             },
+        }
+    }
+}
+
+/// A coordinate space for converting grid references back to points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointSpace {
+    /// Active area where the cursor can move.
+    Active,
+    /// Visible viewport, which changes when scrolled.
+    Viewport,
+    /// Full screen including scrollback.
+    Screen,
+    /// Scrollback history only, before the active area.
+    History,
+}
+
+impl PointSpace {
+    pub(crate) fn into_raw(self) -> ffi::PointTag::Type {
+        match self {
+            Self::Active => ffi::PointTag::ACTIVE,
+            Self::Viewport => ffi::PointTag::VIEWPORT,
+            Self::Screen => ffi::PointTag::SCREEN,
+            Self::History => ffi::PointTag::HISTORY,
         }
     }
 }
@@ -936,6 +1014,7 @@ macro_rules! handlers {
                     // without taking ownership of the underlying ghostty terminal.
                     let mut term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
                         inner: obj,
+                        tracked_grid_refs: $crate::screen::TrackedGridRefs::default(),
                         vtable: ::core::default::Default::default(),
                     });
                     let $t: &$crate::terminal::Terminal = &term;
@@ -1275,5 +1354,146 @@ mod tests {
         // Primary DA request (CSI c) should invoke on_device_attributes.
         terminal.vt_write(b"\x1b[c");
         assert_eq!(*callback_count.borrow(), 1);
+    }
+
+    fn tiny_terminal() -> Terminal<'static, 'static> {
+        Terminal::new(Options {
+            cols: 8,
+            rows: 3,
+            max_scrollback: 100,
+        })
+        .expect("terminal should initialize")
+    }
+
+    fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> u32 {
+        let snapshot = tracked
+            .snapshot(terminal)
+            .expect("tracked snapshot should not fail")
+            .expect("tracked ref should have a value");
+        snapshot
+            .cell()
+            .expect("tracked snapshot should resolve to a cell")
+            .codepoint()
+            .expect("tracked snapshot cell should expose a codepoint")
+    }
+
+    #[test]
+    fn tracked_grid_ref_follows_scroll() {
+        let mut terminal = tiny_terminal();
+        terminal.vt_write(b"alpha\r\nbravo\r\ncharlie");
+
+        let tracked = terminal
+            .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .expect("tracked grid ref should initialize");
+
+        terminal.vt_write(b"\r\ndelta");
+
+        assert!(tracked.has_value());
+        assert_eq!(
+            codepoint_at_tracked_ref(&terminal, &tracked),
+            u32::from('a')
+        );
+        assert_eq!(
+            tracked
+                .point(PointSpace::Screen)
+                .expect("tracked point should resolve")
+                .expect("tracked point should have a value")
+                .x,
+            0
+        );
+    }
+
+    #[test]
+    fn tracked_grid_ref_reports_loss_and_can_set_point() {
+        let mut terminal = tiny_terminal();
+        terminal.vt_write(b"alpha\r\nbravo\r\ncharlie");
+
+        let mut tracked = terminal
+            .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .expect("tracked grid ref should initialize");
+
+        terminal.reset();
+
+        assert!(!tracked.has_value());
+        assert!(
+            tracked
+                .snapshot(&terminal)
+                .expect("missing tracked snapshot should not fail")
+                .is_none()
+        );
+        assert!(
+            tracked
+                .point(PointSpace::Screen)
+                .expect("missing tracked point should not fail")
+                .is_none()
+        );
+
+        terminal.vt_write(b"echo");
+        tracked
+            .set_point(&mut terminal, Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .expect("tracked grid ref should set to a new point");
+
+        assert!(tracked.has_value());
+        assert_eq!(
+            codepoint_at_tracked_ref(&terminal, &tracked),
+            u32::from('e')
+        );
+    }
+
+    #[test]
+    fn tracked_grid_ref_survives_terminal_drop() {
+        let tracked = {
+            let mut terminal = tiny_terminal();
+            terminal.vt_write(b"alpha");
+            terminal
+                .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+                .expect("tracked grid ref should initialize")
+        };
+
+        assert!(!tracked.has_value());
+        assert!(matches!(
+            tracked.point(PointSpace::Screen),
+            Err(Error::InvalidValue)
+        ));
+    }
+
+    #[test]
+    fn tracked_grid_ref_rejects_different_terminal() {
+        let mut first = tiny_terminal();
+        first.vt_write(b"alpha");
+        let mut second = tiny_terminal();
+        second.vt_write(b"bravo");
+
+        let mut tracked = first
+            .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .expect("tracked grid ref should initialize");
+
+        assert!(matches!(
+            tracked.snapshot(&second),
+            Err(Error::InvalidValue)
+        ));
+        assert!(matches!(
+            tracked.set_point(&mut second, Point::Active(PointCoordinate { x: 0, y: 0 })),
+            Err(Error::InvalidValue)
+        ));
+    }
+
+    #[test]
+    fn grid_ref_converts_back_to_point() {
+        let mut terminal = tiny_terminal();
+        terminal.vt_write(b"alpha");
+
+        let original = PointCoordinate { x: 1, y: 0 };
+        let grid_ref = terminal
+            .grid_ref(Point::Active(original))
+            .expect("grid ref should resolve");
+
+        assert_eq!(
+            terminal
+                .point_from_grid_ref(&grid_ref, PointSpace::Active)
+                .expect("grid ref point conversion should not fail")
+                .expect("grid ref should be representable in active space"),
+            original
+        );
     }
 }

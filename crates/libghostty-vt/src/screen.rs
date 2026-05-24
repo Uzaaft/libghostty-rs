@@ -3,12 +3,19 @@
 //! These types represent the contents of a terminal screen.
 //! A [`Cell`] is a single grid cell and a [`Row`] is a single row.
 //! Both are opaque values whose fields are accessed via their methods.
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::{
+    cell::RefCell,
+    marker::PhantomData,
+    mem::MaybeUninit,
+    ptr::NonNull,
+    rc::{Rc, Weak},
+};
 
 use crate::{
-    error::{Error, Result, from_result, from_result_with_len},
+    error::{Error, Result, from_optional_result, from_result, from_result_with_len},
     ffi,
     style::{self, PaletteIndex, RgbColor, Style},
+    terminal::{Point, PointCoordinate, PointSpace, Terminal},
 };
 
 /// Terminal screen identifier.
@@ -123,6 +130,200 @@ impl GridRef<'_> {
             )
         };
         from_result_with_len(result, len)
+    }
+}
+
+#[derive(Debug)]
+struct TrackedGridRefState {
+    inner: std::cell::Cell<Option<NonNull<ffi::TrackedGridRefImpl>>>,
+    terminal: NonNull<ffi::TerminalImpl>,
+}
+
+impl TrackedGridRefState {
+    fn new(inner: NonNull<ffi::TrackedGridRefImpl>, terminal: NonNull<ffi::TerminalImpl>) -> Self {
+        Self {
+            inner: std::cell::Cell::new(Some(inner)),
+            terminal,
+        }
+    }
+
+    fn handle(&self) -> Result<NonNull<ffi::TrackedGridRefImpl>> {
+        self.inner.get().ok_or(Error::InvalidValue)
+    }
+
+    fn handle_for_terminal(
+        &self,
+        terminal: &Terminal<'_, '_>,
+    ) -> Result<NonNull<ffi::TrackedGridRefImpl>> {
+        if self.terminal != terminal.inner.ptr {
+            return Err(Error::InvalidValue);
+        }
+
+        self.handle()
+    }
+
+    fn free(&self) {
+        if let Some(inner) = self.inner.take() {
+            unsafe { ffi::ghostty_tracked_grid_ref_free(inner.as_ptr()) }
+        }
+    }
+}
+
+/// Terminal-owned tracked grid reference registry.
+pub(crate) struct TrackedGridRefs {
+    refs: RefCell<Vec<Weak<TrackedGridRefState>>>,
+}
+
+impl std::fmt::Debug for TrackedGridRefs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrackedGridRefs").finish_non_exhaustive()
+    }
+}
+
+impl Default for TrackedGridRefs {
+    fn default() -> Self {
+        Self {
+            refs: RefCell::new(Vec::new()),
+        }
+    }
+}
+
+impl TrackedGridRefs {
+    pub(crate) fn register(&self, tracked: &TrackedGridRef) {
+        let mut refs = self.refs.borrow_mut();
+        refs.retain(|weak| weak.strong_count() > 0);
+        refs.push(Rc::downgrade(&tracked.state));
+    }
+
+    pub(crate) fn free_all(&self) {
+        let refs = std::mem::take(&mut *self.refs.borrow_mut());
+        for weak in refs {
+            if let Some(state) = weak.upgrade() {
+                state.free();
+            }
+        }
+    }
+}
+
+/// Owned reference to a terminal grid cell that follows terminal mutations.
+///
+/// A tracked grid reference is backed by libghostty's tracked grid ref API. It
+/// follows its resolved cell across terminal mutations that preserve the
+/// underlying location. It can still lose its semantic location if the
+/// underlying grid storage is reset or discarded; in that case
+/// [`TrackedGridRef::snapshot`] and [`TrackedGridRef::point`] return
+/// `Ok(None)`.
+///
+/// A tracked reference may outlive the terminal that created it. If that
+/// happens, the Rust wrapper frees the underlying libghostty handle before the
+/// terminal is freed and leaves this value inert. An inert reference reports
+/// `false` from [`TrackedGridRef::has_value`], and methods that require the
+/// underlying handle return [`Error::InvalidValue`].
+///
+/// Each tracked reference adds bookkeeping to terminal mutations. Prefer
+/// [`Terminal::grid_ref`] for immediate one-shot cell inspection.
+#[derive(Debug)]
+pub struct TrackedGridRef {
+    state: Rc<TrackedGridRefState>,
+}
+
+impl TrackedGridRef {
+    pub(crate) fn new(
+        inner: NonNull<ffi::TrackedGridRefImpl>,
+        terminal: NonNull<ffi::TerminalImpl>,
+    ) -> Self {
+        Self {
+            state: Rc::new(TrackedGridRefState::new(inner, terminal)),
+        }
+    }
+
+    /// Return whether this reference currently has a meaningful location.
+    ///
+    /// This is only a snapshot of the current state. Any terminal mutation can
+    /// still cause a later call to [`TrackedGridRef::snapshot`] or
+    /// [`TrackedGridRef::point`] to return `Ok(None)`.
+    pub fn has_value(&self) -> bool {
+        let Some(inner) = self.state.inner.get() else {
+            return false;
+        };
+
+        unsafe { ffi::ghostty_tracked_grid_ref_has_value(inner.as_ptr()) }
+    }
+
+    /// Snapshot this tracked reference into a regular grid reference.
+    ///
+    /// The returned [`GridRef`] follows the same lifetime rule as
+    /// [`Terminal::grid_ref`]: it is only valid until the next terminal
+    /// mutation. The terminal argument ties that short-lived snapshot to the
+    /// terminal borrow and is also used to reject references created by a
+    /// different terminal.
+    pub fn snapshot<'t>(&self, terminal: &'t Terminal<'_, '_>) -> Result<Option<GridRef<'t>>> {
+        let inner = self.state.handle_for_terminal(terminal)?;
+        let mut grid_ref = MaybeUninit::new(ffi::sized!(ffi::GridRef));
+        let result = unsafe {
+            ffi::ghostty_tracked_grid_ref_snapshot(inner.as_ptr(), grid_ref.as_mut_ptr())
+        };
+
+        from_optional_result(result, grid_ref).map(|value| {
+            value.map(|raw| unsafe {
+                // SAFETY: A successful libghostty snapshot initializes a
+                // short-lived untracked grid reference for the provided
+                // terminal. The returned Rust lifetime is tied to that
+                // terminal borrow.
+                GridRef::from_raw(raw)
+            })
+        })
+    }
+
+    /// Convert this tracked reference into a coordinate in the requested space.
+    ///
+    /// The coordinate is resolved against the terminal screen/page-list that
+    /// currently owns this reference. If the terminal has switched between the
+    /// primary and alternate screens since this reference was created or last
+    /// set, that may be different from the terminal's currently active screen.
+    ///
+    /// Returns `Ok(None)` if the tracked location was discarded, or if the
+    /// current location cannot be represented in the requested coordinate
+    /// space.
+    pub fn point(&self, space: PointSpace) -> Result<Option<PointCoordinate>> {
+        let inner = self.state.handle()?;
+        let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_tracked_grid_ref_point(
+                inner.as_ptr(),
+                space.into_raw(),
+                point.as_mut_ptr(),
+            )
+        };
+
+        from_optional_result(result, point).map(|value| value.map(Into::into))
+    }
+
+    /// Set this tracked reference to a new terminal point.
+    ///
+    /// The terminal must be the same terminal that originally created this
+    /// tracked reference. On success, any previous `no value` state is cleared
+    /// and this reference starts tracking the new point. The point is resolved
+    /// against the terminal screen/page-list that is active when this method is
+    /// called, so this can move the reference between primary and alternate
+    /// screens.
+    pub fn set_point(
+        &mut self,
+        terminal: &mut Terminal<'_, '_>,
+        point: Point,
+    ) -> Result<&mut Self> {
+        let inner = self.state.handle_for_terminal(terminal)?;
+        let result = unsafe {
+            ffi::ghostty_tracked_grid_ref_set(inner.as_ptr(), terminal.inner.as_raw(), point.into())
+        };
+        from_result(result)?;
+        Ok(self)
+    }
+}
+
+impl Drop for TrackedGridRef {
+    fn drop(&mut self) {
+        self.state.free();
     }
 }
 
