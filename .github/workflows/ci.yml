@@ -15,18 +15,24 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     env:
-      ZIG_LOCAL_CACHE_DIR: ${{ runner.os == 'Linux' && '/zig/local-cache' || '/Users/runner/zig/local-cache' }}
-      ZIG_GLOBAL_CACHE_DIR: ${{ runner.os == 'Linux' && '/zig/global-cache' || '/Users/runner/zig/global-cache' }}
+      ZIG_LOCAL_CACHE_DIR: ${{ matrix.zig-local-cache-dir }}
+      ZIG_GLOBAL_CACHE_DIR: ${{ matrix.zig-global-cache-dir }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: macOS aarch64
             runner: namespace-profile-libghostty-mac
+            zig-local-cache-dir: /Users/runner/zig/local-cache
+            zig-global-cache-dir: /Users/runner/zig/global-cache
           - name: Linux aarch64
             runner: namespace-profile-linux-aarch64-sm
+            zig-local-cache-dir: /zig/local-cache
+            zig-global-cache-dir: /zig/global-cache
           - name: Linux x86_64
             runner: namespace-profile-linux-x86-sm
+            zig-local-cache-dir: /zig/local-cache
+            zig-global-cache-dir: /zig/global-cache
     steps:
       - uses: actions/checkout@v4
 
