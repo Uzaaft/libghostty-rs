@@ -14,6 +14,9 @@ jobs:
   check:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
+    env:
+      ZIG_LOCAL_CACHE_DIR: ${{ runner.os == 'Linux' && '/zig/local-cache' || '/Users/runner/zig/local-cache' }}
+      ZIG_GLOBAL_CACHE_DIR: ${{ runner.os == 'Linux' && '/zig/global-cache' || '/Users/runner/zig/global-cache' }}
     strategy:
       fail-fast: false
       matrix:
@@ -33,11 +36,14 @@ jobs:
         with:
           path: |
             /nix
+            /zig
 
       - name: Setup Namespace cache
         uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1.4.3
         if: runner.os == 'macOS'
         with:
+          cache: |
+            xcode
           path: |
             /Users/runner/zig
 
@@ -50,6 +56,8 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
         if: runner.os == 'macOS'
+        with:
+          determinate: true
 
       - name: Build package derivation
         run: nix build .#default --print-build-logs

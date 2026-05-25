@@ -151,6 +151,8 @@
           ];
 
           shellHook = ''
+            export GHOSTTY_SOURCE_DIR=${ghosttySrc}
+            export GHOSTTY_ZIG_SYSTEM_DIR=${ghosttyZigDeps}
             export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             # Unset Nix Darwin SDK env vars and remove the xcbuild
