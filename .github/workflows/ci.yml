@@ -21,9 +21,9 @@ jobs:
           - name: macOS aarch64
             runner: macos-latest
           - name: Linux aarch64
-            runner: ubuntu-24.04-arm
+            runner: namespace-profile-linux-aarch64-sm
           - name: Linux x86_64
-            runner: ubuntu-latest
+            runner: namespace-profile-linux-x86-sm
     steps:
       - uses: actions/checkout@v4
 
