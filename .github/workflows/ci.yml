@@ -41,7 +41,6 @@ jobs:
         if: runner.os == 'Linux'
         with:
           path: |
-            /nix
             /zig
 
       - name: Setup Namespace cache
