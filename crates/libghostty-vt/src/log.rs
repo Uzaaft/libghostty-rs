@@ -91,20 +91,33 @@ static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
 /// Set the log callback.
 ///
 /// When set, internal library log messages are delivered to this
-/// callback. When cleared (`None` value), log messages are silently
+/// callback. When cleared (set to `None`), log messages are silently
 /// discarded.
-///
-/// Use [`LogStderr`] as a convenience callback that writes formatted messages
-/// to stderr.
 ///
 /// Which log levels are emitted depends on the build mode of the library and
 /// is not configurable at runtime. Debug builds emit all levels (debug and
 /// above). Release builds emit info and above; debug-level messages are
 /// compiled out entirely and will never reach the callback.
 ///
+/// # Examples
+///
+/// Use [`LogStderr`] as a simple way to write formatted logs to stderr:
+///
 /// ```
-/// use libghostty_vt::log;
-/// log::set_logger(None).unwrap();
+/// use libghostty_vt::{set_logger, log::LogStderr};
+/// # fn main() -> Result<(), Box<dyn std::error::Error>>{
+/// set_logger(Some(Box::new(LogStderr)))?;
+/// # Ok(())}
+/// ```
+///
+/// When the `log` feature is enabled, you can also redirect log messages
+/// to any `log`-compatible logger, including the one currently used globally:
+///
+/// ```ignore
+/// # fn main() -> Result<(), Box<dyn std::error::Error>>{
+/// // Any logger will do, though usually you want to use the global logger
+/// libghostty_vt::set_logger(Some(Box::new(log::logger())))?;
+/// # Ok(())}
 /// ```
 pub fn set_logger(f: Option<Box<dyn Logger>>) -> Result<()> {
     unsafe extern "C" fn callback(
