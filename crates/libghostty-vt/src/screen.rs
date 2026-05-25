@@ -3,12 +3,13 @@
 //! These types represent the contents of a terminal screen.
 //! A [`Cell`] is a single grid cell and a [`Row`] is a single row.
 //! Both are opaque values whose fields are accessed via their methods.
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
-    error::{Error, Result, from_result, from_result_with_len},
+    error::{Error, Result, from_optional_result, from_result, from_result_with_len},
     ffi,
     style::{self, PaletteIndex, RgbColor, Style},
+    terminal::{Point, PointCoordinate, PointSpace, Terminal},
 };
 
 /// Terminal screen identifier.
@@ -123,6 +124,136 @@ impl GridRef<'_> {
             )
         };
         from_result_with_len(result, len)
+    }
+}
+
+/// Owned reference to a terminal grid cell that follows terminal mutations.
+///
+/// A tracked grid reference is backed by libghostty's tracked grid ref API. It
+/// follows its resolved cell across terminal mutations that preserve the
+/// underlying location. It can still lose its semantic location if the
+/// underlying grid storage is reset or discarded; in that case
+/// [`TrackedGridRef::snapshot`] and [`TrackedGridRef::point`] return
+/// `Ok(None)`.
+///
+/// A tracked reference may outlive the terminal that created it. After the
+/// terminal is freed, [`TrackedGridRef::has_value`] returns `false`,
+/// [`TrackedGridRef::point`] returns `Ok(None)`, and the handle can still be
+/// dropped normally. [`TrackedGridRef::snapshot`] still requires a live borrow
+/// of the creating terminal because the returned [`GridRef`] is a short-lived
+/// terminal snapshot.
+///
+/// Each tracked reference adds bookkeeping to terminal mutations. Prefer
+/// [`Terminal::grid_ref`] for immediate one-shot cell inspection.
+#[derive(Debug)]
+pub struct TrackedGridRef {
+    inner: NonNull<ffi::TrackedGridRefImpl>,
+    terminal: NonNull<ffi::TerminalImpl>,
+}
+
+impl TrackedGridRef {
+    pub(crate) fn new(
+        inner: NonNull<ffi::TrackedGridRefImpl>,
+        terminal: NonNull<ffi::TerminalImpl>,
+    ) -> Self {
+        Self { inner, terminal }
+    }
+
+    fn handle_for_terminal(
+        &self,
+        terminal: &Terminal<'_, '_>,
+    ) -> Result<NonNull<ffi::TrackedGridRefImpl>> {
+        if self.terminal != terminal.inner.ptr {
+            return Err(Error::InvalidValue);
+        }
+
+        Ok(self.inner)
+    }
+
+    /// Return whether this reference currently has a meaningful location.
+    ///
+    /// This is only a snapshot of the current state. Any terminal mutation can
+    /// still cause a later call to [`TrackedGridRef::snapshot`] or
+    /// [`TrackedGridRef::point`] to return `Ok(None)`.
+    pub fn has_value(&self) -> bool {
+        unsafe { ffi::ghostty_tracked_grid_ref_has_value(self.inner.as_ptr()) }
+    }
+
+    /// Snapshot this tracked reference into a regular grid reference.
+    ///
+    /// The returned [`GridRef`] follows the same lifetime rule as
+    /// [`Terminal::grid_ref`]: it is only valid until the next terminal
+    /// mutation. The terminal argument ties that short-lived snapshot to the
+    /// terminal borrow and is also used to reject references created by a
+    /// different terminal. Use [`TrackedGridRef::has_value`] or
+    /// [`TrackedGridRef::point`] to query a tracked reference after its
+    /// terminal has been dropped.
+    pub fn snapshot<'t>(&self, terminal: &'t Terminal<'_, '_>) -> Result<Option<GridRef<'t>>> {
+        let inner = self.handle_for_terminal(terminal)?;
+        let mut grid_ref = MaybeUninit::new(ffi::sized!(ffi::GridRef));
+        let result = unsafe {
+            ffi::ghostty_tracked_grid_ref_snapshot(inner.as_ptr(), grid_ref.as_mut_ptr())
+        };
+
+        from_optional_result(result, grid_ref).map(|value| {
+            value.map(|raw| unsafe {
+                // SAFETY: A successful libghostty snapshot initializes a
+                // short-lived untracked grid reference for the provided
+                // terminal. The returned Rust lifetime is tied to that
+                // terminal borrow.
+                GridRef::from_raw(raw)
+            })
+        })
+    }
+
+    /// Convert this tracked reference into a coordinate in the requested space.
+    ///
+    /// The coordinate is resolved against the terminal screen/page-list that
+    /// currently owns this reference. If the terminal has switched between the
+    /// primary and alternate screens since this reference was created or last
+    /// set, that may be different from the terminal's currently active screen.
+    ///
+    /// Returns `Ok(None)` if the tracked location was discarded, or if the
+    /// current location cannot be represented in the requested coordinate
+    /// space.
+    pub fn point(&self, space: PointSpace) -> Result<Option<PointCoordinate>> {
+        let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_tracked_grid_ref_point(
+                self.inner.as_ptr(),
+                space.into_raw(),
+                point.as_mut_ptr(),
+            )
+        };
+
+        from_optional_result(result, point).map(|value| value.map(Into::into))
+    }
+
+    /// Set this tracked reference to a new terminal point.
+    ///
+    /// The terminal must be the same terminal that originally created this
+    /// tracked reference. On success, any previous `no value` state is cleared
+    /// and this reference starts tracking the new point. The point is resolved
+    /// against the terminal screen/page-list that is active when this method is
+    /// called, so this can move the reference between primary and alternate
+    /// screens.
+    pub fn set_point(
+        &mut self,
+        terminal: &mut Terminal<'_, '_>,
+        point: Point,
+    ) -> Result<&mut Self> {
+        let inner = self.handle_for_terminal(terminal)?;
+        let result = unsafe {
+            ffi::ghostty_tracked_grid_ref_set(inner.as_ptr(), terminal.inner.as_raw(), point.into())
+        };
+        from_result(result)?;
+        Ok(self)
+    }
+}
+
+impl Drop for TrackedGridRef {
+    fn drop(&mut self) {
+        unsafe { ffi::ghostty_tracked_grid_ref_free(self.inner.as_ptr()) }
     }
 }
 

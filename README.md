@@ -6,6 +6,7 @@ Rust bindings and safe API for [libghostty-vt](https://ghostty.org), the virtual
 
 - `crates/libghostty-vt-sys` — raw FFI bindings generated from `ghostty/vt.h`
 - `crates/libghostty-vt` — safe Rust wrappers (Terminal, RenderState, KeyEncoder, MouseEncoder, etc.)
+- `example/grid_ref_tracked_rs` — focused example of tracked grid references following cells through scrollback and reset
 - `example/ghostling_rs` — Rust port of [ghostling](https://github.com/ghostty-org/ghostling), a minimal terminal emulator using [macroquad](https://macroquad.rs)
 
 ## Quick Start
@@ -102,6 +103,14 @@ LD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -nam
 # macOS
 DYLD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) \
   cargo run -p ghostling_rs
+
+# Focused tracked grid reference example, Linux
+LD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) \
+  cargo run -p grid_ref_tracked_rs
+
+# Focused tracked grid reference example, macOS
+DYLD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) \
+  cargo run -p grid_ref_tracked_rs
 ```
 
 When `link-static` is enabled, the example does not need `LD_LIBRARY_PATH` or
