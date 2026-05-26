@@ -6,7 +6,7 @@
 use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
-    error::{Error, Result, from_optional_result, from_result, from_result_with_len},
+    error::{Error, Result, from_optional_result_uninit, from_result, from_result_with_len},
     ffi,
     style::{self, PaletteIndex, RgbColor, Style},
     terminal::{Point, PointCoordinate, PointSpace, Terminal},
@@ -136,7 +136,7 @@ impl GridRef<'_> {
 /// A tracked reference can still lose its original semantic location.
 /// This can happen when the underlying grid is reset, pruned, or otherwise
 /// discarded in a way that cannot be mapped to a meaningful new cell.
-/// In that state, [`TrackedGridRef::has_value`] returns `false` and 
+/// In that state, [`TrackedGridRef::has_value`] returns `false` and
 /// [`TrackedGridRef::snapshot`] / [`TrackedGridRef::point`] return `Ok(None)`.
 /// The handle remains valid, and callers may move it to a new point with
 /// [`TrackedGridRef::set`].
@@ -148,7 +148,7 @@ impl GridRef<'_> {
 ///
 /// A tracked reference belongs to the terminal screen/page-list that was
 /// active when it was created or last set. Converting it to a point uses that
-/// owning screen/page-list, even if the terminal has since switched between 
+/// owning screen/page-list, even if the terminal has since switched between
 /// primary and alternate screens. Calling [`TrackedGridRef::set`] resolves
 /// the new point against the terminal's currently active screen/page-list
 /// and may move the tracked reference between screens.
@@ -174,9 +174,9 @@ impl TrackedGridRef {
     }
 
     /// Whether a tracked grid reference currently has a meaningful value.
-	///
-	/// If the terminal that created the tracked reference has been dropped,
-	/// this returns false.
+    ///
+    /// If the terminal that created the tracked reference has been dropped,
+    /// this returns false.
     pub fn has_value(&self) -> bool {
         unsafe { ffi::ghostty_tracked_grid_ref_has_value(self.inner.as_ptr()) }
     }
@@ -202,7 +202,7 @@ impl TrackedGridRef {
             ffi::ghostty_tracked_grid_ref_snapshot(self.inner.as_ptr(), grid_ref.as_mut_ptr())
         };
 
-        from_optional_result(result, grid_ref).map(|value| {
+        from_optional_result_uninit(result, grid_ref).map(|value| {
             value.map(|raw| unsafe {
                 // SAFETY: A successful libghostty snapshot initializes a
                 // short-lived untracked grid reference for the provided
@@ -219,7 +219,7 @@ impl TrackedGridRef {
     /// Unlike snapshotting, this does not expose an intermediate untracked
     /// [`GridRef`].
     ///
-    /// A tracked reference is resolved against the terminal screen/page-list 
+    /// A tracked reference is resolved against the terminal screen/page-list
     /// that currently owns the reference. If the terminal has switched between
     /// primary and alternate screens since the reference was created or last
     /// set, this may be different from the terminal's currently active screen.
@@ -238,25 +238,21 @@ impl TrackedGridRef {
             )
         };
 
-        from_optional_result(result, point).map(|value| value.map(Into::into))
+        from_optional_result_uninit(result, point).map(|value| value.map(Into::into))
     }
 
     /// Move an existing tracked grid reference to a new terminal point.
     ///
-	/// On success, the tracked reference begins tracking the new point and any
-	/// prior "no value" state is cleared. On `Err(Error::OutOfMemory)`, the original
-	/// tracked reference is left unchanged.
-	///
-	/// The terminal must be the same terminal that created the tracked reference.
-	/// The point is resolved against the terminal screen/page-list that is active
-	/// at the time this function is called. If the terminal has switched between 
-	/// primary and alternate screens, this may move the tracked reference from
-	/// one screen/page-list to the other.
-    pub fn set(
-        &mut self,
-        terminal: &mut Terminal<'_, '_>,
-        point: Point,
-    ) -> Result<&mut Self> {
+    /// On success, the tracked reference begins tracking the new point and any
+    /// prior "no value" state is cleared. On `Err(Error::OutOfMemory)`, the original
+    /// tracked reference is left unchanged.
+    ///
+    /// The terminal must be the same terminal that created the tracked reference.
+    /// The point is resolved against the terminal screen/page-list that is active
+    /// at the time this function is called. If the terminal has switched between
+    /// primary and alternate screens, this may move the tracked reference from
+    /// one screen/page-list to the other.
+    pub fn set(&mut self, terminal: &mut Terminal<'_, '_>, point: Point) -> Result<&mut Self> {
         // The C layer validates the terminal/tracked-ref pairing and returns
         // GHOSTTY_INVALID_VALUE on mismatch, so we don't duplicate the check
         // on the Rust side.
@@ -398,36 +394,6 @@ impl Cell {
     /// Only valid when [`Cell::content_tag`] is [`CellContentTag::BgColorRgb`].
     pub fn bg_color_rgb(self) -> Result<RgbColor> {
         Ok(self.get::<ffi::ColorRgb>(ffi::CellData::COLOR_RGB)?.into())
-    }
-}
-
-/// A selection range defined by two grid references.
-#[derive(Debug)]
-pub struct Selection<'t> {
-    /// Start of the selection range (inclusive).
-    pub start: GridRef<'t>,
-    /// End of the selection range (inclusive).
-    pub end: GridRef<'t>,
-    /// Whether the selection is rectangular (block) rather than linear.
-    pub rectangle: bool,
-}
-impl From<Selection<'_>> for ffi::Selection {
-    fn from(value: Selection<'_>) -> Self {
-        Self {
-            start: value.start.inner,
-            end: value.end.inner,
-            rectangle: value.rectangle,
-            ..ffi::sized!(ffi::Selection)
-        }
-    }
-}
-impl Selection<'_> {
-    pub(crate) unsafe fn from_raw(value: ffi::Selection) -> Self {
-        Self {
-            start: unsafe { GridRef::from_raw(value.start) },
-            end: unsafe { GridRef::from_raw(value.end) },
-            rectangle: value.rectangle,
-        }
     }
 }
 

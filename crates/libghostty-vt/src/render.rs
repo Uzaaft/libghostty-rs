@@ -4,12 +4,14 @@ use std::{convert::Into, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
-    error::{Error, Result, from_result},
+    error::{Error, Result, from_optional_result, from_result},
     ffi,
     screen::{Cell, Row},
     style::{RgbColor, Style},
     terminal::Terminal,
 };
+
+pub use ffi::RenderStateRowSelection as RowSelection;
 
 /// Represents the state required to render a visible screen (a viewport) of
 /// a terminal instance.
@@ -544,6 +546,21 @@ impl RowIteration<'_, '_> {
     pub fn set_dirty(&self, dirty: bool) -> Result<()> {
         self.set(ffi::RenderStateRowOption::DIRTY, &dirty)
     }
+
+    /// Row-local selected cell range.
+    pub fn selection(&self) -> Result<Option<RowSelection>> {
+        let mut value = ffi::sized!(RowSelection);
+        let result = unsafe {
+            ffi::ghostty_render_state_row_get(
+                self.iter.0.as_raw(),
+                ffi::RenderStateRowData::SELECTION,
+                std::ptr::from_mut(&mut value).cast(),
+            )
+        };
+        // Since we manually model every possible query, this should never fail.
+        // SAFETY: Value should be initialized after successful call.
+        from_optional_result(result, value)
+    }
 }
 
 impl<'alloc> CellIterator<'alloc> {
@@ -721,6 +738,19 @@ impl CellIteration<'_, '_> {
             )
         };
         from_result(result)
+    }
+
+    /// Whether the cell is contained within the current selection.
+    ///
+    /// This returns true when the cell's column is within the current row's
+    /// row-local selection range, and false otherwise. Rendering policy for
+    /// selected cells (colors, inversion, etc.) is left to the caller.
+    ///
+    /// Renderers that can draw cells in spans may be more efficient calling
+    /// [`RowIteration::selection`] once per row and applying that range
+    /// directly, avoiding one C API call per cell for selection state.
+    pub fn is_selected(&self) -> Result<bool> {
+        self.get(ffi::RenderStateRowCellsData::SELECTED)
     }
 }
 

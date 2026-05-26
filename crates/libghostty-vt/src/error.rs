@@ -43,7 +43,7 @@ pub(crate) fn from_result(code: ffi::Result::Type) -> Result<()> {
     }
 }
 
-pub(crate) fn from_optional_result<T>(
+pub(crate) fn from_optional_result_uninit<T>(
     code: ffi::Result::Type,
     v: MaybeUninit<T>,
 ) -> Result<Option<T>> {
@@ -57,11 +57,35 @@ pub(crate) fn from_optional_result<T>(
     }
 }
 
+pub(crate) fn from_optional_result<T>(code: ffi::Result::Type, v: T) -> Result<Option<T>> {
+    match code {
+        // SAFETY: Value should be initialized after successful call.
+        ffi::Result::SUCCESS => Ok(Some(v)),
+        ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
+        ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: 0 }),
+        ffi::Result::NO_VALUE => Ok(None),
+        _ => Err(Error::InvalidValue),
+    }
+}
+
 pub(crate) fn from_result_with_len(code: ffi::Result::Type, len: usize) -> Result<usize> {
     match code {
         ffi::Result::SUCCESS => Ok(len),
         ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
         ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: len }),
+        _ => Err(Error::InvalidValue),
+    }
+}
+
+pub(crate) fn from_optional_result_with_len(
+    code: ffi::Result::Type,
+    len: usize,
+) -> Result<Option<usize>> {
+    match code {
+        ffi::Result::SUCCESS => Ok(Some(len)),
+        ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
+        ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: len }),
+        ffi::Result::NO_VALUE => Ok(None),
         _ => Err(Error::InvalidValue),
     }
 }

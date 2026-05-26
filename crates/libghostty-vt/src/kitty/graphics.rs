@@ -196,9 +196,9 @@ use std::{
 use crate::{
     Terminal,
     alloc::{Allocator, Bytes, Object, Ref},
-    error::{Error, Result, from_optional_result, from_result},
+    error::{Error, Result, from_optional_result_uninit, from_result},
     ffi,
-    screen::Selection,
+    selection::Selection,
 };
 
 #[doc(inline)]
@@ -236,6 +236,7 @@ pub struct PlacementIterator<'alloc> {
 #[derive(Debug)]
 pub struct PlacementIteration<'t, 'alloc>(&'t mut PlacementIterator<'alloc>);
 
+/// Methods related to the [Kitty graphics protocol](crate::kitty::graphics).
 impl Terminal<'_, '_> {
     /// The Kitty graphics image storage for the active screen.
     ///
@@ -554,7 +555,7 @@ impl<'t, 'alloc> PlacementIteration<'t, 'alloc> {
                 &raw mut pos.row,
             )
         };
-        from_optional_result(result, MaybeUninit::new(pos))
+        from_optional_result_uninit(result, MaybeUninit::new(pos))
     }
 
     /// Get the resolved source rectangle for the current placement.
