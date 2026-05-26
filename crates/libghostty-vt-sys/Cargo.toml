@@ -16,7 +16,7 @@ doctest = false
 default = ["vendored"]
 vendored = []
 pkg-config = ["dep:pkg-config"]
-link-static = []
+link-dynamic = []
 bindgen-tool = ["dep:bindgen", "dep:libc", "dep:heck"]
 kitty-graphics = []
 

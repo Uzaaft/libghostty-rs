@@ -14,10 +14,10 @@ enum LinkMode {
 
 impl LinkMode {
     fn current() -> Self {
-        if cfg!(feature = "link-static") {
-            Self::Static
-        } else {
+        if cfg!(feature = "link-dynamic") {
             Self::Dynamic
+        } else {
+            Self::Static
         }
     }
 
