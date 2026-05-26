@@ -45,7 +45,7 @@
         unfilteredRoot = ./.;
 
         zigPkg = zig.packages.${system}."0.15.2";
-        ghosttyCommit = "6590196661f769dd8f2b3e85d6c98262c4ec5b3b";
+        ghosttyCommit = "b869a6e5ab0a50ce01e8eb5aa408a02b3cbe4f3a";
 
         # Keep this in sync with GHOSTTY_COMMIT in
         # crates/libghostty-vt-sys/build.rs. Nix must provide Ghostty sources
@@ -54,7 +54,7 @@
           owner = "ghostty-org";
           repo = "ghostty";
           rev = ghosttyCommit;
-          hash = "sha256-HHHgWuBssEBMfV5hOFdFxp0WUXiwfl20NfkjU/ZNuC8=";
+          hash = "sha256-6K6ejMEDCsc6ful5y1aTggAGHvN48flDONwEYwK6KX4=";
         };
 
         # Ghostty ships a zon2nix-generated link farm for its Zig package

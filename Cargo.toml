@@ -2,6 +2,7 @@
 members = [
   "crates/libghostty-vt",
   "crates/libghostty-vt-sys",
+  "example/grid_ref_tracked_rs",
   "example/ghostling_rs",
 ]
 resolver = "2"
