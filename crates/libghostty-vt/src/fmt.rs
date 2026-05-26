@@ -9,7 +9,7 @@ use crate::{
     alloc::{Allocator, Bytes, Object},
     error::{Error, Result, from_result},
     ffi,
-    screen::Selection,
+    selection::Selection,
     terminal::Terminal,
 };
 
@@ -61,15 +61,14 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         opts: FormatterOptions,
     ) -> Result<Self> {
         let mut raw: ffi::Formatter = std::ptr::null_mut();
-        let selection = opts.selection.map(Into::into);
 
         let opts = ffi::FormatterTerminalOptions {
             emit: opts.format.into(),
             trim: opts.trim,
             extra: ffi::FormatterTerminalExtra::default(),
             unwrap: opts.unwrap,
-            selection: match selection {
-                Some(s) => &raw const s,
+            selection: match opts.selection {
+                Some(s) => &s.inner,
                 None => std::ptr::null(),
             },
             ..ffi::sized!(ffi::FormatterTerminalOptions)

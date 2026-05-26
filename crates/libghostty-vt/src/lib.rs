@@ -88,6 +88,11 @@
 
 pub use libghostty_vt_sys as ffi;
 
+// Make sure that `Terminal`'s own impl blocks (i.e. core functions)
+// are placed *before* any extra impl blocks from other modules,
+// e.g. Kitty Graphics extensions, Selection APIs
+pub mod terminal;
+
 pub mod alloc;
 pub mod build_info;
 pub mod error;
@@ -101,9 +106,9 @@ pub mod osc;
 pub mod paste;
 pub mod render;
 pub mod screen;
+pub mod selection;
 pub mod sgr;
 pub mod style;
-pub mod terminal;
 
 #[doc(inline)]
 pub use crate::{
