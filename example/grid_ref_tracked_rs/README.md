@@ -10,11 +10,9 @@ for a new point.
 ## Usage
 
 ```sh
-# macOS
-DYLD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) \
-  cargo run -p grid_ref_tracked_rs
-
-# Linux
-LD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) \
-  cargo run -p grid_ref_tracked_rs
+cargo run -p grid_ref_tracked_rs
 ```
+
+When building with `link-dynamic`, set `DYLD_LIBRARY_PATH` on macOS or
+`LD_LIBRARY_PATH` on Linux to the directory containing the generated
+`libghostty-vt` shared library.
