@@ -7,10 +7,16 @@
 //! `libghostty-vt` is able to achieve behind a simple interface.
 
 #![deny(unsafe_code)] // Well, almost.
-use std::cell::Cell;
+use std::{
+    cell::Cell,
+    time::{Duration, Instant},
+};
 
 use macroquad::{
-    miniquad::{conf, window::order_quit},
+    miniquad::{
+        CursorIcon, conf,
+        window::{order_quit, set_mouse_cursor},
+    },
     prelude::*,
 };
 use nix::sys::wait;
@@ -23,10 +29,12 @@ use libghostty_vt::{
     kitty::graphics::{self, DecodePng, DecodedImage, Graphics, Layer, PlacementIterator},
     mouse,
     render::{CellIterator, Dirty, RenderState, RowIterator},
+    selection::gesture::{DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     style::RgbColor,
     terminal::{
-        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Mode,
-        PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes, SizeReportSize,
+        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Point,
+        PointCoordinate, PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes,
+        SizeReportSize,
     },
 };
 
@@ -212,6 +220,10 @@ async fn main() -> Result<()> {
         // (the user shell) is still active or not. We only want to keep
         // processing inputs and communicate with the child when it's
         // alive, and when it's exited we should handle cleanup properly.
+        input
+            .selection
+            .update_mouse_cursor(&terminal, dims, matches!(child, Child::Active(_)))?;
+
         match child {
             Child::Active(pid) => {
                 // Forward keyboard/mouse input only while the child is alive.
@@ -347,13 +359,26 @@ impl<'alloc> Renderer<'alloc> {
             let mut cell_it = self.cell_it.update(row)?;
 
             while let Some(cell) = cell_it.next() {
+                // Selection membership is computed by libghostty from the
+                // terminal-owned selection.  Ghostling only chooses the visual
+                // policy: selected cells use reverse-video colors, matching the
+                // common terminal behavior and avoiding a separate theme knob.
+                let selected = cell.is_selected()?;
                 let graphemes = cell.graphemes_len()?;
                 let bg = cell.bg_color()?;
 
                 if graphemes == 0 {
-                    // The cell has no text, but it might have a background
-                    // color (e.g. from an erase with a color set).
-                    if let Some(bg) = bg {
+                    if selected {
+                        draw_rectangle(
+                            x,
+                            y,
+                            dims.cell_width,
+                            dims.cell_height,
+                            color(colors.foreground),
+                        );
+                    } else if let Some(bg) = bg {
+                        // The cell has no text, but it might have a background
+                        // color (e.g. from an erase with a color set).
                         draw_rectangle(x, y, dims.cell_width, dims.cell_height, color(bg));
                     }
                 } else {
@@ -375,6 +400,11 @@ impl<'alloc> Renderer<'alloc> {
 
                     // Inverse (reverse video): swap foreground and background colors.
                     if style.inverse {
+                        std::mem::swap(&mut fg, &mut bg);
+                        has_bg = true;
+                    }
+
+                    if selected {
                         std::mem::swap(&mut fg, &mut bg);
                         has_bg = true;
                     }
@@ -616,8 +646,8 @@ struct Input<'alloc> {
     mouse_encoder: mouse::Encoder<'alloc>,
     mouse_event: mouse::Event<'alloc>,
     response: Vec<u8>,
+    selection: SelectionState<'alloc>,
 }
-
 impl<'alloc> Input<'alloc> {
     fn new() -> Result<Self> {
         Ok(Self {
@@ -626,6 +656,7 @@ impl<'alloc> Input<'alloc> {
             mouse_encoder: mouse::Encoder::new()?,
             mouse_event: mouse::Event::new()?,
             response: Vec::with_capacity(64),
+            selection: SelectionState::new()?,
         })
     }
 
@@ -728,9 +759,11 @@ impl<'alloc> Input<'alloc> {
             .into_iter()
             .any(|(m, _)| is_mouse_button_down(m));
 
+        let mods = Self::keyboard_mods();
+
         let (x, y) = mouse_position();
         self.mouse_event
-            .set_mods(Self::keyboard_mods())
+            .set_mods(mods)
             .set_position(mouse::Position { x, y });
 
         self.mouse_encoder
@@ -758,8 +791,16 @@ impl<'alloc> Input<'alloc> {
         // Check each mouse button for press/release events.
         for (mb, btn) in Self::ALL_MOUSE_BUTTONS {
             let action = if is_mouse_button_released(mb) {
+                if self.selection.is_selecting(terminal)? {
+                    self.selection.on_release(terminal, dims)?;
+                    continue;
+                }
                 mouse::Action::Release
             } else if is_mouse_button_pressed(mb) {
+                if mb == MouseButton::Left && Self::selection_allowed_with_mods(terminal, mods)? {
+                    self.selection.on_click(terminal, x, y, dims)?;
+                    continue;
+                }
                 mouse::Action::Press
             } else {
                 continue;
@@ -774,6 +815,11 @@ impl<'alloc> Input<'alloc> {
         // (or no button for pure motion in any-event tracking mode).
         let delta = mouse_delta_position();
         if delta.x.abs() > 1e-6 || delta.y.abs() > 1e-6 {
+            if self.selection.is_selecting(terminal)? {
+                self.selection.on_drag(terminal, x, y, dims, mods)?;
+                return Ok(());
+            }
+
             self.mouse_event
                 .set_action(mouse::Action::Motion)
                 .set_button(
@@ -792,18 +838,7 @@ impl<'alloc> Input<'alloc> {
         // the scrollback buffer so the user can review history.
         let (wheel_x, wheel_y) = mouse_wheel();
         if wheel_x.abs() > 1e-6 || wheel_y.abs() > 1e-6 {
-            // Check whether any mouse tracking mode is enabled.  If so,
-            // the application wants to handle scroll events itself.
-            let is_mouse_tracking = [
-                Mode::X10_MOUSE,
-                Mode::NORMAL_MOUSE,
-                Mode::BUTTON_MOUSE,
-                Mode::ANY_MOUSE,
-            ]
-            .into_iter()
-            .any(|mode| matches!(terminal.mode(mode), Ok(true)));
-
-            if is_mouse_tracking {
+            if terminal.is_mouse_tracking()? {
                 let scroll_btn = if wheel_y > 0.0 {
                     mouse::Button::Four
                 } else {
@@ -831,7 +866,7 @@ impl<'alloc> Input<'alloc> {
         Ok(())
     }
 
-    // Build a Mods bitmask from the current macroquad modifier key state.
+    /// Build a Mods bitmask from the current macroquad modifier key state.
     fn keyboard_mods() -> key::Mods {
         let mut mods = key::Mods::empty();
         if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
@@ -847,6 +882,84 @@ impl<'alloc> Input<'alloc> {
             mods |= key::Mods::SUPER;
         }
         mods
+    }
+
+    // Match Ghostty's rectangular-selection modifier convention so Ghostling feels
+    // the same across platforms: Option alone on macOS, Ctrl/Super+Alt elsewhere.
+    fn selection_rectangle_mods(mods: key::Mods) -> bool {
+        let is_alt = mods.contains(key::Mods::ALT);
+        if cfg!(target_os = "macos") {
+            is_alt
+        } else {
+            is_alt && (mods.contains(key::Mods::CTRL) || mods.contains(key::Mods::SUPER))
+        }
+    }
+
+    /// Decide whether a mouse gesture should manipulate terminal selection or be
+    /// forwarded to the running application.  Applications that request mouse
+    /// tracking get normal events, but Shift provides the common terminal-emulator
+    /// escape hatch for selecting text anyway.
+    fn selection_allowed_with_mods(
+        terminal: &Terminal<'alloc, '_>,
+        mods: key::Mods,
+    ) -> Result<bool> {
+        let mouse_tracking = terminal.is_mouse_tracking()?;
+
+        // When an application has enabled mouse tracking, normal mouse events
+        // belong to the application.  Holding Shift overrides that so users can
+        // still select text in full-screen apps such as vim and tmux.
+        Ok(!mouse_tracking || mods.contains(key::Mods::SHIFT))
+    }
+
+    /// Convert the current mouse position to a clamped viewport grid point.
+    /// Clamping lets users start or continue a drag slightly outside the padded
+    /// terminal area while still extending to the nearest visible cell.
+    fn mouse_viewport_point(terminal: &Terminal<'alloc, '_>, dims: Dimensions) -> Result<Point> {
+        let cols = terminal.cols()?;
+        let rows = terminal.rows()?;
+        let (xpos, ypos) = mouse_position();
+
+        let x = if xpos > PADDING {
+            ((xpos - PADDING) / dims.cell_width).clamp(0.0, cols as f32) as u16
+        } else {
+            0
+        };
+        let y = if ypos > PADDING {
+            ((ypos - PADDING) / dims.cell_height).clamp(0.0, rows as f32) as u32
+        } else {
+            0
+        };
+
+        Ok(Point::Viewport(PointCoordinate { x, y }))
+    }
+
+    // Decide whether the mouse is over an area where a selection drag can begin.
+    // Blank cells are included because terminal selections can start in empty grid
+    // space; the check is about selectable geometry, not text contents.
+    fn mouse_over_selectable_text(
+        terminal: &Terminal<'alloc, '_>,
+        dims: Dimensions,
+    ) -> Result<bool> {
+        // Test the real terminal grid bounds rather than using the window dimensions:
+        // padding and any partially visible trailing pixels are not selectable cells,
+        // and the I-beam cursor should not appear there.
+        let cols = terminal.cols()?;
+        let rows = terminal.rows()?;
+
+        let (xpos, ypos) = mouse_position();
+        let left = PADDING;
+        let top = PADDING;
+        let right = left + cols as f32 * dims.cell_width;
+        let bottom = top + rows as f32 * dims.cell_height;
+
+        if xpos < left || xpos >= right || ypos < top || ypos >= bottom {
+            return Ok(false);
+        }
+
+        if !Self::selection_allowed_with_mods(terminal, Self::keyboard_mods())? {
+            return Ok(false);
+        }
+        Ok(true)
     }
 
     /// All macroquad mouse buttons we want to check with their libghostty equivalent.
@@ -937,6 +1050,122 @@ impl<'alloc> Input<'alloc> {
         (KeyCode::F11, Key::F11, '\0'),
         (KeyCode::F12, Key::F12, '\0'),
     ];
+}
+
+#[derive(Debug)]
+struct SelectionState<'alloc> {
+    gesture: Gesture<'alloc>,
+    press_event: PressEvent<'alloc>,
+    release_event: ReleaseEvent<'alloc>,
+    drag_event: DragEvent<'alloc>,
+    start_time: Instant,
+}
+
+impl SelectionState<'_> {
+    fn new() -> Result<Self> {
+        let mut press_event = PressEvent::new()?;
+        press_event.set_repeat_interval(Duration::from_millis(500))?;
+
+        Ok(Self {
+            gesture: Gesture::new()?,
+            press_event,
+            release_event: ReleaseEvent::new()?,
+            drag_event: DragEvent::new()?,
+            start_time: Instant::now(),
+        })
+    }
+
+    /// Whether we currently have a selection and the mouse is kept down.
+    fn is_selecting(&self, terminal: &Terminal<'_, '_>) -> Result<bool> {
+        Ok(self.gesture.click_count(terminal)? > 0 && is_mouse_button_down(MouseButton::Left))
+    }
+
+    /// Update the selection state upon a left click.
+    fn on_click(
+        &mut self,
+        terminal: &Terminal<'_, '_>,
+        x: f32,
+        y: f32,
+        dims: Dimensions,
+    ) -> Result<()> {
+        let point = Input::mouse_viewport_point(terminal, dims)?;
+        let grid_ref = terminal.grid_ref(point)?;
+
+        let selection = self
+            .press_event
+            .set_repeat_distance(dims.cell_width.into())?
+            .set_time(self.start_time.elapsed())?
+            .set_position(x.into(), y.into())?
+            .apply(&mut self.gesture, terminal, grid_ref)?;
+
+        terminal.set_selection(selection.as_ref())?;
+        Ok(())
+    }
+
+    /// Potentially reset the selection state when the mouse is released.
+    fn on_release(&mut self, terminal: &Terminal<'_, '_>, dims: Dimensions) -> Result<()> {
+        let point = Input::mouse_viewport_point(terminal, dims)?;
+        // The point might fall outside the grid, which is completely okay in this case.
+        let grid_ref = terminal.grid_ref(point).ok();
+
+        self.release_event
+            .apply(&mut self.gesture, terminal, grid_ref)?;
+        Ok(())
+    }
+
+    /// Update the selection state during and after a mouse drag.
+    fn on_drag(
+        &mut self,
+        terminal: &Terminal<'_, '_>,
+        x: f32,
+        y: f32,
+        dims: Dimensions,
+        mods: key::Mods,
+    ) -> Result<()> {
+        let point = Input::mouse_viewport_point(terminal, dims)?;
+        let grid_ref = terminal.grid_ref(point)?;
+
+        let selection = self
+            .drag_event
+            .set_rectangle(Input::selection_rectangle_mods(mods))?
+            .set_geometry(Geometry {
+                columns: terminal.cols()?.into(),
+                cell_width: dims.cell_width as u32,
+                padding_left: PADDING as u32,
+                screen_height: dims.window_height as u32,
+            })?
+            .set_position(x.into(), y.into())?
+            .apply(&mut self.gesture, terminal, grid_ref)?;
+
+        terminal.set_selection(selection.as_ref())?;
+        Ok(())
+    }
+
+    /// Update the platform cursor to advertise selection affordance.
+    ///
+    /// This is kept separate from [`Input::handle_mouse`] so the cursor
+    /// changes on hover even when no mouse button event is being processed.
+    fn update_mouse_cursor(
+        &self,
+        terminal: &Terminal<'_, '_>,
+        dims: Dimensions,
+        input_enabled: bool,
+    ) -> Result<()> {
+        let selectable = input_enabled
+            && (self.is_selecting(terminal)? || Input::mouse_over_selectable_text(terminal, dims)?);
+        let rectangle = Input::selection_rectangle_mods(Input::keyboard_mods());
+
+        set_mouse_cursor(if selectable {
+            if rectangle {
+                CursorIcon::Crosshair
+            } else {
+                CursorIcon::Text
+            }
+        } else {
+            CursorIcon::Default
+        });
+        Ok(())
+    }
 }
 
 /// Configuration for macroquad.
