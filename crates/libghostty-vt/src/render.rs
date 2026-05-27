@@ -342,7 +342,7 @@ impl Snapshot<'_, '_> {
 
     fn set<T>(&self, tag: ffi::RenderStateOption::Type, value: &T) -> Result<()> {
         let result = unsafe {
-            ffi::ghostty_render_state_set(self.0.0.as_raw(), tag, std::ptr::from_ref(&value).cast())
+            ffi::ghostty_render_state_set(self.0.0.as_raw(), tag, std::ptr::from_ref(value).cast())
         };
         // Since we manually model every possible query, this should never fail.
         from_result(result)
@@ -524,7 +524,7 @@ impl RowIteration<'_, '_> {
             ffi::ghostty_render_state_row_set(
                 self.iter.0.as_raw(),
                 tag,
-                std::ptr::from_ref(&value).cast(),
+                std::ptr::from_ref(value).cast(),
             )
         };
         from_result(result)
@@ -777,4 +777,34 @@ pub enum CursorVisualStyle {
     Underline = ffi::RenderStateCursorVisualStyle::UNDERLINE,
     /// Hollow block cursor.
     BlockHollow = ffi::RenderStateCursorVisualStyle::BLOCK_HOLLOW,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::terminal::{Options, Terminal};
+
+    /// Guards the `set_dirty` → `update` → `dirty()` round-trip. If
+    /// `Snapshot::set(value: &T)` calls `from_ref(&value)`, the result has
+    /// type `*const &T` (a pointer to the local reference), not `*const T`.
+    /// C reads stack-address bytes into the dirty field, the next `update`
+    /// propagates them, and `dirty()` fails enum decoding.
+    #[test]
+    fn dirty_decodes_after_set_dirty_then_update() {
+        let terminal = Terminal::new(Options {
+            cols: 8,
+            rows: 3,
+            max_scrollback: 0,
+        })
+        .unwrap();
+        let mut state = RenderState::new().unwrap();
+
+        state
+            .update(&terminal)
+            .unwrap()
+            .set_dirty(Dirty::Clean)
+            .unwrap();
+
+        assert!(state.update(&terminal).unwrap().dirty().is_ok());
+    }
 }
