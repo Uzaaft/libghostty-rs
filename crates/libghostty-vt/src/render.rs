@@ -784,10 +784,11 @@ mod tests {
     use super::*;
     use crate::terminal::{Options, Terminal};
 
-    /// Pre-fix, `Snapshot::set` passed `*const &T` to C instead of `*const T`,
-    /// corrupting the dirty field. The next `update` propagated the garbage,
-    /// and `dirty()` then returned `Err(InvalidValue)`. This pins the
-    /// round-trip: it fails on the pre-fix code and passes after the fix.
+    /// Guards the `set_dirty` → `update` → `dirty()` round-trip. If
+    /// `Snapshot::set(value: &T)` calls `from_ref(&value)`, the result has
+    /// type `*const &T` (a pointer to the local reference), not `*const T`.
+    /// C reads stack-address bytes into the dirty field, the next `update`
+    /// propagates them, and `dirty()` fails enum decoding.
     #[test]
     fn dirty_decodes_after_set_dirty_then_update() {
         let terminal = Terminal::new(Options {
