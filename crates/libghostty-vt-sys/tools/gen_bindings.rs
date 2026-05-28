@@ -11,12 +11,12 @@ fn main() {
     // `cargo build -p libghostty-vt-sys`, the headers live in:
     //   target/<profile>/build/libghostty-vt-sys-<hash>/out/ghostty-install/include
     //
-    // For convenience, also allow GHOSTTY_SOURCE_DIR/zig-out/include or
+    // For convenience, also allow GHOSTTY_SOURCE_DIR/include or
     // an explicit GHOSTTY_INCLUDE_DIR override.
     let include_dir = if let Ok(dir) = env::var("GHOSTTY_INCLUDE_DIR") {
         PathBuf::from(dir)
     } else if let Ok(src) = env::var("GHOSTTY_SOURCE_DIR") {
-        PathBuf::from(src).join("zig-out").join("include")
+        PathBuf::from(src).join("include")
     } else {
         // Walk target/debug/build/ to find the libghostty-vt-sys output.
         let manifest_dir =
