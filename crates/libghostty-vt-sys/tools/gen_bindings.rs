@@ -107,6 +107,10 @@ const PREFIXES: &[(&str, &str)] = &[
     ("GhosttyFocusEvent", "GHOSTTY_FOCUS"),
     ("GhosttyResult", "GHOSTTY_"),
     ("GhosttyKittyGraphicsImageData", "GHOSTTY_KITTY_IMAGE_DATA"),
+    (
+        "GhosttySelectionGestureEventOption",
+        "GHOSTTY_SELECTION_GESTURE_EVENT_OPT",
+    ),
 ];
 
 #[derive(Debug)]
