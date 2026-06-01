@@ -199,13 +199,6 @@ pub struct String {
     #[doc = " Length of the string in bytes."]
     pub len: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of String"][::std::mem::size_of::<String>() - 16usize];
-    ["Alignment of String"][::std::mem::align_of::<String>() - 8usize];
-    ["Offset of field: String::ptr"][::std::mem::offset_of!(String, ptr) - 0usize];
-    ["Offset of field: String::len"][::std::mem::offset_of!(String, len) - 8usize];
-};
 impl Default for String {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -226,14 +219,6 @@ pub struct Buffer {
     #[doc = " Bytes written on success, or required byte capacity on GHOSTTY_OUT_OF_SPACE."]
     pub len: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of Buffer"][::std::mem::size_of::<Buffer>() - 24usize];
-    ["Alignment of Buffer"][::std::mem::align_of::<Buffer>() - 8usize];
-    ["Offset of field: Buffer::ptr"][::std::mem::offset_of!(Buffer, ptr) - 0usize];
-    ["Offset of field: Buffer::cap"][::std::mem::offset_of!(Buffer, cap) - 8usize];
-    ["Offset of field: Buffer::len"][::std::mem::offset_of!(Buffer, len) - 16usize];
-};
 impl Default for Buffer {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -252,13 +237,6 @@ pub struct SurfacePosition {
     #[doc = " Y position in surface pixels."]
     pub y: f64,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SurfacePosition"][::std::mem::size_of::<SurfacePosition>() - 16usize];
-    ["Alignment of SurfacePosition"][::std::mem::align_of::<SurfacePosition>() - 8usize];
-    ["Offset of field: SurfacePosition::x"][::std::mem::offset_of!(SurfacePosition, x) - 0usize];
-    ["Offset of field: SurfacePosition::y"][::std::mem::offset_of!(SurfacePosition, y) - 8usize];
-};
 #[doc = " A borrowed list of Unicode scalar values.\n\n Values are encoded as uint32_t scalar values. The memory is not owned by this\n struct. The pointer is only valid for the lifetime documented by the API that\n consumes or produces it.\n\n APIs may document special handling for NULL + len 0, such as “use defaults”."]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -268,13 +246,6 @@ pub struct Codepoints {
     #[doc = " Number of entries in ptr."]
     pub len: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of Codepoints"][::std::mem::size_of::<Codepoints>() - 16usize];
-    ["Alignment of Codepoints"][::std::mem::align_of::<Codepoints>() - 8usize];
-    ["Offset of field: Codepoints::ptr"][::std::mem::offset_of!(Codepoints, ptr) - 0usize];
-    ["Offset of field: Codepoints::len"][::std::mem::offset_of!(Codepoints, len) - 8usize];
-};
 impl Default for Codepoints {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -334,19 +305,6 @@ pub struct AllocatorVtable {
         ),
     >,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of AllocatorVtable"][::std::mem::size_of::<AllocatorVtable>() - 32usize];
-    ["Alignment of AllocatorVtable"][::std::mem::align_of::<AllocatorVtable>() - 8usize];
-    ["Offset of field: AllocatorVtable::alloc"]
-        [::std::mem::offset_of!(AllocatorVtable, alloc) - 0usize];
-    ["Offset of field: AllocatorVtable::resize"]
-        [::std::mem::offset_of!(AllocatorVtable, resize) - 8usize];
-    ["Offset of field: AllocatorVtable::remap"]
-        [::std::mem::offset_of!(AllocatorVtable, remap) - 16usize];
-    ["Offset of field: AllocatorVtable::free"]
-        [::std::mem::offset_of!(AllocatorVtable, free) - 24usize];
-};
 #[doc = " Custom memory allocator.\n\n For functions that take an allocator pointer, a NULL pointer indicates\n that the default allocator should be used. The default allocator will\n be libc malloc/free if we're linking to libc. If libc isn't linked,\n a custom allocator is used (currently Zig's SMP allocator).\n\n\n Usage example:\n GhosttyAllocator allocator = {\n     .vtable = &my_allocator_vtable,\n     .ctx = my_allocator_state\n };"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -356,13 +314,6 @@ pub struct Allocator {
     #[doc = " Pointer to the allocator's vtable containing function pointers\n for memory operations (alloc, resize, remap, free)."]
     pub vtable: *const AllocatorVtable,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of Allocator"][::std::mem::size_of::<Allocator>() - 16usize];
-    ["Alignment of Allocator"][::std::mem::align_of::<Allocator>() - 8usize];
-    ["Offset of field: Allocator::ctx"][::std::mem::offset_of!(Allocator, ctx) - 0usize];
-    ["Offset of field: Allocator::vtable"][::std::mem::offset_of!(Allocator, vtable) - 8usize];
-};
 impl Default for Allocator {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -435,14 +386,6 @@ pub struct ColorRgb {
     #[doc = "< Blue component (0-255)"]
     pub b: u8,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ColorRgb"][::std::mem::size_of::<ColorRgb>() - 3usize];
-    ["Alignment of ColorRgb"][::std::mem::align_of::<ColorRgb>() - 1usize];
-    ["Offset of field: ColorRgb::r"][::std::mem::offset_of!(ColorRgb, r) - 0usize];
-    ["Offset of field: ColorRgb::g"][::std::mem::offset_of!(ColorRgb, g) - 1usize];
-    ["Offset of field: ColorRgb::b"][::std::mem::offset_of!(ColorRgb, b) - 2usize];
-};
 #[doc = " Palette color index (0-255).\n"]
 pub type ColorPaletteIndex = u8;
 #[doc = " A 256-bit mask of palette indices.\n\n Index i is set iff `(bits[i >> 6] >> (i & 63)) & 1` is 1.\n The mask is typically initialized to zero and then populated with\n GHOSTTY_COLOR_PALETTE_MASK_SET().\n\n GhosttyColorPaletteMask mask = {0};\n GHOSTTY_COLOR_PALETTE_MASK_SET(&mask, 20);\n if (GHOSTTY_COLOR_PALETTE_MASK_IS_SET(&mask, 20)) {\n   // Index 20 will be preserved.\n }\n"]
@@ -451,13 +394,6 @@ pub type ColorPaletteIndex = u8;
 pub struct ColorPaletteMask {
     pub bits: [u64; 4usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ColorPaletteMask"][::std::mem::size_of::<ColorPaletteMask>() - 32usize];
-    ["Alignment of ColorPaletteMask"][::std::mem::align_of::<ColorPaletteMask>() - 8usize];
-    ["Offset of field: ColorPaletteMask::bits"]
-        [::std::mem::offset_of!(ColorPaletteMask, bits) - 0usize];
-};
 #[doc = " An entry in Ghostty's X11 color name table.\n"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -467,14 +403,6 @@ pub struct ColorX11Entry {
     #[doc = " The RGB value of the color."]
     pub color: ColorRgb,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ColorX11Entry"][::std::mem::size_of::<ColorX11Entry>() - 16usize];
-    ["Alignment of ColorX11Entry"][::std::mem::align_of::<ColorX11Entry>() - 8usize];
-    ["Offset of field: ColorX11Entry::name"][::std::mem::offset_of!(ColorX11Entry, name) - 0usize];
-    ["Offset of field: ColorX11Entry::color"]
-        [::std::mem::offset_of!(ColorX11Entry, color) - 8usize];
-};
 impl Default for ColorX11Entry {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -566,19 +494,6 @@ pub struct DeviceAttributesPrimary {
     #[doc = " Number of valid entries in the features array."]
     pub num_features: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of DeviceAttributesPrimary"]
-        [::std::mem::size_of::<DeviceAttributesPrimary>() - 144usize];
-    ["Alignment of DeviceAttributesPrimary"]
-        [::std::mem::align_of::<DeviceAttributesPrimary>() - 8usize];
-    ["Offset of field: DeviceAttributesPrimary::conformance_level"]
-        [::std::mem::offset_of!(DeviceAttributesPrimary, conformance_level) - 0usize];
-    ["Offset of field: DeviceAttributesPrimary::features"]
-        [::std::mem::offset_of!(DeviceAttributesPrimary, features) - 2usize];
-    ["Offset of field: DeviceAttributesPrimary::num_features"]
-        [::std::mem::offset_of!(DeviceAttributesPrimary, num_features) - 136usize];
-};
 impl Default for DeviceAttributesPrimary {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -599,19 +514,6 @@ pub struct DeviceAttributesSecondary {
     #[doc = " ROM cartridge registration number (Pc). Always 0 for emulators."]
     pub rom_cartridge: u16,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of DeviceAttributesSecondary"]
-        [::std::mem::size_of::<DeviceAttributesSecondary>() - 6usize];
-    ["Alignment of DeviceAttributesSecondary"]
-        [::std::mem::align_of::<DeviceAttributesSecondary>() - 2usize];
-    ["Offset of field: DeviceAttributesSecondary::device_type"]
-        [::std::mem::offset_of!(DeviceAttributesSecondary, device_type) - 0usize];
-    ["Offset of field: DeviceAttributesSecondary::firmware_version"]
-        [::std::mem::offset_of!(DeviceAttributesSecondary, firmware_version) - 2usize];
-    ["Offset of field: DeviceAttributesSecondary::rom_cartridge"]
-        [::std::mem::offset_of!(DeviceAttributesSecondary, rom_cartridge) - 4usize];
-};
 #[doc = " Tertiary device attributes (DA3) response data.\n\n Returned as part of GhosttyDeviceAttributes in response to a CSI = c query.\n Response format: DCS ! | D...D ST (DECRPTUI).\n"]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -619,15 +521,6 @@ pub struct DeviceAttributesTertiary {
     #[doc = " Unit ID encoded as 8 uppercase hex digits in the response."]
     pub unit_id: u32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of DeviceAttributesTertiary"]
-        [::std::mem::size_of::<DeviceAttributesTertiary>() - 4usize];
-    ["Alignment of DeviceAttributesTertiary"]
-        [::std::mem::align_of::<DeviceAttributesTertiary>() - 4usize];
-    ["Offset of field: DeviceAttributesTertiary::unit_id"]
-        [::std::mem::offset_of!(DeviceAttributesTertiary, unit_id) - 0usize];
-};
 #[doc = " Device attributes response data for all three DA levels.\n\n Filled by the device_attributes callback in response to CSI c,\n CSI > c, or CSI = c queries. The terminal uses whichever sub-struct\n matches the request type.\n"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -636,17 +529,6 @@ pub struct DeviceAttributes {
     pub secondary: DeviceAttributesSecondary,
     pub tertiary: DeviceAttributesTertiary,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of DeviceAttributes"][::std::mem::size_of::<DeviceAttributes>() - 160usize];
-    ["Alignment of DeviceAttributes"][::std::mem::align_of::<DeviceAttributes>() - 8usize];
-    ["Offset of field: DeviceAttributes::primary"]
-        [::std::mem::offset_of!(DeviceAttributes, primary) - 0usize];
-    ["Offset of field: DeviceAttributes::secondary"]
-        [::std::mem::offset_of!(DeviceAttributes, secondary) - 144usize];
-    ["Offset of field: DeviceAttributes::tertiary"]
-        [::std::mem::offset_of!(DeviceAttributes, tertiary) - 152usize];
-};
 impl Default for DeviceAttributes {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -848,17 +730,6 @@ pub union StyleColorValue {
     pub rgb: ColorRgb,
     pub _padding: u64,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of StyleColorValue"][::std::mem::size_of::<StyleColorValue>() - 8usize];
-    ["Alignment of StyleColorValue"][::std::mem::align_of::<StyleColorValue>() - 8usize];
-    ["Offset of field: StyleColorValue::palette"]
-        [::std::mem::offset_of!(StyleColorValue, palette) - 0usize];
-    ["Offset of field: StyleColorValue::rgb"]
-        [::std::mem::offset_of!(StyleColorValue, rgb) - 0usize];
-    ["Offset of field: StyleColorValue::_padding"]
-        [::std::mem::offset_of!(StyleColorValue, _padding) - 0usize];
-};
 impl Default for StyleColorValue {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -875,13 +746,6 @@ pub struct StyleColor {
     pub tag: StyleColorTag::Type,
     pub value: StyleColorValue,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of StyleColor"][::std::mem::size_of::<StyleColor>() - 16usize];
-    ["Alignment of StyleColor"][::std::mem::align_of::<StyleColor>() - 8usize];
-    ["Offset of field: StyleColor::tag"][::std::mem::offset_of!(StyleColor, tag) - 0usize];
-    ["Offset of field: StyleColor::value"][::std::mem::offset_of!(StyleColor, value) - 8usize];
-};
 impl Default for StyleColor {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -910,26 +774,6 @@ pub struct Style {
     #[doc = "< One of GHOSTTY_SGR_UNDERLINE_* values"]
     pub underline: ::std::os::raw::c_int,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of Style"][::std::mem::size_of::<Style>() - 72usize];
-    ["Alignment of Style"][::std::mem::align_of::<Style>() - 8usize];
-    ["Offset of field: Style::size"][::std::mem::offset_of!(Style, size) - 0usize];
-    ["Offset of field: Style::fg_color"][::std::mem::offset_of!(Style, fg_color) - 8usize];
-    ["Offset of field: Style::bg_color"][::std::mem::offset_of!(Style, bg_color) - 24usize];
-    ["Offset of field: Style::underline_color"]
-        [::std::mem::offset_of!(Style, underline_color) - 40usize];
-    ["Offset of field: Style::bold"][::std::mem::offset_of!(Style, bold) - 56usize];
-    ["Offset of field: Style::italic"][::std::mem::offset_of!(Style, italic) - 57usize];
-    ["Offset of field: Style::faint"][::std::mem::offset_of!(Style, faint) - 58usize];
-    ["Offset of field: Style::blink"][::std::mem::offset_of!(Style, blink) - 59usize];
-    ["Offset of field: Style::inverse"][::std::mem::offset_of!(Style, inverse) - 60usize];
-    ["Offset of field: Style::invisible"][::std::mem::offset_of!(Style, invisible) - 61usize];
-    ["Offset of field: Style::strikethrough"]
-        [::std::mem::offset_of!(Style, strikethrough) - 62usize];
-    ["Offset of field: Style::overline"][::std::mem::offset_of!(Style, overline) - 63usize];
-    ["Offset of field: Style::underline"][::std::mem::offset_of!(Style, underline) - 64usize];
-};
 impl Default for Style {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -956,15 +800,6 @@ pub struct GridRef {
     pub x: u16,
     pub y: u16,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of GridRef"][::std::mem::size_of::<GridRef>() - 24usize];
-    ["Alignment of GridRef"][::std::mem::align_of::<GridRef>() - 8usize];
-    ["Offset of field: GridRef::size"][::std::mem::offset_of!(GridRef, size) - 0usize];
-    ["Offset of field: GridRef::node"][::std::mem::offset_of!(GridRef, node) - 8usize];
-    ["Offset of field: GridRef::x"][::std::mem::offset_of!(GridRef, x) - 16usize];
-    ["Offset of field: GridRef::y"][::std::mem::offset_of!(GridRef, y) - 18usize];
-};
 impl Default for GridRef {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1013,13 +848,6 @@ pub struct PointCoordinate {
     #[doc = " Row (0-indexed). May exceed page size for screen/history tags."]
     pub y: u32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of PointCoordinate"][::std::mem::size_of::<PointCoordinate>() - 8usize];
-    ["Alignment of PointCoordinate"][::std::mem::align_of::<PointCoordinate>() - 4usize];
-    ["Offset of field: PointCoordinate::x"][::std::mem::offset_of!(PointCoordinate, x) - 0usize];
-    ["Offset of field: PointCoordinate::y"][::std::mem::offset_of!(PointCoordinate, y) - 4usize];
-};
 pub mod PointTag {
     #[doc = " Point reference tag.\n\n Determines which coordinate system a point uses.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -1043,15 +871,6 @@ pub union PointValue {
     #[doc = " Padding for ABI compatibility. Do not use."]
     pub _padding: [u64; 2usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of PointValue"][::std::mem::size_of::<PointValue>() - 16usize];
-    ["Alignment of PointValue"][::std::mem::align_of::<PointValue>() - 8usize];
-    ["Offset of field: PointValue::coordinate"]
-        [::std::mem::offset_of!(PointValue, coordinate) - 0usize];
-    ["Offset of field: PointValue::_padding"]
-        [::std::mem::offset_of!(PointValue, _padding) - 0usize];
-};
 impl Default for PointValue {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1068,13 +887,6 @@ pub struct Point {
     pub tag: PointTag::Type,
     pub value: PointValue,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of Point"][::std::mem::size_of::<Point>() - 24usize];
-    ["Alignment of Point"][::std::mem::align_of::<Point>() - 8usize];
-    ["Offset of field: Point::tag"][::std::mem::offset_of!(Point, tag) - 0usize];
-    ["Offset of field: Point::value"][::std::mem::offset_of!(Point, value) - 8usize];
-};
 impl Default for Point {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1111,16 +923,6 @@ pub struct Selection {
     #[doc = " Whether the endpoints are interpreted as a rectangular/block selection\n rather than a linear selection."]
     pub rectangle: bool,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of Selection"][::std::mem::size_of::<Selection>() - 64usize];
-    ["Alignment of Selection"][::std::mem::align_of::<Selection>() - 8usize];
-    ["Offset of field: Selection::size"][::std::mem::offset_of!(Selection, size) - 0usize];
-    ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 8usize];
-    ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 32usize];
-    ["Offset of field: Selection::rectangle"]
-        [::std::mem::offset_of!(Selection, rectangle) - 56usize];
-};
 impl Default for Selection {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1143,21 +945,6 @@ pub struct TerminalSelectWordOptions {
     #[doc = " Number of entries in boundary_codepoints."]
     pub boundary_codepoints_len: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalSelectWordOptions"]
-        [::std::mem::size_of::<TerminalSelectWordOptions>() - 48usize];
-    ["Alignment of TerminalSelectWordOptions"]
-        [::std::mem::align_of::<TerminalSelectWordOptions>() - 8usize];
-    ["Offset of field: TerminalSelectWordOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, size) - 0usize];
-    ["Offset of field: TerminalSelectWordOptions::ref_"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, ref_) - 8usize];
-    ["Offset of field: TerminalSelectWordOptions::boundary_codepoints"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 32usize];
-    ["Offset of field: TerminalSelectWordOptions::boundary_codepoints_len"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 40usize];
-};
 impl Default for TerminalSelectWordOptions {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1182,25 +969,6 @@ pub struct TerminalSelectWordBetweenOptions {
     #[doc = " Number of entries in boundary_codepoints."]
     pub boundary_codepoints_len: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalSelectWordBetweenOptions"]
-        [::std::mem::size_of::<TerminalSelectWordBetweenOptions>() - 72usize];
-    ["Alignment of TerminalSelectWordBetweenOptions"]
-        [::std::mem::align_of::<TerminalSelectWordBetweenOptions>() - 8usize];
-    ["Offset of field: TerminalSelectWordBetweenOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, size) - 0usize];
-    ["Offset of field: TerminalSelectWordBetweenOptions::start"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, start) - 8usize];
-    ["Offset of field: TerminalSelectWordBetweenOptions::end"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 32usize];
-    ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, boundary_codepoints) - 56usize];
-    ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints_len"][::std::mem::offset_of!(
-        TerminalSelectWordBetweenOptions,
-        boundary_codepoints_len
-    ) - 64usize];
-};
 impl Default for TerminalSelectWordBetweenOptions {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1225,23 +993,6 @@ pub struct TerminalSelectLineOptions {
     #[doc = " Whether semantic prompt state changes should bound the line selection."]
     pub semantic_prompt_boundary: bool,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalSelectLineOptions"]
-        [::std::mem::size_of::<TerminalSelectLineOptions>() - 56usize];
-    ["Alignment of TerminalSelectLineOptions"]
-        [::std::mem::align_of::<TerminalSelectLineOptions>() - 8usize];
-    ["Offset of field: TerminalSelectLineOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, size) - 0usize];
-    ["Offset of field: TerminalSelectLineOptions::ref_"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, ref_) - 8usize];
-    ["Offset of field: TerminalSelectLineOptions::whitespace"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 32usize];
-    ["Offset of field: TerminalSelectLineOptions::whitespace_len"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 40usize];
-    ["Offset of field: TerminalSelectLineOptions::semantic_prompt_boundary"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 48usize];
-};
 impl Default for TerminalSelectLineOptions {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1266,23 +1017,6 @@ pub struct TerminalSelectionFormatOptions {
     #[doc = " Optional selection to format.\n\n If NULL, the terminal's current active selection is used. If the terminal\n has no active selection, formatting returns GHOSTTY_NO_VALUE.\n\n If non-NULL, the pointed-to selection must be a valid snapshot selection\n for this terminal and must obey GhosttySelection lifetime rules."]
     pub selection: *const Selection,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalSelectionFormatOptions"]
-        [::std::mem::size_of::<TerminalSelectionFormatOptions>() - 24usize];
-    ["Alignment of TerminalSelectionFormatOptions"]
-        [::std::mem::align_of::<TerminalSelectionFormatOptions>() - 8usize];
-    ["Offset of field: TerminalSelectionFormatOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, size) - 0usize];
-    ["Offset of field: TerminalSelectionFormatOptions::emit"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, emit) - 8usize];
-    ["Offset of field: TerminalSelectionFormatOptions::unwrap"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, unwrap) - 12usize];
-    ["Offset of field: TerminalSelectionFormatOptions::trim"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, trim) - 13usize];
-    ["Offset of field: TerminalSelectionFormatOptions::selection"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, selection) - 16usize];
-};
 impl Default for TerminalSelectionFormatOptions {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1357,19 +1091,6 @@ pub struct SelectionGestureBehaviors {
     #[doc = " Behavior for triple-click selection gestures."]
     pub triple_click: SelectionGestureBehavior::Type,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SelectionGestureBehaviors"]
-        [::std::mem::size_of::<SelectionGestureBehaviors>() - 12usize];
-    ["Alignment of SelectionGestureBehaviors"]
-        [::std::mem::align_of::<SelectionGestureBehaviors>() - 4usize];
-    ["Offset of field: SelectionGestureBehaviors::single_click"]
-        [::std::mem::offset_of!(SelectionGestureBehaviors, single_click) - 0usize];
-    ["Offset of field: SelectionGestureBehaviors::double_click"]
-        [::std::mem::offset_of!(SelectionGestureBehaviors, double_click) - 4usize];
-    ["Offset of field: SelectionGestureBehaviors::triple_click"]
-        [::std::mem::offset_of!(SelectionGestureBehaviors, triple_click) - 8usize];
-};
 impl Default for SelectionGestureBehaviors {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -1392,21 +1113,6 @@ pub struct SelectionGestureGeometry {
     #[doc = " Height of the rendered terminal surface in surface pixels. Must be non-zero."]
     pub screen_height: u32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SelectionGestureGeometry"]
-        [::std::mem::size_of::<SelectionGestureGeometry>() - 16usize];
-    ["Alignment of SelectionGestureGeometry"]
-        [::std::mem::align_of::<SelectionGestureGeometry>() - 4usize];
-    ["Offset of field: SelectionGestureGeometry::columns"]
-        [::std::mem::offset_of!(SelectionGestureGeometry, columns) - 0usize];
-    ["Offset of field: SelectionGestureGeometry::cell_width"]
-        [::std::mem::offset_of!(SelectionGestureGeometry, cell_width) - 4usize];
-    ["Offset of field: SelectionGestureGeometry::padding_left"]
-        [::std::mem::offset_of!(SelectionGestureGeometry, padding_left) - 8usize];
-    ["Offset of field: SelectionGestureGeometry::screen_height"]
-        [::std::mem::offset_of!(SelectionGestureGeometry, screen_height) - 12usize];
-};
 pub mod SelectionGestureAutoscroll {
     #[doc = " Current autoscroll direction for an active selection drag gesture.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -1698,19 +1404,6 @@ pub struct SizeReportSize {
     #[doc = " Height of a single terminal cell in pixels."]
     pub cell_height: u32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SizeReportSize"][::std::mem::size_of::<SizeReportSize>() - 12usize];
-    ["Alignment of SizeReportSize"][::std::mem::align_of::<SizeReportSize>() - 4usize];
-    ["Offset of field: SizeReportSize::rows"]
-        [::std::mem::offset_of!(SizeReportSize, rows) - 0usize];
-    ["Offset of field: SizeReportSize::columns"]
-        [::std::mem::offset_of!(SizeReportSize, columns) - 2usize];
-    ["Offset of field: SizeReportSize::cell_width"]
-        [::std::mem::offset_of!(SizeReportSize, cell_width) - 4usize];
-    ["Offset of field: SizeReportSize::cell_height"]
-        [::std::mem::offset_of!(SizeReportSize, cell_height) - 8usize];
-};
 unsafe extern "C" {
     #[doc = " Encode a terminal size report into an escape sequence.\n\n Encodes a size report in the format specified by @p style into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
     pub fn ghostty_size_report_encode(
@@ -1854,37 +1547,6 @@ pub struct KittyGraphicsPlacementRenderInfo {
     #[doc = " Resolved source rectangle height in pixels."]
     pub source_height: u32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of KittyGraphicsPlacementRenderInfo"]
-        [::std::mem::size_of::<KittyGraphicsPlacementRenderInfo>() - 56usize];
-    ["Alignment of KittyGraphicsPlacementRenderInfo"]
-        [::std::mem::align_of::<KittyGraphicsPlacementRenderInfo>() - 8usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::size"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, size) - 0usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::pixel_width"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, pixel_width) - 8usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::pixel_height"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, pixel_height) - 12usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::grid_cols"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, grid_cols) - 16usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::grid_rows"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, grid_rows) - 20usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_col"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_col) - 24usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_row"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_row) - 28usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_visible"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_visible) - 32usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::source_x"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_x) - 36usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::source_y"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_y) - 40usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::source_width"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_width) - 44usize];
-    ["Offset of field: KittyGraphicsPlacementRenderInfo::source_height"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_height) - 48usize];
-};
 unsafe extern "C" {
     #[doc = " Get data from a kitty graphics storage instance.\n\n The output pointer must be of the appropriate type for the requested\n data kind.\n\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n"]
     pub fn ghostty_kitty_graphics_get(
@@ -2029,17 +1691,6 @@ pub struct TerminalOptions {
     #[doc = " Maximum number of lines to keep in scrollback history."]
     pub max_scrollback: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalOptions"][::std::mem::size_of::<TerminalOptions>() - 16usize];
-    ["Alignment of TerminalOptions"][::std::mem::align_of::<TerminalOptions>() - 8usize];
-    ["Offset of field: TerminalOptions::cols"]
-        [::std::mem::offset_of!(TerminalOptions, cols) - 0usize];
-    ["Offset of field: TerminalOptions::rows"]
-        [::std::mem::offset_of!(TerminalOptions, rows) - 2usize];
-    ["Offset of field: TerminalOptions::max_scrollback"]
-        [::std::mem::offset_of!(TerminalOptions, max_scrollback) - 8usize];
-};
 pub mod TerminalCompressionMode {
     #[doc = " Amount of compression work to perform before returning.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -2087,19 +1738,6 @@ pub union TerminalScrollViewportValue {
     #[doc = " Padding for ABI compatibility. Do not use."]
     pub _padding: [u64; 2usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalScrollViewportValue"]
-        [::std::mem::size_of::<TerminalScrollViewportValue>() - 16usize];
-    ["Alignment of TerminalScrollViewportValue"]
-        [::std::mem::align_of::<TerminalScrollViewportValue>() - 8usize];
-    ["Offset of field: TerminalScrollViewportValue::delta"]
-        [::std::mem::offset_of!(TerminalScrollViewportValue, delta) - 0usize];
-    ["Offset of field: TerminalScrollViewportValue::row"]
-        [::std::mem::offset_of!(TerminalScrollViewportValue, row) - 0usize];
-    ["Offset of field: TerminalScrollViewportValue::_padding"]
-        [::std::mem::offset_of!(TerminalScrollViewportValue, _padding) - 0usize];
-};
 impl Default for TerminalScrollViewportValue {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -2116,16 +1754,6 @@ pub struct TerminalScrollViewport {
     pub tag: TerminalScrollViewportTag::Type,
     pub value: TerminalScrollViewportValue,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalScrollViewport"][::std::mem::size_of::<TerminalScrollViewport>() - 24usize];
-    ["Alignment of TerminalScrollViewport"]
-        [::std::mem::align_of::<TerminalScrollViewport>() - 8usize];
-    ["Offset of field: TerminalScrollViewport::tag"]
-        [::std::mem::offset_of!(TerminalScrollViewport, tag) - 0usize];
-    ["Offset of field: TerminalScrollViewport::value"]
-        [::std::mem::offset_of!(TerminalScrollViewport, value) - 8usize];
-};
 impl Default for TerminalScrollViewport {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -2170,17 +1798,6 @@ pub struct TerminalScrollbar {
     #[doc = " Length of the visible area in rows."]
     pub len: u64,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of TerminalScrollbar"][::std::mem::size_of::<TerminalScrollbar>() - 24usize];
-    ["Alignment of TerminalScrollbar"][::std::mem::align_of::<TerminalScrollbar>() - 8usize];
-    ["Offset of field: TerminalScrollbar::total"]
-        [::std::mem::offset_of!(TerminalScrollbar, total) - 0usize];
-    ["Offset of field: TerminalScrollbar::offset"]
-        [::std::mem::offset_of!(TerminalScrollbar, offset) - 8usize];
-    ["Offset of field: TerminalScrollbar::len"]
-        [::std::mem::offset_of!(TerminalScrollbar, len) - 16usize];
-};
 #[doc = " Callback function type for bell.\n\n Called when the terminal receives a BEL character (0x07).\n\n"]
 pub type TerminalBellFn = ::std::option::Option<
     unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void),
@@ -2206,15 +1823,6 @@ pub struct ClipboardContent {
     #[doc = " Decoded, binary-safe representation data."]
     pub data: String,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ClipboardContent"][::std::mem::size_of::<ClipboardContent>() - 32usize];
-    ["Alignment of ClipboardContent"][::std::mem::align_of::<ClipboardContent>() - 8usize];
-    ["Offset of field: ClipboardContent::mime"]
-        [::std::mem::offset_of!(ClipboardContent, mime) - 0usize];
-    ["Offset of field: ClipboardContent::data"]
-        [::std::mem::offset_of!(ClipboardContent, data) - 16usize];
-};
 impl Default for ClipboardContent {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -2237,19 +1845,6 @@ pub struct ClipboardWrite {
     #[doc = " Number of entries in contents; zero means clear the destination."]
     pub contents_len: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 32usize];
-    ["Alignment of ClipboardWrite"][::std::mem::align_of::<ClipboardWrite>() - 8usize];
-    ["Offset of field: ClipboardWrite::size"]
-        [::std::mem::offset_of!(ClipboardWrite, size) - 0usize];
-    ["Offset of field: ClipboardWrite::location"]
-        [::std::mem::offset_of!(ClipboardWrite, location) - 8usize];
-    ["Offset of field: ClipboardWrite::contents"]
-        [::std::mem::offset_of!(ClipboardWrite, contents) - 16usize];
-    ["Offset of field: ClipboardWrite::contents_len"]
-        [::std::mem::offset_of!(ClipboardWrite, contents_len) - 24usize];
-};
 impl Default for ClipboardWrite {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -2597,25 +2192,6 @@ pub struct FormatterScreenExtra {
     #[doc = " Emit character set designations and invocations."]
     pub charsets: bool,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of FormatterScreenExtra"][::std::mem::size_of::<FormatterScreenExtra>() - 16usize];
-    ["Alignment of FormatterScreenExtra"][::std::mem::align_of::<FormatterScreenExtra>() - 8usize];
-    ["Offset of field: FormatterScreenExtra::size"]
-        [::std::mem::offset_of!(FormatterScreenExtra, size) - 0usize];
-    ["Offset of field: FormatterScreenExtra::cursor"]
-        [::std::mem::offset_of!(FormatterScreenExtra, cursor) - 8usize];
-    ["Offset of field: FormatterScreenExtra::style"]
-        [::std::mem::offset_of!(FormatterScreenExtra, style) - 9usize];
-    ["Offset of field: FormatterScreenExtra::hyperlink"]
-        [::std::mem::offset_of!(FormatterScreenExtra, hyperlink) - 10usize];
-    ["Offset of field: FormatterScreenExtra::protection"]
-        [::std::mem::offset_of!(FormatterScreenExtra, protection) - 11usize];
-    ["Offset of field: FormatterScreenExtra::kitty_keyboard"]
-        [::std::mem::offset_of!(FormatterScreenExtra, kitty_keyboard) - 12usize];
-    ["Offset of field: FormatterScreenExtra::charsets"]
-        [::std::mem::offset_of!(FormatterScreenExtra, charsets) - 13usize];
-};
 #[doc = " Extra terminal state to include in styled output.\n"]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -2637,28 +2213,6 @@ pub struct FormatterTerminalExtra {
     #[doc = " Screen-level extras."]
     pub screen: FormatterScreenExtra,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of FormatterTerminalExtra"][::std::mem::size_of::<FormatterTerminalExtra>() - 32usize];
-    ["Alignment of FormatterTerminalExtra"]
-        [::std::mem::align_of::<FormatterTerminalExtra>() - 8usize];
-    ["Offset of field: FormatterTerminalExtra::size"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, size) - 0usize];
-    ["Offset of field: FormatterTerminalExtra::palette"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, palette) - 8usize];
-    ["Offset of field: FormatterTerminalExtra::modes"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, modes) - 9usize];
-    ["Offset of field: FormatterTerminalExtra::scrolling_region"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, scrolling_region) - 10usize];
-    ["Offset of field: FormatterTerminalExtra::tabstops"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, tabstops) - 11usize];
-    ["Offset of field: FormatterTerminalExtra::pwd"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, pwd) - 12usize];
-    ["Offset of field: FormatterTerminalExtra::keyboard"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, keyboard) - 13usize];
-    ["Offset of field: FormatterTerminalExtra::screen"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, screen) - 16usize];
-};
 #[doc = " Options for creating a terminal formatter.\n"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2676,25 +2230,6 @@ pub struct FormatterTerminalOptions {
     #[doc = " Optional selection to restrict output to a range.\n  If NULL, the entire screen is formatted."]
     pub selection: *const Selection,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of FormatterTerminalOptions"]
-        [::std::mem::size_of::<FormatterTerminalOptions>() - 56usize];
-    ["Alignment of FormatterTerminalOptions"]
-        [::std::mem::align_of::<FormatterTerminalOptions>() - 8usize];
-    ["Offset of field: FormatterTerminalOptions::size"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, size) - 0usize];
-    ["Offset of field: FormatterTerminalOptions::emit"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, emit) - 8usize];
-    ["Offset of field: FormatterTerminalOptions::unwrap"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, unwrap) - 12usize];
-    ["Offset of field: FormatterTerminalOptions::trim"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, trim) - 13usize];
-    ["Offset of field: FormatterTerminalOptions::extra"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, extra) - 16usize];
-    ["Offset of field: FormatterTerminalOptions::selection"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, selection) - 48usize];
-};
 impl Default for FormatterTerminalOptions {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -2846,18 +2381,6 @@ pub struct RenderStateRowSelection {
     #[doc = " End column of the row-local selection range, inclusive."]
     pub end_x: u16,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of RenderStateRowSelection"][::std::mem::size_of::<RenderStateRowSelection>() - 16usize];
-    ["Alignment of RenderStateRowSelection"]
-        [::std::mem::align_of::<RenderStateRowSelection>() - 8usize];
-    ["Offset of field: RenderStateRowSelection::size"]
-        [::std::mem::offset_of!(RenderStateRowSelection, size) - 0usize];
-    ["Offset of field: RenderStateRowSelection::start_x"]
-        [::std::mem::offset_of!(RenderStateRowSelection, start_x) - 8usize];
-    ["Offset of field: RenderStateRowSelection::end_x"]
-        [::std::mem::offset_of!(RenderStateRowSelection, end_x) - 10usize];
-};
 #[doc = " Render-state color information.\n\n This struct uses the sized-struct ABI pattern. Initialize with\n GHOSTTY_INIT_SIZED(GhosttyRenderStateColors) before calling\n ghostty_render_state_colors_get().\n\n Example:\n GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);\n GhosttyResult result = ghostty_render_state_colors_get(state, &colors);\n"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2875,23 +2398,6 @@ pub struct RenderStateColors {
     #[doc = " The active 256-color palette for this render state."]
     pub palette: [ColorRgb; 256usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of RenderStateColors"][::std::mem::size_of::<RenderStateColors>() - 792usize];
-    ["Alignment of RenderStateColors"][::std::mem::align_of::<RenderStateColors>() - 8usize];
-    ["Offset of field: RenderStateColors::size"]
-        [::std::mem::offset_of!(RenderStateColors, size) - 0usize];
-    ["Offset of field: RenderStateColors::background"]
-        [::std::mem::offset_of!(RenderStateColors, background) - 8usize];
-    ["Offset of field: RenderStateColors::foreground"]
-        [::std::mem::offset_of!(RenderStateColors, foreground) - 11usize];
-    ["Offset of field: RenderStateColors::cursor"]
-        [::std::mem::offset_of!(RenderStateColors, cursor) - 14usize];
-    ["Offset of field: RenderStateColors::cursor_has_value"]
-        [::std::mem::offset_of!(RenderStateColors, cursor_has_value) - 17usize];
-    ["Offset of field: RenderStateColors::palette"]
-        [::std::mem::offset_of!(RenderStateColors, palette) - 18usize];
-};
 impl Default for RenderStateColors {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -3224,19 +2730,6 @@ pub struct SgrUnknown {
     pub partial_ptr: *const u16,
     pub partial_len: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SgrUnknown"][::std::mem::size_of::<SgrUnknown>() - 32usize];
-    ["Alignment of SgrUnknown"][::std::mem::align_of::<SgrUnknown>() - 8usize];
-    ["Offset of field: SgrUnknown::full_ptr"]
-        [::std::mem::offset_of!(SgrUnknown, full_ptr) - 0usize];
-    ["Offset of field: SgrUnknown::full_len"]
-        [::std::mem::offset_of!(SgrUnknown, full_len) - 8usize];
-    ["Offset of field: SgrUnknown::partial_ptr"]
-        [::std::mem::offset_of!(SgrUnknown, partial_ptr) - 16usize];
-    ["Offset of field: SgrUnknown::partial_len"]
-        [::std::mem::offset_of!(SgrUnknown, partial_len) - 24usize];
-};
 impl Default for SgrUnknown {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -3264,37 +2757,6 @@ pub union SgrAttributeValue {
     pub fg_256: ColorPaletteIndex,
     pub _padding: [u64; 8usize],
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SgrAttributeValue"][::std::mem::size_of::<SgrAttributeValue>() - 64usize];
-    ["Alignment of SgrAttributeValue"][::std::mem::align_of::<SgrAttributeValue>() - 8usize];
-    ["Offset of field: SgrAttributeValue::unknown"]
-        [::std::mem::offset_of!(SgrAttributeValue, unknown) - 0usize];
-    ["Offset of field: SgrAttributeValue::underline"]
-        [::std::mem::offset_of!(SgrAttributeValue, underline) - 0usize];
-    ["Offset of field: SgrAttributeValue::underline_color"]
-        [::std::mem::offset_of!(SgrAttributeValue, underline_color) - 0usize];
-    ["Offset of field: SgrAttributeValue::underline_color_256"]
-        [::std::mem::offset_of!(SgrAttributeValue, underline_color_256) - 0usize];
-    ["Offset of field: SgrAttributeValue::direct_color_fg"]
-        [::std::mem::offset_of!(SgrAttributeValue, direct_color_fg) - 0usize];
-    ["Offset of field: SgrAttributeValue::direct_color_bg"]
-        [::std::mem::offset_of!(SgrAttributeValue, direct_color_bg) - 0usize];
-    ["Offset of field: SgrAttributeValue::bg_8"]
-        [::std::mem::offset_of!(SgrAttributeValue, bg_8) - 0usize];
-    ["Offset of field: SgrAttributeValue::fg_8"]
-        [::std::mem::offset_of!(SgrAttributeValue, fg_8) - 0usize];
-    ["Offset of field: SgrAttributeValue::bright_bg_8"]
-        [::std::mem::offset_of!(SgrAttributeValue, bright_bg_8) - 0usize];
-    ["Offset of field: SgrAttributeValue::bright_fg_8"]
-        [::std::mem::offset_of!(SgrAttributeValue, bright_fg_8) - 0usize];
-    ["Offset of field: SgrAttributeValue::bg_256"]
-        [::std::mem::offset_of!(SgrAttributeValue, bg_256) - 0usize];
-    ["Offset of field: SgrAttributeValue::fg_256"]
-        [::std::mem::offset_of!(SgrAttributeValue, fg_256) - 0usize];
-    ["Offset of field: SgrAttributeValue::_padding"]
-        [::std::mem::offset_of!(SgrAttributeValue, _padding) - 0usize];
-};
 impl Default for SgrAttributeValue {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -3311,13 +2773,6 @@ pub struct SgrAttribute {
     pub tag: SgrAttributeTag::Type,
     pub value: SgrAttributeValue,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SgrAttribute"][::std::mem::size_of::<SgrAttribute>() - 72usize];
-    ["Alignment of SgrAttribute"][::std::mem::align_of::<SgrAttribute>() - 8usize];
-    ["Offset of field: SgrAttribute::tag"][::std::mem::offset_of!(SgrAttribute, tag) - 0usize];
-    ["Offset of field: SgrAttribute::value"][::std::mem::offset_of!(SgrAttribute, value) - 8usize];
-};
 impl Default for SgrAttribute {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -3368,6 +2823,14 @@ unsafe extern "C" {
     #[doc = " Get the value from an SGR attribute.\n\n This function returns a pointer to the value union from an SGR attribute. Use\n the tag to determine which field of the union is valid. Primarily useful in\n WebAssembly environments where accessing struct fields directly is difficult.\n\n"]
     pub fn ghostty_sgr_attribute_value(attr: *mut SgrAttribute) -> *mut SgrAttributeValue;
 }
+unsafe extern "C" {
+    #[doc = " Allocate memory for an SGR attribute (WebAssembly only).\n\n This is a convenience function for WebAssembly environments to allocate\n memory for an SGR attribute structure that can be passed to ghostty_sgr_next.\n\n"]
+    pub fn ghostty_wasm_alloc_sgr_attribute() -> *mut SgrAttribute;
+}
+unsafe extern "C" {
+    #[doc = " Free memory for an SGR attribute (WebAssembly only).\n\n Frees memory allocated by ghostty_wasm_alloc_sgr_attribute.\n\n"]
+    pub fn ghostty_wasm_free_sgr_attribute(attr: *mut SgrAttribute);
+}
 #[doc = " Result of decoding an image.\n\n The `data` buffer must be allocated through the allocator provided to\n the decode callback. The library takes ownership and will free it\n with the same allocator."]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3381,15 +2844,6 @@ pub struct SysImage {
     #[doc = " Length of the pixel data in bytes."]
     pub data_len: usize,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of SysImage"][::std::mem::size_of::<SysImage>() - 24usize];
-    ["Alignment of SysImage"][::std::mem::align_of::<SysImage>() - 8usize];
-    ["Offset of field: SysImage::width"][::std::mem::offset_of!(SysImage, width) - 0usize];
-    ["Offset of field: SysImage::height"][::std::mem::offset_of!(SysImage, height) - 4usize];
-    ["Offset of field: SysImage::data"][::std::mem::offset_of!(SysImage, data) - 8usize];
-    ["Offset of field: SysImage::data_len"][::std::mem::offset_of!(SysImage, data_len) - 16usize];
-};
 impl Default for SysImage {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
@@ -3854,13 +3308,6 @@ pub struct MousePosition {
     pub x: f32,
     pub y: f32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of MousePosition"][::std::mem::size_of::<MousePosition>() - 8usize];
-    ["Alignment of MousePosition"][::std::mem::align_of::<MousePosition>() - 4usize];
-    ["Offset of field: MousePosition::x"][::std::mem::offset_of!(MousePosition, x) - 0usize];
-    ["Offset of field: MousePosition::y"][::std::mem::offset_of!(MousePosition, y) - 4usize];
-};
 unsafe extern "C" {
     #[doc = " Create a new mouse event instance.\n\n"]
     pub fn ghostty_mouse_event_new(
@@ -3967,29 +3414,6 @@ pub struct MouseEncoderSize {
     #[doc = " Left padding in pixels."]
     pub padding_left: u32,
 }
-#[allow(clippy::unnecessary_operation, clippy::identity_op)]
-const _: () = {
-    ["Size of MouseEncoderSize"][::std::mem::size_of::<MouseEncoderSize>() - 40usize];
-    ["Alignment of MouseEncoderSize"][::std::mem::align_of::<MouseEncoderSize>() - 8usize];
-    ["Offset of field: MouseEncoderSize::size"]
-        [::std::mem::offset_of!(MouseEncoderSize, size) - 0usize];
-    ["Offset of field: MouseEncoderSize::screen_width"]
-        [::std::mem::offset_of!(MouseEncoderSize, screen_width) - 8usize];
-    ["Offset of field: MouseEncoderSize::screen_height"]
-        [::std::mem::offset_of!(MouseEncoderSize, screen_height) - 12usize];
-    ["Offset of field: MouseEncoderSize::cell_width"]
-        [::std::mem::offset_of!(MouseEncoderSize, cell_width) - 16usize];
-    ["Offset of field: MouseEncoderSize::cell_height"]
-        [::std::mem::offset_of!(MouseEncoderSize, cell_height) - 20usize];
-    ["Offset of field: MouseEncoderSize::padding_top"]
-        [::std::mem::offset_of!(MouseEncoderSize, padding_top) - 24usize];
-    ["Offset of field: MouseEncoderSize::padding_bottom"]
-        [::std::mem::offset_of!(MouseEncoderSize, padding_bottom) - 28usize];
-    ["Offset of field: MouseEncoderSize::padding_right"]
-        [::std::mem::offset_of!(MouseEncoderSize, padding_right) - 32usize];
-    ["Offset of field: MouseEncoderSize::padding_left"]
-        [::std::mem::offset_of!(MouseEncoderSize, padding_left) - 36usize];
-};
 pub mod MouseEncoderOption {
     #[doc = " Mouse encoder option identifiers.\n\n These values are used with ghostty_mouse_encoder_setopt() to configure\n the behavior of the mouse encoder.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -4065,4 +3489,44 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Measures the terminal display width of the first grapheme cluster in a\n sequence of Unicode codepoints.\n\n This uses the exact same grapheme segmentation and cluster width rules\n the terminal itself uses when printing text with grapheme clustering\n enabled (mode 2027), so callers can predict column layout (e.g. IME\n preedit overlays) that exactly matches what the terminal will do when\n the text is actually written to it. Unlike\n ghostty_unicode_codepoint_width(), this accounts for cluster-level\n rules: emoji variation selectors, ZWJ sequences, combining marks, and\n skin tone modifiers.\n\n Reads codepoints from cps until the terminal would consider the\n grapheme cluster complete, stores the cluster's total width in cells\n (0, 1, or 2) into width (which may be NULL if only segmentation is\n desired), and returns the number of codepoints consumed. Returns 0 if\n and only if len is 0; otherwise consumes at least one codepoint. Measure\n a whole string by calling in a loop:\n\n size_t total = 0;\n for (size_t i = 0; i < len;) {\n   uint8_t width;\n   i += ghostty_unicode_grapheme_width(cps + i, len - i, &width);\n   total += width;\n }\n\n This is not a streaming API. The provided sequence must contain a\n complete first grapheme cluster, or the logical end of the string. If\n input arrives in chunks, keep buffering while this function consumes all\n available codepoints (return value == len) and the stream may still\n continue; a later codepoint could still extend the cluster and change\n its width.\n\n Width semantics, matching the terminal with mode 2027 enabled:\n - The cluster starts at the width of its first codepoint, as returned by\n   ghostty_unicode_codepoint_width().\n - VS16 (U+FE0F) forces the cluster wide (2) and VS15 (U+FE0E) forces it\n   narrow (1), but only when the immediately preceding codepoint in the\n   cluster is a valid emoji variation sequence base (per Unicode\n   emoji-variation-sequences.txt). Invalid variation selectors are\n   ignored entirely.\n - Any other continuation codepoint that contributes to grapheme width\n   forces the cluster wide (2). Note this means cluster width is NOT the\n   maximum of per-codepoint widths: some continuation marks have narrow\n   codepoint width yet still widen the cluster.\n\n Mode dependence: this models mode 2027 (grapheme clustering) enabled,\n which is Ghostty's recommended configuration. When mode 2027 is\n disabled, clusters never combine and variation selectors never change\n width; predict layout in that case by summing\n ghostty_unicode_codepoint_width() over each codepoint instead.\n\n Edge cases:\n - Codepoints beyond U+10FFFF consume one codepoint, have width 1, and\n   are always cluster boundaries. This function is total; it never fails.\n - Control characters (C0/C1, CR, LF) are never printed through the\n   terminal's text path; passing them here returns an unspecified (but\n   stable and bounded) result.\n - A cluster whose first codepoint is zero-width (e.g. a lone combining\n   mark) is malformed at a cell start; the terminal may attach it to\n   earlier screen content. This function reports the fold result for the\n   sequence in isolation (typically 0).\n\n This function is pure, allocates nothing, and is thread-safe.\n"]
     pub fn ghostty_unicode_grapheme_width(cps: *const u32, len: usize, width: *mut u8) -> usize;
+}
+unsafe extern "C" {
+    #[doc = " Allocate an opaque pointer. This can be used for any opaque pointer\n types such as GhosttyKeyEncoder, GhosttyKeyEvent, etc.\n"]
+    pub fn ghostty_wasm_alloc_opaque() -> *mut *mut ::std::os::raw::c_void;
+}
+unsafe extern "C" {
+    #[doc = " Free an opaque pointer allocated by ghostty_wasm_alloc_opaque().\n"]
+    pub fn ghostty_wasm_free_opaque(ptr: *mut *mut ::std::os::raw::c_void);
+}
+unsafe extern "C" {
+    #[doc = " Allocate an array of uint8_t values.\n"]
+    pub fn ghostty_wasm_alloc_u8_array(len: usize) -> *mut u8;
+}
+unsafe extern "C" {
+    #[doc = " Free an array allocated by ghostty_wasm_alloc_u8_array().\n"]
+    pub fn ghostty_wasm_free_u8_array(ptr: *mut u8, len: usize);
+}
+unsafe extern "C" {
+    #[doc = " Allocate an array of uint16_t values.\n"]
+    pub fn ghostty_wasm_alloc_u16_array(len: usize) -> *mut u16;
+}
+unsafe extern "C" {
+    #[doc = " Free an array allocated by ghostty_wasm_alloc_u16_array().\n"]
+    pub fn ghostty_wasm_free_u16_array(ptr: *mut u16, len: usize);
+}
+unsafe extern "C" {
+    #[doc = " Allocate a single uint8_t value.\n"]
+    pub fn ghostty_wasm_alloc_u8() -> *mut u8;
+}
+unsafe extern "C" {
+    #[doc = " Free a uint8_t allocated by ghostty_wasm_alloc_u8().\n"]
+    pub fn ghostty_wasm_free_u8(ptr: *mut u8);
+}
+unsafe extern "C" {
+    #[doc = " Allocate a single size_t value.\n"]
+    pub fn ghostty_wasm_alloc_usize() -> *mut usize;
+}
+unsafe extern "C" {
+    #[doc = " Free a size_t allocated by ghostty_wasm_alloc_usize().\n"]
+    pub fn ghostty_wasm_free_usize(ptr: *mut usize);
 }
