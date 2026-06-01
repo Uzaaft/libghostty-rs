@@ -35,10 +35,12 @@
 
         toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
           extensions = rustExtensions;
-          targets = pkgs.lib.optionals pkgs.stdenv.isLinux [
-            "x86_64-unknown-linux-gnu"
-            "x86_64-unknown-linux-musl"
-          ];
+          targets =
+            ["wasm32-unknown-unknown"]
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              "x86_64-unknown-linux-gnu"
+              "x86_64-unknown-linux-musl"
+            ];
         };
 
         craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
