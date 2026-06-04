@@ -740,6 +740,74 @@ impl CellIteration<'_, '_> {
         from_result(result)
     }
 
+    /// Encode the current cell's full grapheme cluster as UTF-8 into a
+    /// caller-provided string buffer.
+    ///
+    /// The base codepoint is encoded first, followed by any extra grapheme
+    /// codepoints.
+    ///
+    /// May grow the buffer if more space is required.
+    pub fn graphemes_utf8(&self, buf: &mut String) -> Result<()> {
+        // SAFETY: String comes with some very stringent safety requirements,
+        // so we'll detail them here. The safety protocol for the C API is
+        // essentially that, in case of an error, no data will be written
+        // to the String's underlying buffer, and the buffer should appear
+        // as if unmodified. As such, we should be fine to operate on the
+        // original buffer directly and not cause any UB or break any
+        // invariants with the String's internal state.
+        //
+        // Since Strings do not have a `set_len` method like Vecs, in the
+        // happy path we have to recombine the entire string from its
+        // constituents, i.e. its pointer, length and capacity. This should
+        // be fine as the pointer indeed came from the original String,
+        // and that we do not attempt to copy the pointer anywhere and
+        // potentially cause aliasing issues. As for the remaining factors,
+        // we have to trust that the API will not cause length and capacity
+        // to have nonsensical values, and that the underlying bytes are
+        // indeed UTF-8.
+        //
+        // TODO: Use `String::into_raw_parts` to make this slightly simpler
+
+        let cbuf = loop {
+            // Save the old length of the String for later
+            let len = buf.len();
+            let mut cbuf = ffi::Buffer {
+                ptr: buf.as_mut_ptr(),
+                cap: buf.capacity(),
+                len,
+            };
+
+            let result = unsafe {
+                ffi::ghostty_render_state_row_cells_get(
+                    self.iter.0.as_raw(),
+                    ffi::RenderStateRowCellsData::GRAPHEMES_UTF8,
+                    std::ptr::from_mut(&mut cbuf).cast(),
+                )
+            };
+            match result {
+                ffi::Result::SUCCESS => break Ok(cbuf),
+                ffi::Result::OUT_OF_MEMORY => break Err(Error::OutOfMemory),
+                ffi::Result::OUT_OF_SPACE => {
+                    // When OutOfSpace is returned, the new length is written
+                    // to `cbuf.len`, so we reserve additional space for that
+                    buf.reserve(cbuf.len - len);
+                    continue;
+                }
+                ffi::Result::NO_VALUE | ffi::Result::INVALID_VALUE | _ => {
+                    break Err(Error::InvalidValue);
+                }
+            };
+        }?;
+
+        // Reconstitute the original String
+        // WITHOUT DROPPING THE EXISTING STRING OBJECT (!!)
+        // Otherwise, memory corruption, double frees, etc. WILL happen.
+        unsafe {
+            std::ptr::write(buf, String::from_raw_parts(cbuf.ptr, cbuf.len, cbuf.cap));
+        }
+        Ok(())
+    }
+
     /// Whether the cell is contained within the current selection.
     ///
     /// This returns true when the cell's column is within the current row's
@@ -751,6 +819,15 @@ impl CellIteration<'_, '_> {
     /// directly, avoiding one C API call per cell for selection state.
     pub fn is_selected(&self) -> Result<bool> {
         self.get(ffi::RenderStateRowCellsData::SELECTED)
+    }
+
+    /// Whether the cell has any explicit styling.
+    ///
+    /// This is equivalent to querying the raw cell's [`Cell::has_styling`]
+    /// value, but avoids materializing the raw [`Cell`] for renderers that
+    /// only need to know whether fetching the full style is necessary.
+    pub fn has_styling(&self) -> Result<bool> {
+        self.get(ffi::RenderStateRowCellsData::HAS_STYLING)
     }
 }
 

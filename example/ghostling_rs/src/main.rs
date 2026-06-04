@@ -336,6 +336,9 @@ impl<'alloc> Renderer<'alloc> {
         // Small padding from the window edges.
         let mut y = PADDING;
 
+        // Reusable text buffer for reading cell graphemes as UTF-8 text.
+        let mut text = String::with_capacity(16);
+
         // For convenience, `next` gives you the same iteration back only
         // as a shared pointer, so you can simultaneously iterate through
         // all rows while having a handle to query data for each row.
@@ -358,7 +361,7 @@ impl<'alloc> Renderer<'alloc> {
                     }
                 } else {
                     // Convert read grapheme codepoints into UTF-8 text.
-                    let text: String = cell.graphemes()?.into_iter().collect();
+                    cell.graphemes_utf8(&mut text)?;
 
                     // Resolve foreground and background colors using the new
                     // per-cell color queries. These flatten style colors,
@@ -368,15 +371,19 @@ impl<'alloc> Renderer<'alloc> {
                     let mut fg = cell.fg_color()?.unwrap_or(colors.foreground);
                     let mut has_bg = bg.is_some();
                     let mut bg = bg.unwrap_or(colors.background);
+                    let mut bold = false;
 
-                    // Read the style for flags (inverse, bold, italic) — color
-                    // resolution is handled above via the new API.
-                    let style = cell.style()?;
+                    if cell.has_styling()? {
+                        // Read the style for flags (inverse, bold, italic) — color
+                        // resolution is handled above via the new API.
+                        let style = cell.style()?;
 
-                    // Inverse (reverse video): swap foreground and background colors.
-                    if style.inverse {
-                        std::mem::swap(&mut fg, &mut bg);
-                        has_bg = true;
+                        // Inverse (reverse video): swap foreground and background colors.
+                        if style.inverse {
+                            std::mem::swap(&mut fg, &mut bg);
+                            has_bg = true;
+                        }
+                        bold = style.bold;
                     }
 
                     // Draw a background rectangle if the cell has a non-default bg
@@ -404,7 +411,7 @@ impl<'alloc> Renderer<'alloc> {
                     // In a more sophisticated terminal one would obviously use the
                     // correct bold version of the font using font discovery, but
                     // let's do it the hackier way here.
-                    if style.bold {
+                    if bold {
                         draw_text_ex(
                             &text,
                             x + 1.0,
