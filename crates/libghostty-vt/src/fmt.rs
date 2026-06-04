@@ -20,24 +20,125 @@ pub struct Formatter<'t, 'alloc: 'cb, 'cb: 't> {
     _terminal: PhantomData<&'t Terminal<'alloc, 'cb>>,
 }
 
-/// Options for creating a terminal formatter.
+/// Options for [creating a terminal formatter](Formatter::new).
 #[derive(Debug)]
-pub struct FormatterOptions<'t> {
-    /// Output format to emit.
-    pub format: Format,
-    /// Whether to trim trailing whitespace on non-blank lines.
-    pub trim: bool,
-    /// Whether to unwrap soft-wrapped lines.
-    pub unwrap: bool,
-    /// Optional selection to restrict output to a range.
+pub struct FormatterOptions<'t, 's> {
+    inner: ffi::FormatterTerminalOptions,
+    _phan: PhantomData<&'s Selection<'t>>,
+}
+impl<'t, 's> FormatterOptions<'t, 's> {
+    /// Create a new set of options for [creating a terminal formatter](Formatter::new).
+    pub fn new() -> Self {
+        Self {
+            inner: ffi::FormatterTerminalOptions {
+                extra: ffi::FormatterTerminalExtra {
+                    screen: ffi::FormatterScreenExtra {
+                        ..ffi::sized!(ffi::FormatterScreenExtra)
+                    },
+                    ..ffi::sized!(ffi::FormatterTerminalExtra)
+                },
+                ..ffi::sized!(ffi::FormatterTerminalOptions)
+            },
+            _phan: PhantomData,
+        }
+    }
+    /// Specify the output format to emit.
+    pub fn with_format(mut self, value: Format) -> Self {
+        self.inner.emit = value.into();
+        self
+    }
+    /// Specify whether to unwrap soft-wrapped lines.
+    pub fn with_unwrap(mut self, value: bool) -> Self {
+        self.inner.unwrap = value;
+        self
+    }
+    /// Specify whether to trim trailing whitespace on non-blank lines.
+    pub fn with_trim(mut self, value: bool) -> Self {
+        self.inner.trim = value;
+        self
+    }
+    /// Specify the selection to restrict output to a range.
     ///
-    /// If `None`, the entire screen is formatted.
-    pub selection: Option<Selection<'t>>,
+    /// If a selection is not given, the formatter defaults to formatting
+    /// the entire screen.
+    pub fn with_selection(mut self, value: &'s Selection<'t>) -> Self {
+        self.inner.selection = &value.inner;
+        self
+    }
+
+    // --- Extra settings --- //
+
+    /// Specify whether to emit the palette using OSC 4 sequences.
+    pub fn with_palette(mut self, value: bool) -> Self {
+        self.inner.extra.palette = value;
+        self
+    }
+    /// Specify terminal modes that differ from their defaults using CSI h/l.
+    pub fn with_modes(mut self, value: bool) -> Self {
+        self.inner.extra.modes = value;
+        self
+    }
+    /// Specify whether to emit scrolling region state using DECSTBM and DECSLRM sequences.
+    pub fn with_scrolling_region(mut self, value: bool) -> Self {
+        self.inner.extra.scrolling_region = value;
+        self
+    }
+    /// Specify tabstop positions by clearing all tabs and setting each one.
+    pub fn with_tabstops(mut self, value: bool) -> Self {
+        self.inner.extra.tabstops = value;
+        self
+    }
+    /// Specify the present working directory using OSC 7.
+    pub fn with_pwd(mut self, value: bool) -> Self {
+        self.inner.extra.pwd = value;
+        self
+    }
+    /// Specify keyboard modes such as ModifyOtherKeys.
+    pub fn with_keyboard(mut self, value: bool) -> Self {
+        self.inner.extra.keyboard = value;
+        self
+    }
+
+    // --- Screen settings --- //
+
+    /// Specify whether to emit cursor position using CUP (CSI H).
+    pub fn with_cursor(mut self, value: bool) -> Self {
+        self.inner.extra.screen.cursor = value;
+        self
+    }
+    /// Emit current SGR style state based on the cursor's active style_id.
+    pub fn with_style(mut self, value: bool) -> Self {
+        self.inner.extra.screen.style = value;
+        self
+    }
+    /// Emit current hyperlink state using OSC 8 sequences.
+    pub fn with_hyperlink(mut self, value: bool) -> Self {
+        self.inner.extra.screen.hyperlink = value;
+        self
+    }
+    /// Emit character protection mode using DECSCA.
+    pub fn with_protection(mut self, value: bool) -> Self {
+        self.inner.extra.screen.protection = value;
+        self
+    }
+    /// Emit Kitty keyboard protocol state using CSI > u and CSI = sequences.
+    pub fn with_kitty_keyboard(mut self, value: bool) -> Self {
+        self.inner.extra.screen.kitty_keyboard = value;
+        self
+    }
+    /// Emit character set designations and invocations.
+    pub fn with_charsets(mut self, value: bool) -> Self {
+        self.inner.extra.screen.charsets = value;
+        self
+    }
 }
 
 impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// Create a formatter for a terminal's active screen.
-    pub fn new(terminal: &'t Terminal<'alloc, 'cb>, opts: FormatterOptions<'t>) -> Result<Self> {
+    pub fn new(
+        terminal: &'t Terminal<'alloc, 'cb>,
+        opts: FormatterOptions<'t, '_>,
+    ) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_inner(std::ptr::null(), terminal, opts) }
     }
@@ -62,24 +163,12 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     ) -> Result<Self> {
         let mut raw: ffi::Formatter = std::ptr::null_mut();
 
-        let opts = ffi::FormatterTerminalOptions {
-            emit: opts.format.into(),
-            trim: opts.trim,
-            extra: ffi::FormatterTerminalExtra::default(),
-            unwrap: opts.unwrap,
-            selection: match opts.selection {
-                Some(s) => &s.inner,
-                None => std::ptr::null(),
-            },
-            ..ffi::sized!(ffi::FormatterTerminalOptions)
-        };
-
         let result = unsafe {
             ffi::ghostty_formatter_terminal_new(
                 alloc,
                 &raw mut raw,
                 terminal.inner.as_raw(),
-                opts.into(),
+                opts.inner,
             )
         };
         from_result(result)?;
