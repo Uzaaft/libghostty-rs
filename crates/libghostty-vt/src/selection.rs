@@ -1,4 +1,19 @@
 //! Selecting terminal content between two endpoints.
+//!
+//! The start and end values are [`GridRef`] values. They are therefore
+//! untracked grid references and inherit the same lifetime rules: they are
+//! only safe to use until the next mutating operation on the terminal that
+//! produced them, including dropping the terminal. To keep a selection valid
+//! across terminal mutations, callers must maintain tracked grid references
+//! for the endpoints and reconstruct a [`Selection`] from fresh snapshots
+//! when needed.
+//!
+//! Selections can be directly obtained by calling methods such as
+//! [`Terminal::select_all`], [`Terminal::select_word`], etc., but this can be
+//! quite cumbersome to use for terminal emulators designed for human users.
+//! For this use case, [selection gestures](self::gesture) serve as a convenient
+//! way of translating common UI actions (clicking, dragging, etc.) into selections,
+//! to be copied, formatted, or installed as the active selection.
 use std::{marker::PhantomData, ptr::NonNull};
 
 use crate::{
@@ -9,6 +24,8 @@ use crate::{
     screen::GridRef,
     terminal::{Point, Terminal},
 };
+
+pub mod gesture;
 
 /// A snapshot selection range defined by two grid references.
 ///
@@ -579,6 +596,7 @@ impl Default for FormatOptions<'_, '_> {
 /// for both forward and reversed selections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[repr(u32)]
+#[non_exhaustive]
 pub enum Adjustment {
     /// Move left to the previous non-empty cell, wrapping upward.
     Left = ffi::SelectionAdjust::LEFT,
@@ -613,6 +631,7 @@ pub enum Adjustment {
 /// top-left-to-bottom-right or bottom-right-to-top-left orderings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[repr(u32)]
+#[non_exhaustive]
 pub enum Order {
     /// Start is before end in top-left to bottom-right order.
     Forward = ffi::SelectionOrder::FORWARD,
