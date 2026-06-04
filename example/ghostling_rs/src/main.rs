@@ -1131,18 +1131,18 @@ impl SelectionState<'_> {
     ) -> Result<()> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         let grid_ref = terminal.grid_ref(point)?;
-
-        let selection = self
-            .drag_event
-            .set_rectangle(Input::selection_rectangle_mods(mods))?
-            .set_geometry(Geometry {
+        let geometry = Geometry {
                 columns: terminal.cols()?.into(),
                 cell_width: dims.cell_width as u32,
                 padding_left: PADDING as u32,
                 screen_height: dims.window_height as u32,
-            })?
+            };
+
+        let selection = self
+            .drag_event
+            .set_rectangle(Input::selection_rectangle_mods(mods))?
             .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref)?;
+            .apply(&mut self.gesture, terminal, grid_ref, geometry)?;
 
         terminal.set_selection(selection.as_ref())?;
         Ok(())
