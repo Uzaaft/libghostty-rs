@@ -569,7 +569,7 @@ impl<'alloc> DeepPressEvent<'alloc> {
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
         Ok(Self {
-            base: unsafe { Event::new_inner(alloc, ffi::SelectionGestureEventType::DRAG)? },
+            base: unsafe { Event::new_inner(alloc, ffi::SelectionGestureEventType::DEEP_PRESS)? },
         })
     }
 
