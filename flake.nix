@@ -30,7 +30,7 @@
           overlays = [(import rust-overlay)];
         };
 
-        rustVersion = "1.93.0";
+        rustVersion = "1.90.0";
         rustExtensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
 
         toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
@@ -71,7 +71,7 @@
         unfilteredRoot = ./.;
 
         zigPkg = zig.packages.${system}."0.15.2";
-        ghosttyCommit = "6590196661f769dd8f2b3e85d6c98262c4ec5b3b";
+        ghosttyCommit = "cb36966a752982014827a9cabcf630ec3788b3d9";
 
         # Keep this in sync with GHOSTTY_COMMIT in
         # crates/libghostty-vt-sys/build.rs. Nix must provide Ghostty sources
@@ -80,7 +80,7 @@
           owner = "ghostty-org";
           repo = "ghostty";
           rev = ghosttyCommit;
-          hash = "sha256-HHHgWuBssEBMfV5hOFdFxp0WUXiwfl20NfkjU/ZNuC8=";
+          hash = "sha256-Bn1M2fBFf/F4zBhU1rNemIdBkE3o6ramsCotXigpUNM=";
         };
 
         # Ghostty ships a zon2nix-generated link farm for its Zig package
@@ -108,6 +108,8 @@
 
         commonArgs =
           {
+            pname = "libghostty-rs";
+            version = "0.1.1";
             inherit src;
             strictDeps = true;
             GHOSTTY_SOURCE_DIR = "${ghosttySrc}";
@@ -126,9 +128,6 @@
               [
                 pkgs.libclang
                 pkgs.openssl
-              ]
-              ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
-                pkgs.musl
               ]
               ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
                 pkgs.apple-sdk
@@ -214,6 +213,8 @@
           program = "${aflVmApp}/bin/afl-vm";
         };
 
+        checks.default = application;
+
         devShells.default = craneLib.devShell {
           packages = [
             toolchain
@@ -246,6 +247,8 @@
           ];
 
           shellHook = ''
+            export GHOSTTY_SOURCE_DIR=${ghosttySrc}
+            export GHOSTTY_ZIG_SYSTEM_DIR=${ghosttyZigDeps}
             export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             # Unset Nix Darwin SDK env vars and remove the xcbuild

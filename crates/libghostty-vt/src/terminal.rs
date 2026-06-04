@@ -1,13 +1,13 @@
 //! Types and functions around terminal state management.
 
-use std::mem::MaybeUninit;
+use std::{mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     alloc::{Allocator, Object},
-    error::{Error, Result, from_optional_result, from_result},
+    error::{Error, Result, from_optional_result_uninit, from_result},
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
     key,
-    screen::{GridRef, Screen},
+    screen::{GridRef, Screen, TrackedGridRef},
     style::{self, RgbColor},
 };
 
@@ -21,6 +21,39 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 ///
 /// Once a terminal session is up and running, you can configure a key encoder
 /// to write keyboard input via [`key::Encoder::set_options_from_terminal`].
+///
+/// ## Example: VT stream processing
+///
+/// ```
+/// use libghostty_vt::{Terminal, TerminalOptions};
+///
+/// // Create a terminal
+/// let mut terminal = Terminal::new(TerminalOptions {
+///     cols: 80,
+///     rows: 24,
+///     max_scrollback: 0,
+/// }).unwrap();
+///
+/// // Feed VT data into the terminal
+/// terminal.vt_write(b"Hello, World!\r\n");
+///
+/// // ANSI color codes: ESC[1;32m = bold green, ESC[0m = reset
+/// terminal.vt_write(b"\x1b[1;32mGreen Text\x1b[0m\r\n");
+///
+/// // Cursor positioning: ESC[1;1H = move to row 1, column 1
+/// terminal.vt_write(b"\x1b[1;1HTop-left corner\r\n");
+///
+/// // Cursor movement: ESC[5B = move down 5 lines
+/// terminal.vt_write(b"\x1b[5B");
+/// terminal.vt_write(b"Moved down!\r\n");
+///
+/// // Erase line: ESC[2K = clear entire line
+/// terminal.vt_write(b"\x1b[2K");
+/// terminal.vt_write(b"New content\r\n");
+///
+/// // Multiple lines
+/// terminal.vt_write(b"Line A\r\nLine B\r\nLine C\r\n");
+/// ```
 ///
 /// # Effects
 ///
@@ -53,32 +86,45 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 /// due to Rust's much stricter safety guarantees. In turn, we use the
 /// user data internally for callback dispatch purposes.
 ///
-/// You should instead use idiomatic Rust mechanisms like [`Rc`](std::rc::Rc)s
-/// to hold common, mutable state between callbacks (which is perfectly safe,
-/// since everything is run on a single thread within a single `vt_write` call),
-/// or with some other type with interior mutability.
+/// You should instead use types that allow safe *interior mutability*
+/// (e.g. [`Cell`](std::cell::Cell) or [`RefCell`](std::cell::RefCell))
+/// and pass a shared reference into each effect handler that needs to mutate
+/// the shared state. Note that reference counting mechanisms like
+/// [`Rc`](std::rc::Rc) and [`Arc`](std::sync::Arc) are optional.
 ///
 /// ## Example: Registering effects and processing VT data
 ///
 /// ```rust
-/// use std::{cell::Cell, rc::Rc};
+/// use std::cell::Cell;
 /// use libghostty_vt::{Terminal, TerminalOptions};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// // Set up a simple bell counter.
+/// //
+/// // `usize` is a simple, `Copy`able type, which means `Cell`s are
+/// // perfectly suitable here. More complex, non-`Copy` types should
+/// // use `RefCell`s instead.
+/// //
+/// // This has to be done before the terminal is created, since
+/// // its effect handlers will continue to refer to the bell counter
+/// // during the lifetime of the terminal.
+/// let bell_count = Cell::new(0usize);
+///
 /// let mut terminal = Terminal::new(TerminalOptions {
 ///     cols: 80,
 ///     rows: 24,
 ///     max_scrollback: 0,
 /// })?;
 ///
-/// // Set up a simple bell counter
-/// let bell_count = Rc::new(Cell::new(0usize));
 /// terminal
 ///     .on_pty_write(|_term, data| {
 ///         println!("Replying {} bytes to the PTY", data.len());
 ///     })?
 ///    .on_bell({
-///        let bell_count = bell_count.clone();
+///        // Explicitly borrow the bell count, or otherwise `move`
+///        // will attempt to capture the entire `Cell` and cause a
+///        // compiler error
+///        let bell_count = &bell_count;
 ///        move |_term| {
 ///            bell_count.update(|v| v + 1);
 ///            println!("Bell! (count = {})", bell_count.get())
@@ -106,6 +152,80 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 /// assert_eq!(bell_count.get(), 2);
 /// # Ok(())}
 /// ```
+///
+/// # Color theme
+///
+/// The terminal maintains a set of colors used for rendering: a foreground
+/// color, a background color, a cursor color, and a 256-color palette. Each
+/// of these has two layers: a **default** value set by the embedder, and an
+/// **override** value that programs running in the terminal can set via OSC
+/// escape sequences (e.g. OSC 10/11/12 for foreground/background/cursor,
+/// OSC 4 for individual palette entries).
+///
+/// ## Default colors
+///
+/// Use [`Terminal::set_default_fg_color`], [`Terminal::set_default_bg_color`],
+/// [`Terminal::set_default_cursor_color`] and [`Terminal::set_default_color_palette`]
+/// to configure the default colors. These represent the theme or configuration
+/// chosen by the embedder. Passing `None` clears the default, leaving the color
+/// unset.
+///
+/// For the palette, passing `None` resets to the built-in default palette.
+/// The palette set operation preserves any per-index OSC overrides that programs
+/// have applied; only unmodified indices are updated.
+///
+/// ## Reading colors
+///
+/// Use functions like [`Terminal::default_cursor_color`],
+/// [`Terminal::bg_color`], [`Terminal::default_color_palette`], etc. to read
+/// colors. There are two variants for each color: the **effective** value
+/// (which returns the OSC override if one is active, otherwise the default)
+/// and the **default** value (which ignores any OSC overrides).
+///
+/// For foreground, background, and cursor colors, the getters return `Ok(None)`
+/// if no color is configured (neither a default nor an OSC override).
+/// The palette getters always succeed since the palette always has a value
+/// (the built-in default if nothing else is set).
+///
+/// ## Setting a color theme
+///
+/// ```
+/// use libghostty_vt::{
+///     style::{RgbColor, PaletteIndex},
+///     Error,
+///     Terminal,
+/// };
+///
+/// fn set_color_theme(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
+///     // Set default foreground (light gray) and background (dark)
+///     terminal
+///         .set_default_fg_color(Some(
+///             RgbColor { r: 0xDD, g: 0xDD, b: 0xDD }
+///         ))?
+///         .set_default_bg_color(Some(
+///             RgbColor { r: 0x1E, g: 0x1E, b: 0x2E }
+///         ))?
+///         .set_default_cursor_color(Some(
+///             RgbColor { r: 0xF5, g: 0xE0, b: 0xDC }
+///         ))?;
+///     
+///     // Set a custom palette — start from the built-in default and override
+///     // the first 8 entries with a custom dark theme.
+///     let mut palette = terminal.default_color_palette()?;
+///     palette[PaletteIndex::BLACK.0 as usize]   = RgbColor { r: 0x45, g: 0x47, b: 0x5A };
+///     palette[PaletteIndex::RED.0 as usize]     = RgbColor { r: 0xF3, g: 0x8B, b: 0xA8 };
+///     palette[PaletteIndex::GREEN.0 as usize]   = RgbColor { r: 0xA6, g: 0xE3, b: 0xA1 };
+///     palette[PaletteIndex::YELLOW.0 as usize]  = RgbColor { r: 0xF9, g: 0xE2, b: 0xAF };
+///     palette[PaletteIndex::BLUE.0 as usize]    = RgbColor { r: 0x89, g: 0xB4, b: 0xFA };
+///     palette[PaletteIndex::MAGENTA.0 as usize] = RgbColor { r: 0xF5, g: 0xC2, b: 0xE7 };
+///     palette[PaletteIndex::CYAN.0 as usize]    = RgbColor { r: 0x94, g: 0xE2, b: 0xD5 };
+///     palette[PaletteIndex::WHITE.0 as usize]   = RgbColor { r: 0xBA, g: 0xC2, b: 0xDE };
+///     
+///     terminal.set_default_color_palette(Some(palette))?;
+///     Ok(())
+/// }
+/// ```
+///
 #[derive(Debug)]
 pub struct Terminal<'alloc: 'cb, 'cb> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
@@ -249,6 +369,65 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(unsafe { GridRef::from_raw(grid_ref) })
     }
 
+    /// Create an owned tracked grid reference for a terminal point.
+    ///
+    /// This is the tracked variant of [`Terminal::grid_ref`]. The returned handle
+    /// follows the referenced cell as the terminal's page list is modified:
+    /// scrolling, pruning, resize/reflow, and other page-list operations update
+    /// the tracked reference automatically.
+    ///
+    /// The reference is attached to the terminal screen/page-list that is
+    /// active at creation time.
+    ///
+    /// If the point is outside the requested coordinate space, this returns
+    /// `Err(Error::InvalidValue)`.
+    ///
+    /// If the tracked grid reference outlives this terminal, the handle remains
+    /// valid, but it will always return `false` or `Ok(None)`.
+    pub fn track_grid_ref(&self, point: Point) -> Result<TrackedGridRef> {
+        let mut raw: ffi::TrackedGridRef = std::ptr::null_mut();
+        let result = unsafe {
+            ffi::ghostty_terminal_grid_ref_track(self.inner.as_raw(), point.into(), &raw mut raw)
+        };
+        from_result(result)?;
+
+        let inner = NonNull::new(raw).ok_or(Error::InvalidValue)?;
+        Ok(TrackedGridRef::new(inner, self.inner.ptr))
+    }
+
+    /// Convert a grid reference back to a point in the given coordinate system.
+    ///
+    /// This is the inverse of [`Terminal::grid_ref`]: given a grid reference, it
+    /// returns the x/y coordinates in the requested coordinate system (active,
+    /// viewport, screen, or history).
+    ///
+    /// The grid reference must have been obtained from the same terminal instance.
+    /// Like all grid references, it is only valid until the next mutating
+    /// terminal call.
+    ///
+    /// Not every grid reference is representable in every coordinate system.
+    /// For example, a cell in scrollback history cannot be expressed in active
+    /// coordinates, and a cell that has scrolled off the visible area cannot
+    /// be expressed in viewport coordinates. In these cases, the function
+    /// returns `Ok(None)`.
+    pub fn point_from_grid_ref(
+        &self,
+        grid_ref: &GridRef<'_>,
+        space: PointSpace,
+    ) -> Result<Option<PointCoordinate>> {
+        let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_terminal_point_from_grid_ref(
+                self.inner.as_raw(),
+                std::ptr::from_ref(&grid_ref.inner),
+                space.into_raw(),
+                point.as_mut_ptr(),
+            )
+        };
+
+        from_optional_result_uninit(result, point).map(|value| value.map(Into::into))
+    }
+
     /// Get the current value of a terminal mode.
     pub fn mode(&self, mode: Mode) -> Result<bool> {
         let mut value = false;
@@ -281,7 +460,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let result = unsafe {
             ffi::ghostty_terminal_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
         };
-        from_optional_result(result, value)
+        from_optional_result_uninit(result, value)
     }
     pub(crate) fn set<T>(&self, tag: ffi::TerminalOption::Type, v: &T) -> Result<()> {
         let result = unsafe {
@@ -300,7 +479,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         from_result(result)
     }
     pub(crate) fn set_optional<T>(
-        &mut self,
+        &self,
         tag: ffi::TerminalOption::Type,
         v: Option<&T>,
     ) -> Result<()> {
@@ -526,6 +705,30 @@ impl From<Point> for ffi::Point {
                     coordinate: coord.into(),
                 },
             },
+        }
+    }
+}
+
+/// A coordinate space for converting grid references back to points.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PointSpace {
+    /// Active area where the cursor can move.
+    Active,
+    /// Visible viewport, which changes when scrolled.
+    Viewport,
+    /// Full screen including scrollback.
+    Screen,
+    /// Scrollback history only, before the active area.
+    History,
+}
+
+impl PointSpace {
+    pub(crate) fn into_raw(self) -> ffi::PointTag::Type {
+        match self {
+            Self::Active => ffi::PointTag::ACTIVE,
+            Self::Viewport => ffi::PointTag::VIEWPORT,
+            Self::Screen => ffi::PointTag::SCREEN,
+            Self::History => ffi::PointTag::HISTORY,
         }
     }
 }
@@ -915,8 +1118,11 @@ macro_rules! handlers {
             ) |$t:ident, $func:ident| $block:block
         )*
     } => {
+        /// Methods for registering [effect handlers](#effects).
         impl<'alloc, 'cb> $crate::terminal::Terminal<'alloc, 'cb> {$(
             $(#[$fmeta])*
+            ///
+            /// See [#Effects](Terminal#effects) for more details.
             $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
                 unsafe extern "C" fn callback(
                     t: $crate::ffi::Terminal,
@@ -986,7 +1192,7 @@ macro_rules! handlers {
         )*}
         $(
             #[doc = concat!(
-                "Callback type for [`Terminal::",
+                "[Effect](Terminal#effects) callback type for [`Terminal::",
                 stringify!($name),
                 "`](Terminal::",
                 stringify!($name),
@@ -1153,12 +1359,11 @@ handlers! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::mem::ManuallyDrop;
-    use std::rc::Rc;
 
     #[inline(never)]
-    fn build_terminal(callback_count: Rc<Cell<usize>>) -> Terminal<'static, 'static> {
+    fn build_terminal<'cb>(callback_count: &'cb RefCell<usize>) -> Terminal<'static, 'cb> {
         let mut terminal = Terminal::new(Options {
             cols: 80,
             rows: 24,
@@ -1168,7 +1373,7 @@ mod tests {
 
         terminal
             .on_device_attributes(move |_term| {
-                callback_count.set(callback_count.get() + 1);
+                *callback_count.borrow_mut() += 1;
                 Some(DeviceAttributes {
                     primary: PrimaryDeviceAttributes::new(
                         ConformanceLevel::VT220,
@@ -1227,17 +1432,197 @@ mod tests {
         }
     }
 
+    /// Send an OSC 2 title sequence, then verify `term.title()` returns the
+    /// correct value inside the `on_title_changed` callback.
+    #[test]
+    fn title_changed_callback_returns_correct_title() {
+        // The callback bound on `on_title_changed` is `'cb`, not `'static`,
+        // so the closure can borrow stack locals directly – no Rc needed.
+        let captured_title: RefCell<String> = RefCell::new(String::new());
+        let callback_count: Cell<usize> = Cell::new(0);
+
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+
+        terminal
+            .on_title_changed(|term| {
+                callback_count.set(callback_count.get() + 1);
+                let title = term
+                    .title()
+                    .expect("title() should succeed inside callback");
+                *captured_title.borrow_mut() = title.to_owned();
+            })
+            .expect("callback should register");
+
+        // OSC 2 (set title) should invoke on_title_changed.
+        terminal.vt_write(b"\x1b]2;Hello Effects\x1b\\");
+        assert_eq!(callback_count.get(), 1);
+        assert_eq!(*captured_title.borrow(), "Hello Effects");
+
+        // A second title change should fire the callback again.
+        terminal.vt_write(b"\x1b]2;Second Title\x1b\\");
+        assert_eq!(callback_count.get(), 2);
+        assert_eq!(*captured_title.borrow(), "Second Title");
+    }
+
     /// Explicitly relocate the Terminal into distinct storage, then verify the
     /// callback still fires through the stable VTable userdata pointer.
     #[test]
     fn callbacks_survive_explicit_relocation() {
-        let callback_count = Rc::new(Cell::new(0usize));
-        let terminal = build_terminal(callback_count.clone());
+        let callback_count = RefCell::new(0usize);
+        let terminal = build_terminal(&callback_count);
         let (mut terminal, addr_before, addr_after) = relocate_into_new_box(terminal);
         assert_ne!(addr_before, addr_after);
 
         // Primary DA request (CSI c) should invoke on_device_attributes.
         terminal.vt_write(b"\x1b[c");
-        assert_eq!(callback_count.get(), 1);
+        assert_eq!(*callback_count.borrow(), 1);
+    }
+
+    fn tiny_terminal() -> Terminal<'static, 'static> {
+        Terminal::new(Options {
+            cols: 8,
+            rows: 3,
+            max_scrollback: 100,
+        })
+        .expect("terminal should initialize")
+    }
+
+    fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> u32 {
+        let snapshot = tracked
+            .snapshot(terminal)
+            .expect("tracked snapshot should not fail")
+            .expect("tracked ref should have a value");
+        snapshot
+            .cell()
+            .expect("tracked snapshot should resolve to a cell")
+            .codepoint()
+            .expect("tracked snapshot cell should expose a codepoint")
+    }
+
+    #[test]
+    fn tracked_grid_ref_follows_scroll() {
+        let mut terminal = tiny_terminal();
+        terminal.vt_write(b"alpha\r\nbravo\r\ncharlie");
+
+        let tracked = terminal
+            .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .expect("tracked grid ref should initialize");
+
+        terminal.vt_write(b"\r\ndelta");
+
+        assert!(tracked.has_value());
+        assert_eq!(
+            codepoint_at_tracked_ref(&terminal, &tracked),
+            u32::from('a')
+        );
+        assert_eq!(
+            tracked
+                .point(PointSpace::Screen)
+                .expect("tracked point should resolve")
+                .expect("tracked point should have a value")
+                .x,
+            0
+        );
+    }
+
+    #[test]
+    fn tracked_grid_ref_reports_loss_and_can_set_point() {
+        let mut terminal = tiny_terminal();
+        terminal.vt_write(b"alpha\r\nbravo\r\ncharlie");
+
+        let mut tracked = terminal
+            .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .expect("tracked grid ref should initialize");
+
+        terminal.reset();
+
+        assert!(!tracked.has_value());
+        assert!(
+            tracked
+                .snapshot(&terminal)
+                .expect("missing tracked snapshot should not fail")
+                .is_none()
+        );
+        assert!(
+            tracked
+                .point(PointSpace::Screen)
+                .expect("missing tracked point should not fail")
+                .is_none()
+        );
+
+        terminal.vt_write(b"echo");
+        tracked
+            .set(&mut terminal, Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .expect("tracked grid ref should set to a new point");
+
+        assert!(tracked.has_value());
+        assert_eq!(
+            codepoint_at_tracked_ref(&terminal, &tracked),
+            u32::from('e')
+        );
+    }
+
+    #[test]
+    fn tracked_grid_ref_survives_terminal_drop() {
+        let tracked = {
+            let mut terminal = tiny_terminal();
+            terminal.vt_write(b"alpha");
+            terminal
+                .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+                .expect("tracked grid ref should initialize")
+        };
+
+        assert!(!tracked.has_value());
+        assert!(
+            tracked
+                .point(PointSpace::Screen)
+                .expect("detached tracked point should not fail")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn tracked_grid_ref_rejects_different_terminal() {
+        let mut first = tiny_terminal();
+        first.vt_write(b"alpha");
+        let mut second = tiny_terminal();
+        second.vt_write(b"bravo");
+
+        let mut tracked = first
+            .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .expect("tracked grid ref should initialize");
+
+        assert!(matches!(
+            tracked.snapshot(&second),
+            Err(Error::InvalidValue)
+        ));
+        assert!(matches!(
+            tracked.set(&mut second, Point::Active(PointCoordinate { x: 0, y: 0 })),
+            Err(Error::InvalidValue)
+        ));
+    }
+
+    #[test]
+    fn grid_ref_converts_back_to_point() {
+        let mut terminal = tiny_terminal();
+        terminal.vt_write(b"alpha");
+
+        let original = PointCoordinate { x: 1, y: 0 };
+        let grid_ref = terminal
+            .grid_ref(Point::Active(original))
+            .expect("grid ref should resolve");
+
+        assert_eq!(
+            terminal
+                .point_from_grid_ref(&grid_ref, PointSpace::Active)
+                .expect("grid ref point conversion should not fail")
+                .expect("grid ref should be representable in active space"),
+            original
+        );
     }
 }

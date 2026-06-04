@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "6590196661f769dd8f2b3e85d6c98262c4ec5b3b";
+const GHOSTTY_COMMIT: &str = "cb36966a752982014827a9cabcf630ec3788b3d9";
 
 #[derive(Clone, Copy)]
 enum LinkMode {
@@ -14,10 +14,10 @@ enum LinkMode {
 
 impl LinkMode {
     fn current() -> Self {
-        if cfg!(feature = "link-static") {
-            Self::Static
-        } else {
+        if cfg!(feature = "link-dynamic") {
             Self::Dynamic
+        } else {
+            Self::Static
         }
     }
 
@@ -33,6 +33,11 @@ impl LinkMode {
             Self::Dynamic => {
                 if target.contains("darwin") {
                     file_name.starts_with("libghostty-vt") && file_name.ends_with(".dylib")
+                } else if target.contains("windows") {
+                    file_name == "ghostty-vt.lib"
+                        || file_name == "ghostty-vt.dll"
+                        || file_name == "libghostty-vt.dll.lib"
+                        || file_name == "libghostty-vt.dll.a"
                 } else {
                     file_name == "libghostty-vt.so" || file_name.starts_with("libghostty-vt.so.")
                 }
@@ -167,26 +172,29 @@ fn build_vendored(link_mode: LinkMode) {
 
     let lib_dir = install_prefix.join("lib");
     let include_dir = install_prefix.join("include");
+    let search_dirs = library_search_dirs(&target, &install_prefix);
     warn_unused_xcframework(&lib_dir);
 
-    let has_requested_library = std::fs::read_dir(&lib_dir)
-        .unwrap_or_else(|error| panic!("failed to read {}: {error}", lib_dir.display()))
-        .any(|entry| {
-            let entry = entry.unwrap_or_else(|error| {
-                panic!("failed to read entry from {}: {error}", lib_dir.display())
-            });
-            let file_name = entry.file_name();
-            let Some(file_name) = file_name.to_str() else {
-                return false;
-            };
+    let has_requested_library = search_dirs.iter().any(|dir| {
+        std::fs::read_dir(dir)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", dir.display()))
+            .any(|entry| {
+                let entry = entry.unwrap_or_else(|error| {
+                    panic!("failed to read entry from {}: {error}", dir.display())
+                });
+                let file_name = entry.file_name();
+                let Some(file_name) = file_name.to_str() else {
+                    return false;
+                };
 
-            link_mode.matches_library(&target, file_name)
-        });
+                link_mode.matches_library(&target, file_name)
+            })
+    });
     assert!(
         has_requested_library,
-        "expected libghostty-vt {} in {}",
+        "expected libghostty-vt {} in one of {:?}",
         link_mode.artifact_kind(),
-        lib_dir.display()
+        search_dirs
     );
     assert!(
         include_dir.join("ghostty").join("vt.h").exists(),
@@ -194,7 +202,9 @@ fn build_vendored(link_mode: LinkMode) {
         include_dir.join("ghostty").join("vt.h").display()
     );
 
-    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+    for dir in &search_dirs {
+        println!("cargo:rustc-link-search=native={}", dir.display());
+    }
     match link_mode {
         LinkMode::Dynamic => println!("cargo:rustc-link-lib=dylib=ghostty-vt"),
         LinkMode::Static => println!("cargo:rustc-link-lib=static=ghostty-vt"),
@@ -356,6 +366,17 @@ fn run(mut command: Command, context: &str) {
     assert!(status.success(), "{context} failed with status {status}");
 }
 
+/// Returns directories to search for the built library artifact.
+/// On Windows, Zig may place the DLL in `bin/` and the import lib in `lib/`,
+/// so both are included.
+fn library_search_dirs(target: &str, install_prefix: &Path) -> Vec<PathBuf> {
+    let mut dirs = vec![install_prefix.join("lib")];
+    if target.contains("windows") {
+        dirs.push(install_prefix.join("bin"));
+    }
+    dirs
+}
+
 fn zig_target(target: &str) -> String {
     let value = match target {
         "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu",
@@ -364,6 +385,10 @@ fn zig_target(target: &str) -> String {
         "aarch64-unknown-linux-musl" => "aarch64-linux-musl",
         "aarch64-apple-darwin" => "aarch64-macos-none",
         "x86_64-apple-darwin" => "x86_64-macos-none",
+        "x86_64-pc-windows-gnu" => "x86_64-windows-gnu",
+        "aarch64-pc-windows-gnullvm" => "aarch64-windows-gnu",
+        "x86_64-pc-windows-msvc" => "x86_64-windows-msvc",
+        "aarch64-pc-windows-msvc" => "aarch64-windows-msvc",
         other => panic!("unsupported Rust target for vendored build: {other}"),
     };
     value.to_owned()

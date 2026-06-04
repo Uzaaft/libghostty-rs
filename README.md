@@ -6,6 +6,7 @@ Rust bindings and safe API for [libghostty-vt](https://ghostty.org), the virtual
 
 - `crates/libghostty-vt-sys` — raw FFI bindings generated from `ghostty/vt.h`
 - `crates/libghostty-vt` — safe Rust wrappers (Terminal, RenderState, KeyEncoder, MouseEncoder, etc.)
+- `example/grid_ref_tracked_rs` — focused example of tracked grid references following cells through scrollback and reset
 - `example/ghostling_rs` — Rust port of [ghostling](https://github.com/ghostty-org/ghostling), a minimal terminal emulator using [macroquad](https://macroquad.rs)
 
 ## Quick Start
@@ -80,10 +81,10 @@ Zig package dependencies up front, then set `GHOSTTY_SOURCE_DIR` and
 use the same contract rather than adding `git` or allowing network access in
 the sandbox.
 
-Enable `libghostty-vt/link-static` or `libghostty-vt-sys/link-static` to link
-`libghostty-vt.a` instead of the shared library. This statically links the
-Ghostty VT archive, but the final binary may still depend on platform runtime
-libraries.
+By default, `libghostty-vt` and `libghostty-vt-sys` link `libghostty-vt.a`.
+This statically links the Ghostty VT archive, but the final binary may still
+depend on platform runtime libraries. To link the shared library instead,
+enable `libghostty-vt/link-dynamic`.
 
 ```sh
 nix develop
@@ -180,14 +181,10 @@ LIBGHOSTTY_FUZZ_REPEAT=1000 fuzz/afl/valgrind.sh
 ### Running the example
 
 ```sh
-# Linux
-LD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) \
-  cargo run -p ghostling_rs
-
-# macOS
-DYLD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) \
-  cargo run -p ghostling_rs
+cargo run -p ghostling_rs
+cargo run -p grid_ref_tracked_rs
 ```
 
-When `link-static` is enabled, the example does not need `LD_LIBRARY_PATH` or
-`DYLD_LIBRARY_PATH` for `libghostty-vt`.
+When building with `link-dynamic`, set `LD_LIBRARY_PATH` on Linux or
+`DYLD_LIBRARY_PATH` on macOS to the directory containing the generated
+`libghostty-vt` shared library.

@@ -7,7 +7,7 @@
 - Check: `cargo check`
 - Test: `cargo test -p libghostty-vt-sys`
 - Build example: `cargo build -p ghostling_rs`
-- Run example: `LD_LIBRARY_PATH=$(dirname $(find target/debug/build/libghostty-vt-sys-*/out -name "libghostty-vt*" | head -1)) cargo run -p ghostling_rs`
+- Run example: `cargo run -p ghostling_rs`
 
 ## Code Conventions
 

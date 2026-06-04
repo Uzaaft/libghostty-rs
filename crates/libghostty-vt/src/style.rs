@@ -201,7 +201,7 @@ impl From<StyleColor> for ffi::StyleColor {
                 value: ffi::StyleColorValue { palette },
             },
             StyleColor::Rgb(rgb) => Self {
-                tag: ffi::StyleColorTag::NONE,
+                tag: ffi::StyleColorTag::RGB,
                 value: ffi::StyleColorValue { rgb: rgb.into() },
             },
         }
