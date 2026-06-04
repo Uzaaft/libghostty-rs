@@ -73,8 +73,13 @@ jobs:
       - name: Check pkg-config path
         if: runner.os == 'Linux'
         run: |
-          nix develop --command cargo build -p libghostty-vt-sys
-          PKG_CONFIG_PATH=$(find target/debug/build -path '*/out/ghostty-install/share/pkgconfig' | head -1)
-          test -n "$PKG_CONFIG_PATH"
-          export PKG_CONFIG_PATH
-          nix develop --command cargo check -p libghostty-vt-sys --features pkg-config
+          test -f result/share/pkgconfig/libghostty-vt-static.pc
+          PKG_CONFIG_PATH="$PWD/result/share/pkgconfig" \
+            nix develop --command env \
+              -u GHOSTTY_SOURCE_DIR \
+              -u GHOSTTY_ZIG_SYSTEM_DIR \
+              cargo check -p libghostty-vt-sys --no-default-features --features pkg-config
+
+      - name: Run libghostty-vt tests under Valgrind
+        if: matrix.name == 'Linux x86_64'
+        run: nix build .#checks.x86_64-linux.ci-valgrind --print-build-logs

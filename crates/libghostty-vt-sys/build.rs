@@ -72,6 +72,7 @@ fn main() {
     let link_mode = LinkMode::current();
 
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
+    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_SIMD");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");
@@ -126,12 +127,14 @@ fn build_vendored(link_mode: LinkMode) {
     let zig_global_cache_dir = out_dir.join("zig-global-cache");
 
     let optimize = zig_optimize_mode();
+    let simd = zig_simd_enabled();
 
     let mut build = Command::new("zig");
     build
         .arg("build")
         .arg("-Demit-lib-vt")
         .arg(format!("-Doptimize={optimize}"))
+        .arg(format!("-Dsimd={simd}"))
         .arg("-Demit-xcframework=false")
         .arg("-Dapp-runtime=none")
         .arg("--prefix")
@@ -313,6 +316,24 @@ fn zig_optimize_mode() -> &'static str {
     match env::var("OPT_LEVEL").as_deref() {
         Ok("s") | Ok("z") => "ReleaseSmall",
         _ => "ReleaseFast",
+    }
+}
+
+/// Decide whether to build Ghostty's SIMD-accelerated code paths.
+///
+/// Ghostty exposes this as `zig build -Dsimd=...`. Valgrind builds should turn
+/// it off so the generated library uses scalar fallbacks instead of pulling in
+/// the C++ highway/simdutf implementation block.
+fn zig_simd_enabled() -> bool {
+    match env::var("LIBGHOSTTY_VT_SYS_SIMD") {
+        Ok(value) => match value.as_str() {
+            "1" | "true" | "True" | "TRUE" => true,
+            "0" | "false" | "False" | "FALSE" => false,
+            other => {
+                panic!("LIBGHOSTTY_VT_SYS_SIMD must be one of true, false, 1, 0 (got '{other}')")
+            }
+        },
+        Err(_) => true,
     }
 }
 

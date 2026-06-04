@@ -67,6 +67,9 @@ Vendored builds derive Zig's optimize mode from Cargo's profile: dev builds use
 `Debug`, size-optimized builds use `ReleaseSmall`, and other release builds use
 `ReleaseFast`. Set `LIBGHOSTTY_VT_SYS_OPTIMIZE` to `Debug`, `ReleaseSafe`,
 `ReleaseFast`, or `ReleaseSmall` to override that choice explicitly.
+Set `LIBGHOSTTY_VT_SYS_SIMD=false` to pass Ghostty's `-Dsimd=false` option and
+build scalar code paths only. The Nix output `.#libghostty-vt-non-simd` uses
+that mode, and the Valgrind CI check combines it with Zig `Debug` builds.
 
 The `pkg-config` path is opt-in. If you enable `libghostty-vt-sys/pkg-config`,
 the build will prefer an installed `libghostty-vt` discovered through
