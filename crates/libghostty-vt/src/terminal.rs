@@ -806,13 +806,13 @@ impl Mode {
 
     /// The numeric value of the mode.
     #[must_use]
-    pub fn value(self) -> u16 {
+    pub const fn value(self) -> u16 {
         (self.0) & 0x7fff
     }
 
     /// The kind of the mode (DEC/ANSI).
     #[must_use]
-    pub fn kind(self) -> ModeKind {
+    pub const fn kind(self) -> ModeKind {
         if (self.0) & Self::ANSI_BIT > 0 {
             ModeKind::Ansi
         } else {
@@ -916,14 +916,18 @@ impl PrimaryDeviceAttributes {
     ///
     /// **Panics** when more than 64 features are given.
     #[must_use]
-    pub fn new<const N: usize>(
+    pub const fn new<const N: usize>(
         conformance_level: ConformanceLevel,
         features: [DeviceAttributeFeature; N],
     ) -> Self {
         assert!(N <= 64);
 
         let mut f = [0u16; 64];
-        f[..N].copy_from_slice(features.map(|f| f.0).as_slice());
+        let mut i = 0;
+        while i < N {
+            f[i] = features[i].0;
+            i += 1;
+        }
 
         Self(ffi::DeviceAttributesPrimary {
             conformance_level: conformance_level.0,
