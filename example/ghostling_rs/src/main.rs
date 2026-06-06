@@ -154,7 +154,7 @@ async fn main() -> Result<()> {
                 // DA1: VT220-level with a few common features.
                 primary: PrimaryDeviceAttributes::new(
                     ConformanceLevel::VT220,
-                    [
+                    &[
                         DeviceAttributeFeature::COLUMNS_132,
                         DeviceAttributeFeature::SELECTIVE_ERASE,
                         DeviceAttributeFeature::ANSI_COLOR,
