@@ -11,7 +11,7 @@ fn main() {
     // `cargo build -p libghostty-vt-sys`, the headers live in:
     //   target/<profile>/build/libghostty-vt-sys-<hash>/out/ghostty-install/include
     //
-    // For convenience, also allow GHOSTTY_SOURCE_DIR/zig-out/include or
+    // For convenience, also allow GHOSTTY_SOURCE_DIR/include or
     // an explicit GHOSTTY_INCLUDE_DIR override.
     let include_dir = if let Ok(dir) = env::var("GHOSTTY_INCLUDE_DIR") {
         PathBuf::from(dir)
@@ -109,6 +109,10 @@ const PREFIXES: &[(&str, &str)] = &[
     ("GhosttyFocusEvent", "GHOSTTY_FOCUS"),
     ("GhosttyResult", "GHOSTTY_"),
     ("GhosttyKittyGraphicsImageData", "GHOSTTY_KITTY_IMAGE_DATA"),
+    (
+        "GhosttySelectionGestureEventOption",
+        "GHOSTTY_SELECTION_GESTURE_EVENT_OPT",
+    ),
 ];
 
 #[derive(Debug)]

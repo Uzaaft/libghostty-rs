@@ -806,13 +806,13 @@ impl Mode {
 
     /// The numeric value of the mode.
     #[must_use]
-    pub fn value(self) -> u16 {
+    pub const fn value(self) -> u16 {
         (self.0) & 0x7fff
     }
 
     /// The kind of the mode (DEC/ANSI).
     #[must_use]
-    pub fn kind(self) -> ModeKind {
+    pub const fn kind(self) -> ModeKind {
         if (self.0) & Self::ANSI_BIT > 0 {
             ModeKind::Ansi
         } else {
@@ -912,23 +912,31 @@ impl PrimaryDeviceAttributes {
     /// Construct primary device attributes from a conformance level
     /// and an array of device attribute features.
     ///
+    /// Prefer defining primary device attributes as a `const` when the feature
+    /// list is statically known. That makes the 64-feature limit fail during
+    /// compilation instead of panicking at runtime.
+    ///
     /// # Panics
     ///
     /// **Panics** when more than 64 features are given.
     #[must_use]
-    pub fn new<const N: usize>(
+    pub const fn new(
         conformance_level: ConformanceLevel,
-        features: [DeviceAttributeFeature; N],
+        features: &[DeviceAttributeFeature],
     ) -> Self {
-        assert!(N <= 64);
+        assert!(features.len() <= 64);
 
         let mut f = [0u16; 64];
-        f[..N].copy_from_slice(features.map(|f| f.0).as_slice());
+        let mut i = 0;
+        while i < features.len() {
+            f[i] = features[i].0;
+            i += 1;
+        }
 
         Self(ffi::DeviceAttributesPrimary {
             conformance_level: conformance_level.0,
             features: f,
-            num_features: N,
+            num_features: features.len(),
         })
     }
 }
@@ -1377,7 +1385,7 @@ mod tests {
                 Some(DeviceAttributes {
                     primary: PrimaryDeviceAttributes::new(
                         ConformanceLevel::VT220,
-                        [DeviceAttributeFeature::ANSI_COLOR],
+                        &[DeviceAttributeFeature::ANSI_COLOR],
                     ),
                     secondary: SecondaryDeviceAttributes {
                         device_type: DeviceType::VT220,
