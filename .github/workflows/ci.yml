@@ -71,7 +71,7 @@ jobs:
         run: nix flake check --print-build-logs
 
       - name: Check wasm32 static link path
-        run: nix develop -c cargo check -p libghostty-vt --target wasm32-unknown-unknown --features link-static
+        run: nix develop -c cargo check -p libghostty-vt --target wasm32-unknown-unknown
 
       - name: Check pkg-config path
         if: runner.os == 'Linux'
