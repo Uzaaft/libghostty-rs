@@ -389,6 +389,8 @@ fn zig_target(target: &str) -> String {
         "aarch64-pc-windows-gnullvm" => "aarch64-windows-gnu",
         "x86_64-pc-windows-msvc" => "x86_64-windows-msvc",
         "aarch64-pc-windows-msvc" => "aarch64-windows-msvc",
+        "aarch64-linux-android" => "aarch64-linux-android",
+        "x86_64-linux-android" => "x86_64-linux-android",
         other => panic!("unsupported Rust target for vendored build: {other}"),
     };
     value.to_owned()
