@@ -689,6 +689,15 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         self.set_optional(ffi::TerminalOption::APC_MAX_BYTES, max.as_ref())?;
         Ok(self)
     }
+
+    /// Enable or disable Glyph Protocol APC handling.
+    ///
+    /// Disabling the protocol makes the terminal ignore Glyph Protocol APC
+    /// sequences and clears the session's glyph glossary.
+    pub fn set_glyph_protocol_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
+        self.set(ffi::TerminalOption::GLYPH_PROTOCOL, &enabled)?;
+        Ok(self)
+    }
 }
 impl Drop for Terminal<'_, '_> {
     fn drop(&mut self) {
@@ -1587,6 +1596,22 @@ mod tests {
                 .cursor_blinking()
                 .expect("cursor blink should be readable")
         );
+    }
+
+    #[test]
+    fn glyph_protocol_enabled_setting_updates() {
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+
+        terminal
+            .set_glyph_protocol_enabled(false)
+            .expect("glyph protocol should disable")
+            .set_glyph_protocol_enabled(true)
+            .expect("glyph protocol should enable");
     }
 
     /// Explicitly relocate the Terminal into distinct storage, then verify the
