@@ -65,14 +65,16 @@ const ROW_GAP: f32 = 12.0;
 
 #[macroquad::main(macroquad_conf)]
 async fn main() -> Result<()> {
-    // Initialize logging with default log level set to info.
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Info)
-        .parse_default_env()
+    // Initialize tracing with default log level set to info.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
         .init();
 
-    // Make libghostty-vt use the same global logger.
-    libghostty_vt::set_logger(Some(Box::new(log::logger())))?;
+    // Make libghostty-vt emit through the same tracing subscriber.
+    libghostty_vt::set_logger(Some(Box::new(libghostty_vt::log::TracingLogger)))?;
 
     let font = load_ttf_font_from_bytes(include_bytes!("../fonts/JetBrainsMono-Medium.ttf"))?;
 
@@ -192,7 +194,7 @@ async fn main() -> Result<()> {
     // etc.
     let mut input = Input::new()?;
 
-    log::info!(
+    tracing::info!(
         "ghostling-rs | simd: {}, optimize: {:?}",
         if build_info::supports_simd()? {
             "enabled"
@@ -201,7 +203,7 @@ async fn main() -> Result<()> {
         },
         build_info::optimize_mode()?,
     );
-    log::info!("Initialized terminal with size {cols}x{rows}");
+    tracing::info!("Initialized terminal with size {cols}x{rows}");
 
     // Each frame: handle resize → read pty → process input → render.
     loop {
@@ -243,7 +245,7 @@ async fn main() -> Result<()> {
                     }
                     Err(PtyError::OtherError(e)) => {
                         // Other error — the child's side of the pty is closed.
-                        log::error!("failed to read from pty: {e}");
+                        tracing::error!("failed to read from pty: {e}");
                         child = Child::Exited(pid);
                     }
                 }
@@ -262,7 +264,7 @@ async fn main() -> Result<()> {
                 order_quit();
             }
             Child::Reaped(status) => {
-                log::info!("Child process exited: {status:?}");
+                tracing::info!("Child process exited: {status:?}");
                 order_quit();
             }
         }
