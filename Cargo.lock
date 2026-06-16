@@ -254,7 +254,7 @@ dependencies = [
 
 [[package]]
 name = "ghostling_rs"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "env_logger",
  "libghostty-vt",
@@ -277,7 +277,7 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "grid_ref_tracked_rs"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "libghostty-vt",
 ]
@@ -371,7 +371,7 @@ checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
 
 [[package]]
 name = "libghostty-vt"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "allocator-api2 0.4.0",
  "bitflags 2.11.1",
@@ -383,7 +383,7 @@ dependencies = [
 
 [[package]]
 name = "libghostty-vt-sys"
-version = "0.1.1"
+version = "0.2.0"
 dependencies = [
  "bindgen",
  "heck",

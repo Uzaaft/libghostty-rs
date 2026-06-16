@@ -83,7 +83,7 @@
         commonArgs =
           {
             pname = "libghostty-rs";
-            version = "0.1.1";
+            version = "0.2.0";
             inherit src;
             strictDeps = true;
             GHOSTTY_SOURCE_DIR = "${ghosttySrc}";
