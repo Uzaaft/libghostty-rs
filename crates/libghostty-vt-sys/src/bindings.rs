@@ -2006,6 +2006,20 @@ pub mod TerminalScreen {
     #[doc = " The alternate screen."]
     pub const MAX_VALUE: Type = 2147483647;
 }
+pub mod TerminalCursorStyle {
+    #[doc = " Visual style of the terminal cursor.\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Bar cursor (DECSCUSR 5, 6)."]
+    pub const BAR: Type = 0;
+    #[doc = " Block cursor (DECSCUSR 1, 2)."]
+    pub const BLOCK: Type = 1;
+    #[doc = " Underline cursor (DECSCUSR 3, 4)."]
+    pub const UNDERLINE: Type = 2;
+    #[doc = " Hollow block cursor."]
+    pub const BLOCK_HOLLOW: Type = 3;
+    #[doc = " Hollow block cursor."]
+    pub const MAX_VALUE: Type = 2147483647;
+}
 #[doc = " Scrollbar state for the terminal viewport.\n\n Represents the scrollable area dimensions needed to render a scrollbar.\n"]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
@@ -2062,6 +2076,10 @@ pub type TerminalSizeFn = ::std::option::Option<
 >;
 #[doc = " Callback function type for title_changed.\n\n Called when the terminal title changes via escape sequences\n (e.g. OSC 0 or OSC 2). The new title can be queried from the\n terminal after the callback returns.\n\n"]
 pub type TerminalTitleChangedFn = ::std::option::Option<
+    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void),
+>;
+#[doc = " Callback function type for pwd_changed.\n\n Called when the terminal pwd (current working directory) changes via\n escape sequences: OSC 7 (file:// URI), OSC 9 (ConEmu CurrentDir), or\n OSC 1337 CurrentDir (iTerm2). Use ghostty_terminal_get() with\n GHOSTTY_TERMINAL_DATA_PWD inside the callback to read the new value.\n\n The terminal stores whatever bytes the shell emitted, without parsing.\n That means for OSC 7 the value is the raw URI (typically file://...);\n for OSC 9/OSC 1337 it is typically a bare path. The embedder is\n responsible for decoding any URI scheme or host if it cares about them.\n\n The callback also fires when the shell clears the pwd (e.g. an empty\n OSC 7). In that case GHOSTTY_TERMINAL_DATA_PWD returns a zero-length\n string.\n\n"]
+pub type TerminalPwdChangedFn = ::std::option::Option<
     unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void),
 >;
 #[doc = " Callback function type for write_pty.\n\n Called when the terminal needs to write data back to the pty, for\n example in response to a device status report or mode query. The\n data is only valid for the duration of the call; callers must copy\n it if it needs to persist.\n\n"]
@@ -2124,7 +2142,15 @@ pub mod TerminalOption {
     pub const APC_MAX_BYTES_KITTY: Type = 20;
     #[doc = " Set the active screen selection.\n\n The value must point to a GhosttySelection whose grid references are\n valid for this terminal's active screen at the time of the call. The\n terminal copies the selection immediately and converts it to\n terminal-owned tracked state, so the GhosttySelection struct and its\n untracked grid references do not need to outlive this call.\n\n Passing NULL clears the active screen selection.\n\n Input type: GhosttySelection*"]
     pub const SELECTION: Type = 21;
-    #[doc = " Set the active screen selection.\n\n The value must point to a GhosttySelection whose grid references are\n valid for this terminal's active screen at the time of the call. The\n terminal copies the selection immediately and converts it to\n terminal-owned tracked state, so the GhosttySelection struct and its\n untracked grid references do not need to outlive this call.\n\n Passing NULL clears the active screen selection.\n\n Input type: GhosttySelection*"]
+    #[doc = " Set the default cursor style used by DECSCUSR reset (CSI 0 q).\n\n A NULL value pointer resets to the built-in default block cursor.\n\n Input type: GhosttyTerminalCursorStyle*"]
+    pub const DEFAULT_CURSOR_STYLE: Type = 22;
+    #[doc = " Set whether the default cursor should blink when reset by DECSCUSR\n (CSI 0 q).\n\n A NULL value pointer resets to the built-in default of not blinking.\n\n Input type: bool*"]
+    pub const DEFAULT_CURSOR_BLINK: Type = 23;
+    #[doc = " Enable or disable Glyph Protocol APC handling.\n\n When disabled, Glyph Protocol APC sequences are ignored and no\n support/query/register/clear responses are emitted. Disabling also clears\n the terminal session's glyph glossary. A NULL value pointer is a no-op.\n\n Input type: bool*"]
+    pub const GLYPH_PROTOCOL: Type = 24;
+    #[doc = " Callback invoked when the terminal pwd changes via escape\n sequences (OSC 7, OSC 9, or OSC 1337 CurrentDir). Set to NULL\n to ignore pwd change events.\n\n Input type: GhosttyTerminalPwdChangedFn"]
+    pub const PWD_CHANGED: Type = 25;
+    #[doc = " Callback invoked when the terminal pwd changes via escape\n sequences (OSC 7, OSC 9, or OSC 1337 CurrentDir). Set to NULL\n to ignore pwd change events.\n\n Input type: GhosttyTerminalPwdChangedFn"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod TerminalData {

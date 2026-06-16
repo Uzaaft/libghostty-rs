@@ -255,6 +255,21 @@ impl From<Options> for ffi::TerminalOptions {
     }
 }
 
+/// Default visual style used when the cursor style is reset.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum CursorStyle {
+    /// Bar cursor (DECSCUSR 5, 6).
+    Bar = ffi::TerminalCursorStyle::BAR,
+    /// Block cursor (DECSCUSR 1, 2).
+    Block = ffi::TerminalCursorStyle::BLOCK,
+    /// Underline cursor (DECSCUSR 3, 4).
+    Underline = ffi::TerminalCursorStyle::UNDERLINE,
+    /// Hollow block cursor.
+    BlockHollow = ffi::TerminalCursorStyle::BLOCK_HOLLOW,
+}
+
 impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Create a new terminal instance.
     pub fn new(opts: Options) -> Result<Self> {
@@ -631,6 +646,22 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 
+    /// Set the default cursor style used by DECSCUSR reset (CSI 0 q).
+    ///
+    /// Passing `None` resets to libghostty's built-in block cursor default.
+    pub fn set_default_cursor_style(&mut self, v: Option<CursorStyle>) -> Result<&mut Self> {
+        self.set_optional(Opt::DEFAULT_CURSOR_STYLE, v.as_ref())?;
+        Ok(self)
+    }
+
+    /// Set whether the default cursor blinks when reset by DECSCUSR (CSI 0 q).
+    ///
+    /// Passing `None` resets to libghostty's built-in non-blinking default.
+    pub fn set_default_cursor_blink(&mut self, v: Option<bool>) -> Result<&mut Self> {
+        self.set_optional(Opt::DEFAULT_CURSOR_BLINK, v.as_ref())?;
+        Ok(self)
+    }
+
     /// The current 256-color palette.
     pub fn color_palette(&self) -> Result<[RgbColor; 256]> {
         self.get::<[ffi::ColorRgb; 256]>(Data::COLOR_PALETTE)
@@ -656,6 +687,15 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// A `None` value removes all overrides, reverting to the built-in defaults.
     pub fn set_apc_max_bytes(&mut self, max: Option<usize>) -> Result<&mut Self> {
         self.set_optional(ffi::TerminalOption::APC_MAX_BYTES, max.as_ref())?;
+        Ok(self)
+    }
+
+    /// Enable or disable Glyph Protocol APC handling.
+    ///
+    /// Disabling the protocol makes the terminal ignore Glyph Protocol APC
+    /// sequences and clears the session's glyph glossary.
+    pub fn set_glyph_protocol_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
+        self.set(ffi::TerminalOption::GLYPH_PROTOCOL, &enabled)?;
         Ok(self)
     }
 }
@@ -1306,6 +1346,20 @@ handlers! {
         func(&term);
     }
 
+    /// Call the given function when the terminal current working directory
+    /// changes via escape sequences (e.g. OSC 7, OSC 9, or OSC 1337).
+    ///
+    /// The new working directory can be queried from the terminal after
+    /// the callback returns.
+    pub fn on_pwd_changed(
+        &mut self,
+        tag = PWD_CHANGED,
+        from = GhosttyTerminalPwdChangedFn(),
+        to = PwdChangedFn(),
+    ) |term, func| {
+        func(&term);
+    }
+
     /// Call the given function in response to XTWINOPS size queries
     /// (CSI 14/16/18 t).
     pub fn on_size(
@@ -1367,6 +1421,8 @@ handlers! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RenderState;
+    use crate::render::CursorVisualStyle;
     use std::cell::{Cell, RefCell};
     use std::mem::ManuallyDrop;
 
@@ -1475,6 +1531,87 @@ mod tests {
         terminal.vt_write(b"\x1b]2;Second Title\x1b\\");
         assert_eq!(callback_count.get(), 2);
         assert_eq!(*captured_title.borrow(), "Second Title");
+    }
+
+    /// Send an OSC 7 current-directory sequence, then verify `term.pwd()`
+    /// returns the correct value inside the `on_pwd_changed` callback.
+    #[test]
+    fn pwd_changed_callback_returns_correct_pwd() {
+        let captured_pwd: RefCell<String> = RefCell::new(String::new());
+        let callback_count: Cell<usize> = Cell::new(0);
+
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+
+        terminal
+            .on_pwd_changed(|term| {
+                callback_count.set(callback_count.get() + 1);
+                let pwd = term.pwd().expect("pwd() should succeed inside callback");
+                *captured_pwd.borrow_mut() = pwd.to_owned();
+            })
+            .expect("callback should register");
+
+        terminal.vt_write(b"\x1b]7;file://localhost/tmp/project\x1b\\");
+        assert_eq!(callback_count.get(), 1);
+        assert_eq!(*captured_pwd.borrow(), "file://localhost/tmp/project");
+
+        terminal.vt_write(b"\x1b]7;file://localhost/tmp/other\x1b\\");
+        assert_eq!(callback_count.get(), 2);
+        assert_eq!(*captured_pwd.borrow(), "file://localhost/tmp/other");
+    }
+
+    #[test]
+    fn default_cursor_reset_uses_configured_style_and_blink() {
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+        let mut render_state = RenderState::new().expect("render state should initialize");
+
+        terminal
+            .set_default_cursor_style(Some(CursorStyle::Underline))
+            .expect("default cursor style should update")
+            .set_default_cursor_blink(Some(true))
+            .expect("default cursor blink should update");
+
+        terminal.vt_write(b"\x1b[0 q");
+        let snapshot = render_state
+            .update(&terminal)
+            .expect("render state should update");
+
+        assert_eq!(
+            snapshot
+                .cursor_visual_style()
+                .expect("cursor style should be readable"),
+            CursorVisualStyle::Underline
+        );
+        assert!(
+            snapshot
+                .cursor_blinking()
+                .expect("cursor blink should be readable")
+        );
+    }
+
+    #[test]
+    fn glyph_protocol_enabled_setting_updates() {
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+
+        terminal
+            .set_glyph_protocol_enabled(false)
+            .expect("glyph protocol should disable")
+            .set_glyph_protocol_enabled(true)
+            .expect("glyph protocol should enable");
     }
 
     /// Explicitly relocate the Terminal into distinct storage, then verify the
