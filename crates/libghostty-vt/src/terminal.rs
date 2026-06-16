@@ -1306,6 +1306,20 @@ handlers! {
         func(&term);
     }
 
+    /// Call the given function when the terminal current working directory
+    /// changes via escape sequences (e.g. OSC 7, OSC 9, or OSC 1337).
+    ///
+    /// The new working directory can be queried from the terminal after
+    /// the callback returns.
+    pub fn on_pwd_changed(
+        &mut self,
+        tag = PWD_CHANGED,
+        from = GhosttyTerminalPwdChangedFn(),
+        to = PwdChangedFn(),
+    ) |term, func| {
+        func(&term);
+    }
+
     /// Call the given function in response to XTWINOPS size queries
     /// (CSI 14/16/18 t).
     pub fn on_size(
@@ -1475,6 +1489,37 @@ mod tests {
         terminal.vt_write(b"\x1b]2;Second Title\x1b\\");
         assert_eq!(callback_count.get(), 2);
         assert_eq!(*captured_title.borrow(), "Second Title");
+    }
+
+    /// Send an OSC 7 current-directory sequence, then verify `term.pwd()`
+    /// returns the correct value inside the `on_pwd_changed` callback.
+    #[test]
+    fn pwd_changed_callback_returns_correct_pwd() {
+        let captured_pwd: RefCell<String> = RefCell::new(String::new());
+        let callback_count: Cell<usize> = Cell::new(0);
+
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+
+        terminal
+            .on_pwd_changed(|term| {
+                callback_count.set(callback_count.get() + 1);
+                let pwd = term.pwd().expect("pwd() should succeed inside callback");
+                *captured_pwd.borrow_mut() = pwd.to_owned();
+            })
+            .expect("callback should register");
+
+        terminal.vt_write(b"\x1b]7;file://localhost/tmp/project\x1b\\");
+        assert_eq!(callback_count.get(), 1);
+        assert_eq!(*captured_pwd.borrow(), "file://localhost/tmp/project");
+
+        terminal.vt_write(b"\x1b]7;file://localhost/tmp/other\x1b\\");
+        assert_eq!(callback_count.get(), 2);
+        assert_eq!(*captured_pwd.borrow(), "file://localhost/tmp/other");
     }
 
     /// Explicitly relocate the Terminal into distinct storage, then verify the
