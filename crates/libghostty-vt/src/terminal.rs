@@ -255,6 +255,21 @@ impl From<Options> for ffi::TerminalOptions {
     }
 }
 
+/// Default visual style used when the cursor style is reset.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum CursorStyle {
+    /// Bar cursor (DECSCUSR 5, 6).
+    Bar = ffi::TerminalCursorStyle::BAR,
+    /// Block cursor (DECSCUSR 1, 2).
+    Block = ffi::TerminalCursorStyle::BLOCK,
+    /// Underline cursor (DECSCUSR 3, 4).
+    Underline = ffi::TerminalCursorStyle::UNDERLINE,
+    /// Hollow block cursor.
+    BlockHollow = ffi::TerminalCursorStyle::BLOCK_HOLLOW,
+}
+
 impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Create a new terminal instance.
     pub fn new(opts: Options) -> Result<Self> {
@@ -628,6 +643,22 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Set the default cursor color.
     pub fn set_default_cursor_color(&mut self, v: Option<RgbColor>) -> Result<&mut Self> {
         self.set_optional(Opt::COLOR_CURSOR, v.map(ffi::ColorRgb::from).as_ref())?;
+        Ok(self)
+    }
+
+    /// Set the default cursor style used by DECSCUSR reset (CSI 0 q).
+    ///
+    /// Passing `None` resets to libghostty's built-in block cursor default.
+    pub fn set_default_cursor_style(&mut self, v: Option<CursorStyle>) -> Result<&mut Self> {
+        self.set_optional(Opt::DEFAULT_CURSOR_STYLE, v.as_ref())?;
+        Ok(self)
+    }
+
+    /// Set whether the default cursor blinks when reset by DECSCUSR (CSI 0 q).
+    ///
+    /// Passing `None` resets to libghostty's built-in non-blinking default.
+    pub fn set_default_cursor_blink(&mut self, v: Option<bool>) -> Result<&mut Self> {
+        self.set_optional(Opt::DEFAULT_CURSOR_BLINK, v.as_ref())?;
         Ok(self)
     }
 
@@ -1381,6 +1412,8 @@ handlers! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RenderState;
+    use crate::render::CursorVisualStyle;
     use std::cell::{Cell, RefCell};
     use std::mem::ManuallyDrop;
 
@@ -1520,6 +1553,40 @@ mod tests {
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/other\x1b\\");
         assert_eq!(callback_count.get(), 2);
         assert_eq!(*captured_pwd.borrow(), "file://localhost/tmp/other");
+    }
+
+    #[test]
+    fn default_cursor_reset_uses_configured_style_and_blink() {
+        let mut terminal = Terminal::new(Options {
+            cols: 80,
+            rows: 24,
+            max_scrollback: 0,
+        })
+        .expect("terminal should initialize");
+        let mut render_state = RenderState::new().expect("render state should initialize");
+
+        terminal
+            .set_default_cursor_style(Some(CursorStyle::Underline))
+            .expect("default cursor style should update")
+            .set_default_cursor_blink(Some(true))
+            .expect("default cursor blink should update");
+
+        terminal.vt_write(b"\x1b[0 q");
+        let snapshot = render_state
+            .update(&terminal)
+            .expect("render state should update");
+
+        assert_eq!(
+            snapshot
+                .cursor_visual_style()
+                .expect("cursor style should be readable"),
+            CursorVisualStyle::Underline
+        );
+        assert!(
+            snapshot
+                .cursor_blinking()
+                .expect("cursor blink should be readable")
+        );
     }
 
     /// Explicitly relocate the Terminal into distinct storage, then verify the
