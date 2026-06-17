@@ -5,6 +5,10 @@ members = [
   "example/grid_ref_tracked_rs",
   "example/ghostling_rs",
 ]
+default-members = [
+  "crates/libghostty-vt",
+  "crates/libghostty-vt-sys",
+]
 resolver = "2"
 
 [workspace.package]
