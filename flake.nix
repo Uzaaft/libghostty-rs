@@ -35,10 +35,12 @@
 
         toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
           extensions = rustExtensions;
-          targets = pkgs.lib.optionals pkgs.stdenv.isLinux [
-            "x86_64-unknown-linux-gnu"
-            "x86_64-unknown-linux-musl"
-          ];
+          targets =
+            ["wasm32-unknown-unknown"]
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
+              "x86_64-unknown-linux-gnu"
+              "x86_64-unknown-linux-musl"
+            ];
         };
 
         craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
@@ -152,11 +154,12 @@
             export GHOSTTY_ZIG_SYSTEM_DIR=${ghosttyZigDeps}
             export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-            # Unset Nix Darwin SDK env vars and remove the xcbuild
-            # xcrun wrapper so Zig's SDK detection uses the real
-            # system xcrun/xcode-select.
-            unset SDKROOT
-            unset DEVELOPER_DIR
+            # Locally, unset the Nix apple-sdk vars so Zig uses the real
+            # system Xcode SDK via xcrun. In CI, use the Nix apple-sdk.
+            if [ -z "''${CI:-}" ]; then
+              unset SDKROOT
+              unset DEVELOPER_DIR
+            fi
             export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v xcbuild | tr '\n' ':')
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
             # Make Ghostling able to find libGL on Linux.
