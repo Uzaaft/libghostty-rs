@@ -39,19 +39,13 @@ jobs:
         if: runner.os == 'macOS'
         with:
           cache: |
+            nix
             xcode
 
       - name: Install Nix
         uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
-        if: runner.os == 'Linux'
         with:
           nix_path: nixpkgs=channel:nixos-unstable
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-        if: runner.os == 'macOS'
-        with:
-          determinate: true
 
       - name: Use Ghostty binary cache
         uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
