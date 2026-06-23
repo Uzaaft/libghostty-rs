@@ -6,8 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-libghostty-vt = { workspace = true, features = ["log"] }
-log = "0.4.29"
-env_logger = "0.11.10"
+libghostty-vt = { workspace = true, features = ["tracing"] }
 macroquad = "0.4.14"
 nix = { version = "0.31.2", features = ["term", "fs", "signal", "process", "user", "ioctl"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
