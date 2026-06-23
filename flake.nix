@@ -35,17 +35,22 @@
         };
 
         rustVersion = "1.90.0";
-        rustExtensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
-
-        toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
-          extensions = rustExtensions;
+        buildToolchain = pkgs.rust-bin.stable.${rustVersion}.minimal.override {
           targets = pkgs.lib.optionals pkgs.stdenv.isLinux [
             "x86_64-unknown-linux-gnu"
             "x86_64-unknown-linux-musl"
           ];
         };
 
-        craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
+        devToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
+          extensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
+          targets = pkgs.lib.optionals pkgs.stdenv.isLinux [
+            "x86_64-unknown-linux-gnu"
+            "x86_64-unknown-linux-musl"
+          ];
+        };
+
+        craneLib = (crane.mkLib pkgs).overrideToolchain buildToolchain;
         unfilteredRoot = ./.;
 
         zigPkg = zig.packages.${system}."0.15.2";
@@ -114,7 +119,7 @@
 
         devShells.default = craneLib.devShell {
           packages = [
-            toolchain
+            devToolchain
             zigPkg
             pkgs.clang
             pkgs.libclang
