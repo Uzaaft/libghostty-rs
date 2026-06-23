@@ -1,14 +1,5 @@
 [workspace]
-members = [
-  "crates/libghostty-vt",
-  "crates/libghostty-vt-sys",
-  "example/grid_ref_tracked_rs",
-  "example/ghostling_rs",
-]
-default-members = [
-  "crates/libghostty-vt",
-  "crates/libghostty-vt-sys",
-]
+members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
