@@ -13,6 +13,9 @@
       url = "github:mitchellh/zig-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    ghostty = {
+      url = "github:ghostty-org/ghostty/fdbf9ff3a31d7531b691cb49c98fc465a1a503a0";
+    };
   };
 
   outputs = {
@@ -21,6 +24,7 @@
     crane,
     rust-overlay,
     zig,
+    ghostty,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (
@@ -45,25 +49,7 @@
         unfilteredRoot = ./.;
 
         zigPkg = zig.packages.${system}."0.15.2";
-        ghosttyCommit = "fdbf9ff3a31d7531b691cb49c98fc465a1a503a0";
-
-        # Keep this in sync with GHOSTTY_COMMIT in
-        # crates/libghostty-vt-sys/build.rs. Nix must provide Ghostty sources
-        # up front because sandboxed builds cannot fetch from git.
-        ghosttySrc = pkgs.fetchFromGitHub {
-          owner = "ghostty-org";
-          repo = "ghostty";
-          rev = ghosttyCommit;
-          hash = "sha256-TW2dtJ1wZGtdyqQ4YAsfjbTLURhMISIMNK0c0aIy1xM=";
-        };
-
-        # Ghostty ships a zon2nix-generated link farm for its Zig package
-        # dependencies. build.rs passes this through --system so Zig never
-        # downloads packages during the Cargo build script.
-        ghosttyZigDeps = pkgs.callPackage (ghosttySrc + "/build.zig.zon.nix") {
-          name = "ghostty-zig-deps-${builtins.substring 0 7 ghosttyCommit}";
-          zig_0_15 = zigPkg;
-        };
+        ghosttyLib = ghostty.packages.${system}.libghostty-vt;
 
         src = pkgs.lib.fileset.toSource {
           root = unfilteredRoot;
@@ -86,8 +72,7 @@
             version = "0.2.0";
             inherit src;
             strictDeps = true;
-            GHOSTTY_SOURCE_DIR = "${ghosttySrc}";
-            GHOSTTY_ZIG_SYSTEM_DIR = "${ghosttyZigDeps}";
+            cargoExtraArgs = "--locked --features libghostty-vt-sys/pkg-config";
 
             nativeBuildInputs = [
               pkgs.pkg-config
@@ -100,6 +85,7 @@
 
             buildInputs =
               [
+                ghosttyLib
                 pkgs.libclang
                 pkgs.openssl
               ]
@@ -148,8 +134,6 @@
           ];
 
           shellHook = ''
-            export GHOSTTY_SOURCE_DIR=${ghosttySrc}
-            export GHOSTTY_ZIG_SYSTEM_DIR=${ghosttyZigDeps}
             export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             # Unset Nix Darwin SDK env vars and remove the xcbuild
