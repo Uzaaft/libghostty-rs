@@ -31,8 +31,8 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1.4.3
         if: runner.os == 'Linux'
         with:
-          path: |
-            /nix
+          cache: |
+            nix
 
       - name: Setup Namespace cache
         uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1.4.3
@@ -52,6 +52,12 @@ jobs:
         if: runner.os == 'macOS'
         with:
           determinate: true
+
+      - name: Use Ghostty binary cache
+        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with:
+          name: ghostty
+          skipPush: true
 
       - name: Build package derivation
         run: nix build .#default --print-build-logs
