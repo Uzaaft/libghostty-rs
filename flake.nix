@@ -114,17 +114,90 @@
           };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        nonSimdCargoArtifacts = craneLib.buildDepsOnly (
+          commonArgs
+          // {
+            pname = "libghostty-rs-non-simd-deps";
+            LIBGHOSTTY_VT_SYS_SIMD = "false";
+          }
+        );
+        ciValgrindCargoArtifacts = craneLib.buildDepsOnly (
+          commonArgs
+          // {
+            pname = "libghostty-rs-ci-valgrind-deps";
+            cargoExtraArgs = "--locked -p libghostty-vt";
+            cargoTestExtraArgs = "--no-run";
+            CARGO_PROFILE = "";
+
+            # The Valgrind check must not inherit ReleaseFast Zig artifacts from
+            # the normal package build. Debug keeps both Rust and Zig codegen in
+            # Valgrind's supported instruction set and gives better reports.
+            LIBGHOSTTY_VT_SYS_OPTIMIZE = "Debug";
+            LIBGHOSTTY_VT_SYS_SIMD = "false";
+          }
+        );
 
         application = craneLib.buildPackage (
           commonArgs
           // {
             inherit cargoArtifacts;
+            postInstall = ''
+              ghostty_install=$(find target -path '*/out/ghostty-install' -type d | head -1)
+              if [ -z "$ghostty_install" ]; then
+                echo "expected Cargo build script to install libghostty-vt into OUT_DIR" >&2
+                exit 1
+              fi
+              ghostty_install=$(realpath "$ghostty_install")
+
+              cp -R "$ghostty_install"/. "$out"/
+              substituteInPlace "$out"/share/pkgconfig/*.pc \
+                --replace-fail "prefix=$ghostty_install" "prefix=$out"
+            '';
+          }
+        );
+
+        libghosttyVtNonSimd = craneLib.buildPackage (
+          commonArgs
+          // {
+            cargoArtifacts = nonSimdCargoArtifacts;
+            pname = "libghostty-vt-non-simd";
+            LIBGHOSTTY_VT_SYS_SIMD = "false";
+          }
+        );
+
+        ciValgrind = craneLib.buildPackage (
+          commonArgs
+          // {
+            cargoArtifacts = ciValgrindCargoArtifacts;
+            pname = "libghostty-rs-ci-valgrind";
+            cargoBuildCommand = "";
+            cargoTestCommand = "cargo valgrind test";
+            cargoExtraArgs = "--locked -p libghostty-vt";
+            cargoTestExtraArgs = "-- --test-threads=1";
+            CARGO_PROFILE = "";
+            LIBGHOSTTY_VT_SYS_OPTIMIZE = "Debug";
+            LIBGHOSTTY_VT_SYS_SIMD = "false";
+            nativeBuildInputs = commonArgs.nativeBuildInputs ++ [
+              pkgs.cargo-valgrind
+              pkgs.valgrind
+            ];
+
+            installPhaseCommand = "mkdir -p $out";
           }
         );
       in {
-        packages.default = application;
+        packages = {
+          default = application;
+          libghostty-vt-non-simd = libghosttyVtNonSimd;
+        };
 
-        checks.default = application;
+        checks =
+          {
+            default = application;
+          }
+          // pkgs.lib.optionalAttrs (system == "x86_64-linux") {
+            ci-valgrind = ciValgrind;
+          };
 
         devShells.default = craneLib.devShell {
           packages = [
@@ -137,6 +210,9 @@
             pkgs.cmake
             pkgs.ninja
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
+            # Valgrind is Linux-only here. Keep it in the development shell so
+            # CI and local Linux users exercise the same memory-checking path.
+            pkgs.valgrind
             pkgs.libx11
             pkgs.libxcursor
             pkgs.libxrandr
@@ -145,6 +221,8 @@
             pkgs.libGL
             pkgs.libxkbcommon
             pkgs.wayland
+          ] ++ pkgs.lib.optionals (system == "x86_64-linux") [
+            pkgs.cargo-valgrind
           ];
 
           shellHook = ''
