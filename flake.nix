@@ -42,6 +42,10 @@
         rustVersion = "1.90.0";
         buildToolchain = pkgs.rust-bin.stable.${rustVersion}.minimal;
 
+        checkToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
+          extensions = ["clippy" "rustfmt"];
+        };
+
         devToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
           extensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
           targets = pkgs.lib.optionals pkgs.stdenv.isLinux [
@@ -51,6 +55,7 @@
         };
 
         craneLib = (crane.mkLib pkgs).overrideToolchain buildToolchain;
+        craneCheckLib = (crane.mkLib pkgs).overrideToolchain checkToolchain;
         unfilteredRoot = ./.;
 
         zigPkg = zig.packages.${system}."0.15.2";
@@ -114,7 +119,49 @@
       in {
         packages.default = application;
 
-        checks.default = application;
+        checks = {
+          default = application;
+
+          cargo-check = craneLib.mkCargoDerivation (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              pnameSuffix = "-check";
+              buildPhaseCargoCommand = "cargoWithProfile check ${commonArgs.cargoExtraArgs} --workspace --all-targets";
+            }
+          );
+
+          cargo-clippy = craneCheckLib.cargoClippy (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--workspace --all-targets";
+            }
+          );
+
+          cargo-doc = craneCheckLib.cargoDoc (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoDocExtraArgs = "--workspace --no-deps";
+              RUSTDOCFLAGS = "-D warnings";
+            }
+          );
+
+          cargo-fmt = craneCheckLib.cargoFmt {
+            pname = "libghostty-rs";
+            version = "0.2.0";
+            inherit src;
+          };
+
+          cargo-test = craneLib.cargoTest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoTestExtraArgs = "--workspace --all-targets";
+            }
+          );
+        };
 
         devShells.default = craneLib.devShell {
           packages = [
