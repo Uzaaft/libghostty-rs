@@ -40,7 +40,6 @@ jobs:
         if: runner.os == 'macOS'
         with:
           cache: |
-            nix
             xcode
 
       - name: Install Nix
