@@ -24,6 +24,7 @@ jobs:
             runner: namespace-profile-linux-aarch64-sm
           - name: Linux x86_64
             runner: namespace-profile-linux-x86-sm
+            flake_check: true
     steps:
       - uses: actions/checkout@v4
 
@@ -57,4 +58,5 @@ jobs:
         run: nix build .#default --print-build-logs
 
       - name: Run flake checks
+        if: matrix.flake_check
         run: nix flake check --print-build-logs

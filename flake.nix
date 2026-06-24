@@ -40,12 +40,7 @@
         };
 
         rustVersion = "1.90.0";
-        buildToolchain = pkgs.rust-bin.stable.${rustVersion}.minimal.override {
-          targets = pkgs.lib.optionals pkgs.stdenv.isLinux [
-            "x86_64-unknown-linux-gnu"
-            "x86_64-unknown-linux-musl"
-          ];
-        };
+        buildToolchain = pkgs.rust-bin.stable.${rustVersion}.minimal;
 
         devToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
           extensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
@@ -86,7 +81,6 @@
 
             nativeBuildInputs = [
               pkgs.pkg-config
-              zigPkg
               pkgs.clang
             ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
               pkgs.cctools
