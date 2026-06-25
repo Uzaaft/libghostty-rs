@@ -1,6 +1,11 @@
 {
   description = "Rust bindings and safe API for libghostty";
 
+  nixConfig = {
+    extra-substituters = ["https://ghostty.cachix.org"];
+    extra-trusted-public-keys = ["ghostty.cachix.org-1:QB389yTa6gTyneehvqG58y0WnHjQOqgnA+wBnpWWxns="];
+  };
+
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/release-25.11";
     flake-utils.url = "github:numtide/flake-utils";
@@ -13,6 +18,9 @@
       url = "github:mitchellh/zig-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    ghostty = {
+      url = "github:ghostty-org/ghostty/fdbf9ff3a31d7531b691cb49c98fc465a1a503a0";
+    };
   };
 
   outputs = {
@@ -21,6 +29,7 @@
     crane,
     rust-overlay,
     zig,
+    ghostty,
     ...
   }:
     flake-utils.lib.eachDefaultSystem (
@@ -31,39 +40,26 @@
         };
 
         rustVersion = "1.90.0";
-        rustExtensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
+        buildToolchain = pkgs.rust-bin.stable.${rustVersion}.minimal;
 
-        toolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
-          extensions = rustExtensions;
+        checkToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
+          extensions = ["clippy" "rustfmt"];
+        };
+
+        devToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
+          extensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
           targets = pkgs.lib.optionals pkgs.stdenv.isLinux [
             "x86_64-unknown-linux-gnu"
             "x86_64-unknown-linux-musl"
           ];
         };
 
-        craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
+        craneLib = (crane.mkLib pkgs).overrideToolchain buildToolchain;
+        craneCheckLib = (crane.mkLib pkgs).overrideToolchain checkToolchain;
         unfilteredRoot = ./.;
 
         zigPkg = zig.packages.${system}."0.15.2";
-        ghosttyCommit = "fdbf9ff3a31d7531b691cb49c98fc465a1a503a0";
-
-        # Keep this in sync with GHOSTTY_COMMIT in
-        # crates/libghostty-vt-sys/build.rs. Nix must provide Ghostty sources
-        # up front because sandboxed builds cannot fetch from git.
-        ghosttySrc = pkgs.fetchFromGitHub {
-          owner = "ghostty-org";
-          repo = "ghostty";
-          rev = ghosttyCommit;
-          hash = "sha256-TW2dtJ1wZGtdyqQ4YAsfjbTLURhMISIMNK0c0aIy1xM=";
-        };
-
-        # Ghostty ships a zon2nix-generated link farm for its Zig package
-        # dependencies. build.rs passes this through --system so Zig never
-        # downloads packages during the Cargo build script.
-        ghosttyZigDeps = pkgs.callPackage (ghosttySrc + "/build.zig.zon.nix") {
-          name = "ghostty-zig-deps-${builtins.substring 0 7 ghosttyCommit}";
-          zig_0_15 = zigPkg;
-        };
+        ghosttyLib = ghostty.packages.${system}.libghostty-vt;
 
         src = pkgs.lib.fileset.toSource {
           root = unfilteredRoot;
@@ -86,12 +82,10 @@
             version = "0.2.0";
             inherit src;
             strictDeps = true;
-            GHOSTTY_SOURCE_DIR = "${ghosttySrc}";
-            GHOSTTY_ZIG_SYSTEM_DIR = "${ghosttyZigDeps}";
+            cargoExtraArgs = "--locked --features libghostty-vt-sys/pkg-config";
 
             nativeBuildInputs = [
               pkgs.pkg-config
-              zigPkg
               pkgs.clang
             ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
               pkgs.cctools
@@ -100,6 +94,7 @@
 
             buildInputs =
               [
+                ghosttyLib
                 pkgs.libclang
                 pkgs.openssl
               ]
@@ -124,11 +119,53 @@
       in {
         packages.default = application;
 
-        checks.default = application;
+        checks = {
+          default = application;
+
+          cargo-check = craneLib.mkCargoDerivation (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              pnameSuffix = "-check";
+              buildPhaseCargoCommand = "cargoWithProfile check ${commonArgs.cargoExtraArgs} --workspace --all-targets";
+            }
+          );
+
+          cargo-clippy = craneCheckLib.cargoClippy (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--workspace --all-targets";
+            }
+          );
+
+          cargo-doc = craneCheckLib.cargoDoc (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoDocExtraArgs = "--workspace --no-deps";
+              RUSTDOCFLAGS = "-D warnings";
+            }
+          );
+
+          cargo-fmt = craneCheckLib.cargoFmt {
+            pname = "libghostty-rs";
+            version = "0.2.0";
+            inherit src;
+          };
+
+          cargo-test = craneLib.cargoTest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoTestExtraArgs = "--workspace --all-targets";
+            }
+          );
+        };
 
         devShells.default = craneLib.devShell {
           packages = [
-            toolchain
+            devToolchain
             zigPkg
             pkgs.clang
             pkgs.libclang
@@ -148,8 +185,6 @@
           ];
 
           shellHook = ''
-            export GHOSTTY_SOURCE_DIR=${ghosttySrc}
-            export GHOSTTY_ZIG_SYSTEM_DIR=${ghosttyZigDeps}
             export LIBCLANG_PATH=${pkgs.libclang.lib}/lib
           '' + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
             # Unset Nix Darwin SDK env vars and remove the xcbuild

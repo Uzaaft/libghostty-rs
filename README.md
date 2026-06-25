@@ -95,9 +95,10 @@ cargo build -p ghostling_rs
 
 ### Running the example
 
+Run the examples by entering the folder, and run:
+
 ```sh
-cargo run -p ghostling_rs
-cargo run -p grid_ref_tracked_rs
+cargo run
 ```
 
 When building with `link-dynamic`, set `LD_LIBRARY_PATH` on Linux or

@@ -36,9 +36,13 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: 0.15.2
+          cache-key: ${{ matrix.target }}
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          cache-workspace-crates: true
 
       - name: Build libghostty-vt
         run: cargo build -p libghostty-vt --target ${{ matrix.target }}
