@@ -20,8 +20,10 @@ jobs:
         include:
           - name: macOS aarch64
             runner: namespace-profile-libghostty-mac
+            flake_check: true
           - name: Linux aarch64
             runner: namespace-profile-linux-aarch64-sm
+            flake_check: true
           - name: Linux x86_64
             runner: namespace-profile-linux-x86-sm
             flake_check: true
