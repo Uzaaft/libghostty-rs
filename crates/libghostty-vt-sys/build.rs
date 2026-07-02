@@ -72,6 +72,7 @@ fn main() {
     let link_mode = LinkMode::current();
 
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
+    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_ZIG");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
     println!("cargo:rerun-if-env-changed=TARGET");
@@ -127,7 +128,7 @@ fn build_vendored(link_mode: LinkMode) {
 
     let optimize = zig_optimize_mode();
 
-    let mut build = Command::new("zig");
+    let mut build = zig_command();
     build
         .arg("build")
         .arg("-Demit-lib-vt")
@@ -293,6 +294,22 @@ fn emit_include_metadata(include_paths: &[PathBuf]) {
 /// Defaults to `ReleaseFast` for optimized builds. If `DEBUG` is `true` (as cargo sets for the
 /// `dev` profile), `Debug` mode is used. Otherwise, if `OPT_LEVEL` is `s` or `z`, `ReleaseSmall`
 /// is used.
+/// Resolve the Zig executable used for vendored builds. Defaults to `zig` on
+/// PATH. Set `LIBGHOSTTY_VT_SYS_ZIG` to a specific executable (a path or a
+/// command name) when the Zig on PATH is not the release the pinned Ghostty
+/// source requires, e.g. a versioned Homebrew keg's
+/// `/opt/homebrew/opt/zig@0.15/bin/zig`.
+fn zig_command() -> Command {
+    if let Ok(zig) = env::var("LIBGHOSTTY_VT_SYS_ZIG") {
+        assert!(
+            !zig.is_empty(),
+            "LIBGHOSTTY_VT_SYS_ZIG must not be empty when set"
+        );
+        return Command::new(zig);
+    }
+    Command::new("zig")
+}
+
 fn zig_optimize_mode() -> &'static str {
     if let Ok(override_mode) = env::var("LIBGHOSTTY_VT_SYS_OPTIMIZE") {
         return match override_mode.as_str() {
