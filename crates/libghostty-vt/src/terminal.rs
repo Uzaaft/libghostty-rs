@@ -4,7 +4,7 @@ use std::{mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     alloc::{Allocator, Object},
-    error::{Error, Result, from_optional_result_uninit, from_result},
+    error::{Error, Result, from_optional_result_uninit, from_result, from_result_with_len},
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
     key,
     screen::{GridRef, Screen, TrackedGridRef},
@@ -1113,6 +1113,43 @@ pub enum ColorScheme {
     Dark = ffi::ColorScheme::DARK,
 }
 
+impl ColorScheme {
+    /// Encode a color scheme report into an escape sequence.
+    ///
+    /// Encodes a color scheme report into the provided buffer. Dark color
+    /// schemes emit `ESC [ ? 997 ; 1 n`, and light color schemes emit
+    /// `ESC [ ? 997 ; 2 n`. The encoded bytes are identical to the terminal's
+    /// internal `CSI ? 996 n` query response.
+    ///
+    /// Hosts should gate unsolicited sends on mode 2031 being set, which can
+    /// be checked via the mode getters.
+    ///
+    /// If the buffer is too small, returns [`Error::OutOfSpace`] with the
+    /// required buffer size. The caller can then retry with a sufficiently
+    /// sized buffer.
+    pub fn encode_report(self, buf: &mut [u8]) -> Result<usize> {
+        let mut written = 0;
+        let result = unsafe {
+            ffi::ghostty_color_scheme_report_encode(
+                self.into(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &raw mut written,
+            )
+        };
+        from_result_with_len(result, written)
+    }
+}
+
+impl From<ColorScheme> for ffi::ColorScheme::Type {
+    fn from(value: ColorScheme) -> Self {
+        match value {
+            ColorScheme::Light => ffi::ColorScheme::LIGHT,
+            ColorScheme::Dark => ffi::ColorScheme::DARK,
+        }
+    }
+}
+
 //---------------------------------------
 // Callbacks
 //---------------------------------------
@@ -1390,7 +1427,7 @@ handlers! {
     ) |term, func| {
         if let Some(size) = func(&term) {
             // SAFETY: Out pointer is assumed to be valid.
-            unsafe { *out = size as ffi::ColorScheme::Type };
+            unsafe { *out = size.into() };
             true
         } else {
             false
