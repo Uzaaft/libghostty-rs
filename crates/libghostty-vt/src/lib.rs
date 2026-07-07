@@ -109,6 +109,7 @@ pub mod screen;
 pub mod selection;
 pub mod sgr;
 pub mod style;
+pub mod unicode;
 
 #[doc(inline)]
 pub use crate::{
