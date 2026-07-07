@@ -803,6 +803,8 @@ pub enum ScrollViewport {
     Bottom,
     /// Scroll by a delta amount (up is negative).
     Delta(isize),
+    /// Scroll to an absolute row offset from the top of the scrollback.
+    Row(usize),
 }
 impl From<ScrollViewport> for ffi::TerminalScrollViewport {
     fn from(value: ScrollViewport) -> Self {
@@ -820,6 +822,14 @@ impl From<ScrollViewport> for ffi::TerminalScrollViewport {
                 value: {
                     let mut v = ffi::TerminalScrollViewportValue::default();
                     v.delta = delta;
+                    v
+                },
+            },
+            ScrollViewport::Row(row) => Self {
+                tag: ffi::TerminalScrollViewportTag::ROW,
+                value: {
+                    let mut v = ffi::TerminalScrollViewportValue::default();
+                    v.row = row;
                     v
                 },
             },
