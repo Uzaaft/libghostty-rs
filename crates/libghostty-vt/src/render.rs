@@ -76,6 +76,38 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// assert!(render_state.update(&terminal).is_ok());
 /// ```
 ///
+/// ## Updating with a terminal lock
+///
+/// ```rust
+/// // The one-shot update call is simplest when the renderer owns terminal
+/// // access directly. If another thread can write to the terminal, split the
+/// // update so the terminal lock is held only while terminal state is read.
+/// use std::sync::Mutex;
+///
+/// use libghostty_vt::{RenderState, Terminal, TerminalOptions};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let terminal = Mutex::new(Terminal::new(TerminalOptions {
+///     cols: 80,
+///     rows: 25,
+///     max_scrollback: 10000,
+/// })?);
+/// let mut render_state = RenderState::new()?;
+///
+/// // Only this phase needs access to the terminal.
+/// {
+///     let terminal = terminal.lock().unwrap();
+///     render_state.begin_update(&terminal)?;
+/// }
+///
+/// // The lock is released before deferred render-state work runs.
+/// let snapshot = render_state.end_update()?;
+///
+/// // Read from the snapshot to draw the frame.
+/// let _dirty = snapshot.dirty()?;
+/// # Ok(())}
+/// ```
+///
 /// ## Checking dirty state
 ///
 /// ```rust
@@ -319,6 +351,43 @@ impl<'alloc> RenderState<'alloc> {
     ) -> Result<Snapshot<'alloc, '_>> {
         let result =
             unsafe { ffi::ghostty_render_state_update(self.0.as_raw(), terminal.inner.as_raw()) };
+        from_result(result)?;
+        Ok(Snapshot(self))
+    }
+
+    /// Begin an update of a render state instance from a terminal.
+    ///
+    /// Every begin must be completed with a [`Self::end_update`] call before
+    /// the render state is read.
+    ///
+    /// This two-phase structure exists for callers that synchronize access to
+    /// the terminal state: only this function requires terminal access, so a
+    /// caller can hold its lock for this call only and then call
+    /// [`Self::end_update`] after releasing it. The end phase exclusively reads
+    /// and writes memory owned by the render state, so it is safe to call while
+    /// the terminal is being modified.
+    ///
+    /// Work that doesn't require terminal access may be deferred to the end
+    /// phase to keep this call, and therefore lock hold time, as short as
+    /// possible. Callers must treat the render state as incomplete until
+    /// [`Self::end_update`] is called.
+    ///
+    /// This consumes terminal and screen dirty state in the same way as the
+    /// internal render state update path.
+    pub fn begin_update<'cb>(&mut self, terminal: &Terminal<'alloc, 'cb>) -> Result<()> {
+        let result = unsafe {
+            ffi::ghostty_render_state_begin_update(self.0.as_raw(), terminal.inner.as_raw())
+        };
+        from_result(result)
+    }
+
+    /// Complete a prior [`Self::begin_update`] call by performing any deferred work.
+    ///
+    /// This only reads and writes memory owned by the render state, so it is
+    /// safe to call while the terminal is being modified. Calling this without a
+    /// prior begin is a safe no-op.
+    pub fn end_update(&mut self) -> Result<Snapshot<'alloc, '_>> {
+        let result = unsafe { ffi::ghostty_render_state_end_update(self.0.as_raw()) };
         from_result(result)?;
         Ok(Snapshot(self))
     }
