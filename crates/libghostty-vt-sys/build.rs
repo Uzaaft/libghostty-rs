@@ -130,7 +130,7 @@ fn build_vendored(link_mode: LinkMode) {
     let mut build = Command::new("zig");
     build
         .arg("build")
-        .arg("-Demit-lib-vt")
+        .arg("-Demit-lib-vt=true")
         .arg(format!("-Doptimize={optimize}"))
         .arg("-Demit-xcframework=false")
         .arg("-Dapp-runtime=none")
