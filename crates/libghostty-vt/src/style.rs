@@ -3,7 +3,7 @@
 //! A style describes the visual attributes of a terminal cell, including
 //! foreground, background, and underline colors, as well as flags for bold,
 //! italic, underline, and other text decorations.
-use std::{ffi::CStr, mem::MaybeUninit};
+use std::{ffi::CStr, mem::MaybeUninit, slice};
 
 use crate::{
     error::{Error, Result},
@@ -397,22 +397,89 @@ pub struct X11ColorName<'a> {
     pub color: RgbColor,
 }
 
+/// Ghostty's X11 color name table.
+///
+/// This is a borrowed view of the static table embedded in Ghostty.
+#[derive(Clone, Copy, Debug)]
+pub struct X11ColorNames {
+    entries: &'static [ffi::ColorX11Entry],
+}
+
+/// Iterator over Ghostty's X11 color name table.
+#[derive(Clone, Debug)]
+pub struct X11ColorNamesIter {
+    entries: slice::Iter<'static, ffi::ColorX11Entry>,
+}
+
+impl X11ColorNames {
+    /// Get the number of X11 color name entries.
+    ///
+    /// The returned count excludes the NULL terminator.
+    #[must_use]
+    pub fn len(self) -> usize {
+        self.entries.len()
+    }
+
+    /// Return whether the X11 color name table is empty.
+    #[must_use]
+    pub fn is_empty(self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Get an X11 color name entry by index.
+    #[must_use]
+    pub fn get(self, index: usize) -> Option<X11ColorName<'static>> {
+        self.entries.get(index).map(x11_color_name_from_entry)
+    }
+
+    /// Iterate over the X11 color name table.
+    pub fn iter(self) -> X11ColorNamesIter {
+        X11ColorNamesIter {
+            entries: self.entries.iter(),
+        }
+    }
+}
+
+impl IntoIterator for X11ColorNames {
+    type Item = X11ColorName<'static>;
+    type IntoIter = X11ColorNamesIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl Iterator for X11ColorNamesIter {
+    type Item = X11ColorName<'static>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.entries.next().map(x11_color_name_from_entry)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.entries.size_hint()
+    }
+}
+
+impl ExactSizeIterator for X11ColorNamesIter {}
+
+fn x11_color_name_from_entry(entry: &ffi::ColorX11Entry) -> X11ColorName<'static> {
+    let name = unsafe { CStr::from_ptr(entry.name) };
+    X11ColorName {
+        name,
+        color: entry.color.into(),
+    }
+}
+
 /// Get Ghostty's X11 color name table.
 ///
 /// Entries are in rgb.txt order. Aliases are separate entries, such as
 /// `"medium spring green"` and `"MediumSpringGreen"`. Names are the exact
 /// supported spellings from rgb.txt; [`parse_x11_color`] also matches them
 /// case-insensitively.
-pub fn x11_color_names() -> impl ExactSizeIterator<Item = X11ColorName<'static>> {
+pub fn x11_color_names() -> X11ColorNames {
     let ptr = unsafe { ffi::ghostty_color_x11_names() };
     let len = unsafe { ffi::ghostty_color_x11_name_count() };
-
-    (0..len).map(move |index| {
-        let entry = unsafe { *ptr.add(index) };
-        let name = unsafe { CStr::from_ptr(entry.name) };
-        X11ColorName {
-            name,
-            color: entry.color.into(),
-        }
-    })
+    let entries = unsafe { slice::from_raw_parts(ptr, len) };
+    X11ColorNames { entries }
 }
