@@ -405,6 +405,12 @@ pub struct X11ColorNames {
     entries: &'static [ffi::ColorX11Entry],
 }
 
+impl Default for X11ColorNames {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Iterator over Ghostty's X11 color name table.
 #[derive(Clone, Debug)]
 pub struct X11ColorNamesIter {
@@ -412,6 +418,20 @@ pub struct X11ColorNamesIter {
 }
 
 impl X11ColorNames {
+    /// Get Ghostty's X11 color name table.
+    ///
+    /// Entries are in rgb.txt order. Aliases are separate entries, such as
+    /// `"medium spring green"` and `"MediumSpringGreen"`. Names are the exact
+    /// supported spellings from rgb.txt; [`parse_x11_color`] also matches them
+    /// case-insensitively.
+    #[must_use]
+    pub fn new() -> Self {
+        let ptr = unsafe { ffi::ghostty_color_x11_names() };
+        let len = unsafe { ffi::ghostty_color_x11_name_count() };
+        let entries = unsafe { slice::from_raw_parts(ptr, len) };
+        Self { entries }
+    }
+
     /// Get the number of X11 color name entries.
     ///
     /// The returned count excludes the NULL terminator.
@@ -469,17 +489,4 @@ fn x11_color_name_from_entry(entry: &ffi::ColorX11Entry) -> X11ColorName {
         name,
         color: entry.color.into(),
     }
-}
-
-/// Get Ghostty's X11 color name table.
-///
-/// Entries are in rgb.txt order. Aliases are separate entries, such as
-/// `"medium spring green"` and `"MediumSpringGreen"`. Names are the exact
-/// supported spellings from rgb.txt; [`parse_x11_color`] also matches them
-/// case-insensitively.
-pub fn x11_color_names() -> X11ColorNames {
-    let ptr = unsafe { ffi::ghostty_color_x11_names() };
-    let len = unsafe { ffi::ghostty_color_x11_name_count() };
-    let entries = unsafe { slice::from_raw_parts(ptr, len) };
-    X11ColorNames { entries }
 }
