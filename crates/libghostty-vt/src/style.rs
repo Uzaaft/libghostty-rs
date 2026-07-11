@@ -390,9 +390,9 @@ pub fn contrast(a: RgbColor, b: RgbColor) -> f64 {
 
 /// An entry in Ghostty's X11 color name table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct X11ColorName<'a> {
+pub struct X11ColorName {
     /// Null-terminated color name.
-    pub name: &'a CStr,
+    pub name: &'static CStr,
     /// The RGB value of the color.
     pub color: RgbColor,
 }
@@ -428,7 +428,7 @@ impl X11ColorNames {
 
     /// Get an X11 color name entry by index.
     #[must_use]
-    pub fn get(self, index: usize) -> Option<X11ColorName<'static>> {
+    pub fn get(self, index: usize) -> Option<X11ColorName> {
         self.entries.get(index).map(x11_color_name_from_entry)
     }
 
@@ -441,7 +441,7 @@ impl X11ColorNames {
 }
 
 impl IntoIterator for X11ColorNames {
-    type Item = X11ColorName<'static>;
+    type Item = X11ColorName;
     type IntoIter = X11ColorNamesIter;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -450,7 +450,7 @@ impl IntoIterator for X11ColorNames {
 }
 
 impl Iterator for X11ColorNamesIter {
-    type Item = X11ColorName<'static>;
+    type Item = X11ColorName;
 
     fn next(&mut self) -> Option<Self::Item> {
         self.entries.next().map(x11_color_name_from_entry)
@@ -463,7 +463,7 @@ impl Iterator for X11ColorNamesIter {
 
 impl ExactSizeIterator for X11ColorNamesIter {}
 
-fn x11_color_name_from_entry(entry: &ffi::ColorX11Entry) -> X11ColorName<'static> {
+fn x11_color_name_from_entry(entry: &ffi::ColorX11Entry) -> X11ColorName {
     let name = unsafe { CStr::from_ptr(entry.name) };
     X11ColorName {
         name,
