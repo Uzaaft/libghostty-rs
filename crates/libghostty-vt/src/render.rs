@@ -76,6 +76,32 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// assert!(render_state.update(&terminal).is_ok());
 /// ```
 ///
+/// ## Splitting an update
+///
+/// ```rust
+/// use libghostty_vt::{RenderState, Terminal, TerminalOptions};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let terminal = Terminal::new(TerminalOptions {
+///     cols: 80,
+///     rows: 25,
+///     max_scrollback: 10000,
+/// })?;
+/// let mut render_state = RenderState::new()?;
+///
+/// // Use `update` unless you need to minimize how long terminal access is
+/// // held. `begin_update` copies the terminal-dependent state into an update
+/// // token, then `end` finishes the deferred render-state work.
+/// let update = render_state.begin_update(&terminal)?;
+///
+/// // Terminal access is no longer needed here.
+/// let snapshot = update.end()?;
+///
+/// // Read from the snapshot to draw the frame.
+/// let _dirty = snapshot.dirty()?;
+/// # Ok(())}
+/// ```
+///
 /// ## Checking dirty state
 ///
 /// ```rust
@@ -231,6 +257,16 @@ pub struct RenderState<'alloc>(Object<'alloc, ffi::RenderStateImpl>);
 #[derive(Debug)]
 pub struct Snapshot<'alloc, 's>(&'s mut RenderState<'alloc>);
 
+/// An in-progress render state update.
+///
+/// This token is returned by [`RenderState::begin_update`] and keeps the render
+/// state borrowed until [`Self::end`] completes the deferred update work. This
+/// makes it impossible to read from the render state while it is incomplete.
+#[derive(Debug)]
+pub struct Update<'alloc, 's> {
+    state: Option<&'s mut RenderState<'alloc>>,
+}
+
 /// Opaque handle to a render-state row iterator.
 ///
 /// The row iterator must be [updated](RowIterator::update) from a snapshot of
@@ -322,11 +358,65 @@ impl<'alloc> RenderState<'alloc> {
         from_result(result)?;
         Ok(Snapshot(self))
     }
+
+    /// Begin an update of a render state instance from a terminal.
+    ///
+    /// Every begin must be completed with [`Update::end`] before the render
+    /// state is read.
+    ///
+    /// This two-phase structure exists for callers that synchronize access to
+    /// the terminal state: only this function requires terminal access, so a
+    /// caller can hold its lock for this call only and then call [`Update::end`]
+    /// after releasing it. The end phase exclusively reads
+    /// and writes memory owned by the render state, so it is safe to call while
+    /// the terminal is being modified.
+    ///
+    /// Work that doesn't require terminal access may be deferred to the end
+    /// phase to keep this call, and therefore lock hold time, as short as
+    /// possible. Callers must treat the render state as incomplete until
+    /// [`Update::end`] is called.
+    ///
+    /// This consumes terminal and screen dirty state in the same way as the
+    /// internal render state update path.
+    pub fn begin_update<'cb>(
+        &mut self,
+        terminal: &Terminal<'alloc, 'cb>,
+    ) -> Result<Update<'alloc, '_>> {
+        let result = unsafe {
+            ffi::ghostty_render_state_begin_update(self.0.as_raw(), terminal.inner.as_raw())
+        };
+        from_result(result)?;
+        Ok(Update { state: Some(self) })
+    }
 }
 
 impl Drop for RenderState<'_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_render_state_free(self.0.as_raw()) }
+    }
+}
+
+impl<'alloc, 's> Update<'alloc, 's> {
+    /// Complete a prior [`RenderState::begin_update`] call by performing any deferred work.
+    ///
+    /// This only reads and writes memory owned by the render state, so it is
+    /// safe to call while the terminal is being modified. Consumes the update
+    /// token and returns a snapshot that can be read to draw the frame.
+    pub fn end(mut self) -> Result<Snapshot<'alloc, 's>> {
+        let Some(state) = self.state.take() else {
+            return Err(Error::InvalidValue);
+        };
+        let result = unsafe { ffi::ghostty_render_state_end_update(state.0.as_raw()) };
+        from_result(result)?;
+        Ok(Snapshot(state))
+    }
+}
+
+impl Drop for Update<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(state) = self.state.take() {
+            let _ = unsafe { ffi::ghostty_render_state_end_update(state.0.as_raw()) };
+        }
     }
 }
 

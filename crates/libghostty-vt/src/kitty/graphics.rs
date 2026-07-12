@@ -314,6 +314,15 @@ impl Terminal<'_, '_> {
 }
 
 impl<'t> Graphics<'t> {
+    fn get<T>(&self, tag: ffi::KittyGraphicsData::Type) -> Result<T> {
+        let mut value = MaybeUninit::<T>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_kitty_graphics_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
+        };
+        from_result(result)?;
+        Ok(unsafe { value.assume_init() })
+    }
+
     /// Look up a Kitty graphics image by its image ID.
     ///
     /// Returns `None` if no image with the given ID exists.
@@ -323,6 +332,27 @@ impl<'t> Graphics<'t> {
         Some(Image {
             inner: Ref::new(image.cast_mut()).ok()?,
         })
+    }
+
+    /// Generation stamp of the last content mutation to this storage.
+    ///
+    /// Content mutations are any image transmit or replace, placement add, or
+    /// delete. Zero means the storage has never been mutated and is therefore
+    /// empty.
+    ///
+    /// If the generation is unchanged since a previous query, the set of
+    /// placements and all image data are identical, so placement iteration and
+    /// image staleness checks can be skipped entirely. Note that placement
+    /// geometry may still have changed, since scrolling and resizing move
+    /// placements without changing the storage contents, so rendering geometry
+    /// must still be recomputed for frames marked dirty.
+    ///
+    /// Stamps are unique and monotonically increasing process-wide: a value
+    /// observed from any storage never recurs for different content, even across
+    /// screen switches or terminal resets. It is therefore safe to key caches on
+    /// this value alone.
+    pub fn generation(&self) -> Result<u64> {
+        self.get(ffi::KittyGraphicsData::GENERATION)
     }
 }
 
@@ -357,6 +387,19 @@ impl<'t> Image<'t> {
     /// Image height in pixels.
     pub fn height(&self) -> Result<u32> {
         self.get(ffi::KittyGraphicsImageData::HEIGHT)
+    }
+    /// Generation stamp assigned when this image was added to or replaced in the storage.
+    ///
+    /// A changed generation for a given image ID means the pixel contents may
+    /// have changed even when the dimensions, format, and data length are
+    /// identical, for example a retransmission of the same image ID, so texture
+    /// caches must key staleness on this value rather than on size heuristics.
+    ///
+    /// Stamps are unique and monotonically increasing process-wide and are drawn
+    /// from the same sequence as [`Graphics::generation`]. Never zero for a
+    /// stored image, so zero can be used as an empty sentinel by callers.
+    pub fn generation(&self) -> Result<u64> {
+        self.get(ffi::KittyGraphicsImageData::GENERATION)
     }
     /// Pixel format of the image.
     pub fn format(&self) -> Result<ImageFormat> {
