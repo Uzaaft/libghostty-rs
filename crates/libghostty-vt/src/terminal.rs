@@ -1,6 +1,6 @@
 //! Types and functions around terminal state management.
 
-use std::{mem::MaybeUninit, ptr::NonNull};
+use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     alloc::{Allocator, Object},
@@ -8,7 +8,7 @@ use crate::{
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
     key,
     screen::{GridRef, Screen, TrackedGridRef},
-    style::{self, RgbColor},
+    style::{self, Palette, RawPalette, RgbColor},
 };
 
 #[doc(inline)]
@@ -212,14 +212,14 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 ///     // Set a custom palette — start from the built-in default and override
 ///     // the first 8 entries with a custom dark theme.
 ///     let mut palette = terminal.default_color_palette()?;
-///     palette[PaletteIndex::BLACK.0 as usize]   = RgbColor { r: 0x45, g: 0x47, b: 0x5A };
-///     palette[PaletteIndex::RED.0 as usize]     = RgbColor { r: 0xF3, g: 0x8B, b: 0xA8 };
-///     palette[PaletteIndex::GREEN.0 as usize]   = RgbColor { r: 0xA6, g: 0xE3, b: 0xA1 };
-///     palette[PaletteIndex::YELLOW.0 as usize]  = RgbColor { r: 0xF9, g: 0xE2, b: 0xAF };
-///     palette[PaletteIndex::BLUE.0 as usize]    = RgbColor { r: 0x89, g: 0xB4, b: 0xFA };
-///     palette[PaletteIndex::MAGENTA.0 as usize] = RgbColor { r: 0xF5, g: 0xC2, b: 0xE7 };
-///     palette[PaletteIndex::CYAN.0 as usize]    = RgbColor { r: 0x94, g: 0xE2, b: 0xD5 };
-///     palette[PaletteIndex::WHITE.0 as usize]   = RgbColor { r: 0xBA, g: 0xC2, b: 0xDE };
+///     palette.set(PaletteIndex::BLACK, RgbColor { r: 0x45, g: 0x47, b: 0x5A });
+///     palette.set(PaletteIndex::RED, RgbColor { r: 0xF3, g: 0x8B, b: 0xA8 });
+///     palette.set(PaletteIndex::GREEN, RgbColor { r: 0xA6, g: 0xE3, b: 0xA1 });
+///     palette.set(PaletteIndex::YELLOW, RgbColor { r: 0xF9, g: 0xE2, b: 0xAF });
+///     palette.set(PaletteIndex::BLUE, RgbColor { r: 0x89, g: 0xB4, b: 0xFA });
+///     palette.set(PaletteIndex::MAGENTA, RgbColor { r: 0xF5, g: 0xC2, b: 0xE7 });
+///     palette.set(PaletteIndex::CYAN, RgbColor { r: 0x94, g: 0xE2, b: 0xD5 });
+///     palette.set(PaletteIndex::WHITE, RgbColor { r: 0xBA, g: 0xC2, b: 0xDE });
 ///     
 ///     terminal.set_default_color_palette(Some(palette))?;
 ///     Ok(())
@@ -461,6 +461,51 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 
+    /// Compress eligible terminal scrollback.
+    ///
+    /// Incremental mode performs bounded work suitable for an idle callback.
+    /// A pending result means the application should invoke another step while
+    /// the terminal remains idle. A complete result means no continuation is
+    /// needed until `Terminal::compression_activity` changes. Full mode
+    /// performs one synchronous scan and can stall on large scrollback buffers.
+    ///
+    /// Compression is opportunistic. Complete means the pass has finished,
+    /// not that every page was compressed: pages may be unprofitable or
+    /// encounter an allocation or reclamation failure. Compression changes
+    /// only the terminal's storage representation and never its logical
+    /// contents or scrollback limit. Accessing compressed history restores
+    /// it transparently.
+    ///
+    /// This function is not thread-safe with other operations on the same
+    /// terminal. The caller must serialize it with writes, rendering, searches,
+    /// and other terminal access.
+    pub fn compress(&mut self, mode: CompressionMode) -> Result<CompressionResult> {
+        let mut value = ffi::TerminalCompressionResult::UNSUPPORTED;
+        let result = unsafe {
+            ffi::ghostty_terminal_compress(self.inner.as_raw(), mode.into(), &raw mut value)
+        };
+        from_result(result)?;
+        value.try_into().map_err(|_| Error::InvalidValue)
+    }
+
+    /// Return the current compression activity token.
+    ///
+    /// The token is opaque and only equality comparisons are meaningful.
+    /// An embedding application should cache it and restart its compression
+    /// idle delay whenever the value changes. The value may wrap and changes
+    /// in either direction have the same meaning.
+    ///
+    /// This function only observes terminal state.
+    /// It does not perform or schedule compression.
+    pub fn compression_activity(&self) -> Result<CompressionActivity> {
+        let mut value = 0;
+        let result = unsafe {
+            ffi::ghostty_terminal_compression_activity(self.inner.as_raw(), &raw mut value)
+        };
+        from_result(result)?;
+        Ok(CompressionActivity(value))
+    }
+
     pub(crate) fn get<T>(&self, tag: ffi::TerminalData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
@@ -663,21 +708,18 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// The current 256-color palette.
-    pub fn color_palette(&self) -> Result<[RgbColor; 256]> {
-        self.get::<[ffi::ColorRgb; 256]>(Data::COLOR_PALETTE)
-            .map(|v| v.map(Into::into))
+    pub fn color_palette(&self) -> Result<Palette> {
+        self.get::<RawPalette>(Data::COLOR_PALETTE)
+            .map(Palette::from)
     }
     /// The default 256-color palette (ignoring any OSC overrides).
-    pub fn default_color_palette(&self) -> Result<[RgbColor; 256]> {
-        self.get::<[ffi::ColorRgb; 256]>(Data::COLOR_PALETTE_DEFAULT)
-            .map(|v| v.map(Into::into))
+    pub fn default_color_palette(&self) -> Result<Palette> {
+        self.get::<RawPalette>(Data::COLOR_PALETTE_DEFAULT)
+            .map(Palette::from)
     }
     /// Set the default 256-color palette.
-    pub fn set_default_color_palette(&mut self, v: Option<[RgbColor; 256]>) -> Result<&mut Self> {
-        self.set_optional(
-            Opt::COLOR_PALETTE,
-            v.map(|v| v.map(ffi::ColorRgb::from)).as_ref(),
-        )?;
+    pub fn set_default_color_palette(&mut self, v: Option<Palette>) -> Result<&mut Self> {
+        self.set_optional::<RawPalette>(Opt::COLOR_PALETTE, v.map(|v| v.into()).as_ref())?;
         Ok(self)
     }
 
@@ -1160,6 +1202,165 @@ impl From<ColorScheme> for ffi::ColorScheme::Type {
     }
 }
 
+/// Amount of compression work to perform before returning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(u32)]
+pub enum CompressionMode {
+    /// Perform one bounded compression step suitable for idle scheduling.
+    Incremental = ffi::TerminalCompressionMode::INCREMENTAL,
+    /// Synchronously inspect every currently eligible page.
+    Full = ffi::TerminalCompressionMode::FULL,
+}
+
+/// Scheduling result from terminal compression.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(u32)]
+pub enum CompressionResult {
+    /// Retained-mapping reclamation is unavailable on this target.
+    Unsupported = ffi::TerminalCompressionResult::UNSUPPORTED,
+    /// More incremental compression work remains.
+    Pending = ffi::TerminalCompressionResult::PENDING,
+    /// The pass has no continuation to schedule.
+    Complete = ffi::TerminalCompressionResult::COMPLETE,
+}
+
+/// Opaque token representing a terminal's current compression activity.
+///
+/// The token is opaque and only equality comparisons are meaningful.
+/// An embedding application should cache it and restart its compression idle
+/// delay whenever the value changes. The value may wrap and changes in either
+/// direction have the same meaning.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CompressionActivity(u64);
+
+/// A semantic, atomic clipboard write.
+///
+/// The request, contents array, MIME strings, and data strings are all
+/// borrowed and valid only for the callback duration.
+#[derive(Clone, Debug)]
+pub struct ClipboardWrite<'t> {
+    ptr: *const ffi::ClipboardWrite,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> ClipboardWrite<'t> {
+    /// # Safety
+    ///
+    /// Caller must ensure that the given pointer has the correct lifetime.
+    unsafe fn from_raw(ptr: *const ffi::ClipboardWrite) -> Self {
+        Self {
+            ptr,
+            _phan: PhantomData,
+        }
+    }
+
+    /// Get the clipboard's destination.
+    pub fn location(&self) -> ClipboardLocation {
+        // SAFETY: We trust libghostty to give us a valid pointer
+        // within the lifetime of the callback.
+        unsafe { *self.ptr }
+            .location
+            .try_into()
+            .unwrap_or(ClipboardLocation::Standard)
+    }
+    /// Get an iterator into a borrowed array of MIME representations.
+    pub fn contents(&self) -> ClipboardContents<'t> {
+        // SAFETY: We trust libghostty to give us a valid pointer and length
+        // within the lifetime of the callback.
+        ClipboardContents(unsafe {
+            std::slice::from_raw_parts((*self.ptr).contents, (*self.ptr).contents_len).iter()
+        })
+    }
+}
+
+/// An iterator into a borrowed array of MIME representations.
+#[derive(Clone, Debug)]
+pub struct ClipboardContents<'t>(std::slice::Iter<'t, ffi::ClipboardContent>);
+
+impl<'t> Iterator for ClipboardContents<'t> {
+    type Item = ClipboardContent<'t>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0
+            .next()
+            .map(|v| unsafe { ClipboardContent::from_raw(v) })
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+impl DoubleEndedIterator for ClipboardContents<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0
+            .next_back()
+            .map(|v| unsafe { ClipboardContent::from_raw(v) })
+    }
+}
+impl ExactSizeIterator for ClipboardContents<'_> {}
+impl std::iter::FusedIterator for ClipboardContents<'_> {}
+
+/// One MIME representation in a clipboard write.
+///
+/// The data is binary-safe and has already been decoded from any protocol-level
+/// encoding. A zero-length data string is an explicit empty representation; it
+/// does not clear the clipboard.
+#[derive(Clone, Copy, Debug)]
+pub struct ClipboardContent<'t> {
+    /// MIME type of the representation.
+    pub mime: &'t str,
+    /// Decoded, binary-safe representation data.
+    pub data: &'t str,
+}
+impl<'t> ClipboardContent<'t> {
+    /// # Safety
+    ///
+    /// Caller must guarantee that the given raw value is valid within
+    /// the given lifetime.
+    unsafe fn from_raw(value: &ffi::ClipboardContent) -> Self {
+        // SAFETY: Upheld by caller
+        unsafe {
+            Self {
+                mime: value.mime.to_str(),
+                data: value.data.to_str(),
+            }
+        }
+    }
+}
+
+/// Clipboard destination for a clipboard write.
+///
+/// Protocol-specific destination identifiers are normalized to these values
+/// before the clipboard write callback is invoked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(u32)]
+pub enum ClipboardLocation {
+    /// The standard system clipboard.
+    Standard = ffi::ClipboardLocation::STANDARD,
+    /// The selection clipboard.
+    Selection = ffi::ClipboardLocation::SELECTION,
+    /// The primary selection clipboard.
+    Primary = ffi::ClipboardLocation::PRIMARY,
+}
+
+/// Possible errors caused by a clipboard write callback.
+///
+/// Protocols without write acknowledgements, including OSC 52 and iTerm2
+/// OSC 1337 Copy, ignore this result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(u32)]
+pub enum ClipboardWriteError {
+    /// The clipboard write was denied by policy or the user.
+    Denied = ffi::ClipboardWriteResult::DENIED,
+    /// The destination or one or more representations are unsupported.
+    Unsupported = ffi::ClipboardWriteResult::UNSUPPORTED,
+    /// The clipboard is temporarily unavailable.
+    Busy = ffi::ClipboardWriteResult::BUSY,
+    /// One or more representations contain invalid data.
+    InvalidData = ffi::ClipboardWriteResult::INVALID_DATA,
+    /// The clipboard write failed due to an I/O error.
+    IoError = ffi::ClipboardWriteResult::IO_ERROR,
+}
+
 //---------------------------------------
 // Callbacks
 //---------------------------------------
@@ -1461,6 +1662,30 @@ handlers! {
             true
         } else {
             false
+        }
+    }
+
+    /// Call the given function when the running program performs a clipboard write.
+    ///
+    ///
+    /// Protocol details such as OSC 52 selectors, base64 encoding, multipart
+    /// chunks, aliases, and terminators are normalized before this callback is
+    /// invoked. OSC 52 and iTerm2 OSC 1337 Copy writes therefore use the same
+    /// callback shape.
+    ///
+    /// OSC 52 clipboard read requests (\"?\") are always ignored and never
+    /// forwarded to this callback.
+    pub fn on_clipboard_write(
+        &mut self,
+        tag = CLIPBOARD_WRITE,
+        from = GhosttyTerminalClipboardWriteFn(
+            write: *const ffi::ClipboardWrite
+        ) -> ffi::ClipboardWriteResult::Type,
+        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>) -> std::result::Result<(), ClipboardWriteError>,
+    ) |term, func| {
+        match func(&term, unsafe { ClipboardWrite::from_raw(write) }) {
+            Ok(_) => ffi::ClipboardWriteResult::SUCCESS,
+            Err(e) => e.into()
         }
     }
 }
