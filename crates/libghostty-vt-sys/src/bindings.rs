@@ -486,7 +486,7 @@ impl Default for ColorX11Entry {
 }
 unsafe extern "C" {
     #[doc = " Get the RGB color components.\n\n This function extracts the individual red, green, and blue components\n from a GhosttyColorRgb value. Primarily useful in WebAssembly environments\n where accessing struct fields directly is difficult.\n\n"]
-    pub fn ghostty_color_rgb_get(color: ColorRgb, r: *mut u8, g: *mut u8, b: *mut u8);
+    pub fn ghostty_color_rgb_get(color: *const ColorRgb, r: *mut u8, g: *mut u8, b: *mut u8);
 }
 unsafe extern "C" {
     #[doc = " Parse an X11 color name.\n\n The color name is resolved from Ghostty's embedded rgb.txt table.\n Leading and trailing spaces and tabs are trimmed, and matching is\n ASCII case-insensitive. Hex values are not accepted by this function.\n\n matches or @p name is NULL\n"]
@@ -522,23 +522,23 @@ unsafe extern "C" {
     pub fn ghostty_color_palette_generate(
         base: *const ColorRgb,
         skip: *const ColorPaletteMask,
-        bg: ColorRgb,
-        fg: ColorRgb,
+        bg: *const ColorRgb,
+        fg: *const ColorRgb,
         harmonious: bool,
         out: *mut ColorRgb,
     );
 }
 unsafe extern "C" {
     #[doc = " Calculate W3C relative luminance for an RGB color.\n\n Returns a normalized value from 0.0 for black to 1.0 for white.\n See https://www.w3.org/TR/WCAG20/#relativeluminancedef.\n\n"]
-    pub fn ghostty_color_luminance(color: ColorRgb) -> f64;
+    pub fn ghostty_color_luminance(color: *const ColorRgb) -> f64;
 }
 unsafe extern "C" {
     #[doc = " Calculate perceived luminance for an RGB color.\n\n Returns a normalized value from 0.0 for black to 1.0 for white.\n Ghostty treats a background color as light when this exceeds 0.5.\n This is not the metric used internally by\n ghostty_color_palette_generate(), which uses CIELAB lightness.\n\n"]
-    pub fn ghostty_color_perceived_luminance(color: ColorRgb) -> f64;
+    pub fn ghostty_color_perceived_luminance(color: *const ColorRgb) -> f64;
 }
 unsafe extern "C" {
     #[doc = " Calculate the WCAG contrast ratio between two RGB colors.\n\n The contrast ratio is symmetric and ranges from 1.0 for identical\n colors to 21.0 for black and white.\n\n"]
-    pub fn ghostty_color_contrast(a: ColorRgb, b: ColorRgb) -> f64;
+    pub fn ghostty_color_contrast(a: *const ColorRgb, b: *const ColorRgb) -> f64;
 }
 unsafe extern "C" {
     #[doc = " Get Ghostty's X11 color name table.\n\n The returned pointer references static memory valid for the program\n lifetime and is never NULL. Entries are in rgb.txt order and are\n terminated by an entry with name == NULL. Aliases are separate entries,\n such as \"medium spring green\" and \"MediumSpringGreen\". Names are the\n exact supported spellings from rgb.txt; ghostty_color_parse_x11() also\n matches them case-insensitively.\n\n for (const GhosttyColorX11Entry* e = ghostty_color_x11_names();\n      e->name != NULL;\n      e++) {\n   // e->name and e->color are valid here.\n }\n\n"]
@@ -2040,6 +2040,28 @@ const _: () = {
     ["Offset of field: TerminalOptions::max_scrollback"]
         [::std::mem::offset_of!(TerminalOptions, max_scrollback) - 8usize];
 };
+pub mod TerminalCompressionMode {
+    #[doc = " Amount of compression work to perform before returning.\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Perform one bounded compression step suitable for idle scheduling."]
+    pub const INCREMENTAL: Type = 0;
+    #[doc = " Synchronously inspect every currently eligible page."]
+    pub const FULL: Type = 1;
+    #[doc = " Synchronously inspect every currently eligible page."]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod TerminalCompressionResult {
+    #[doc = " Scheduling result from terminal compression.\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Retained-mapping reclamation is unavailable on this target."]
+    pub const UNSUPPORTED: Type = 0;
+    #[doc = " More incremental compression work remains."]
+    pub const PENDING: Type = 1;
+    #[doc = " The pass has no continuation to schedule."]
+    pub const COMPLETE: Type = 2;
+    #[doc = " The pass has no continuation to schedule."]
+    pub const MAX_VALUE: Type = 2147483647;
+}
 pub mod TerminalScrollViewportTag {
     #[doc = " Scroll viewport behavior tag.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -2163,6 +2185,106 @@ const _: () = {
 pub type TerminalBellFn = ::std::option::Option<
     unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void),
 >;
+pub mod ClipboardLocation {
+    #[doc = " Clipboard destination for a clipboard write.\n\n Protocol-specific destination identifiers are normalized to these values\n before the clipboard write callback is invoked.\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " The standard system clipboard."]
+    pub const STANDARD: Type = 0;
+    #[doc = " The selection clipboard."]
+    pub const SELECTION: Type = 1;
+    #[doc = " The primary selection clipboard."]
+    pub const PRIMARY: Type = 2;
+    #[doc = " The primary selection clipboard."]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+#[doc = " One MIME representation in a clipboard write.\n\n Both strings are borrowed and valid only for the duration of the callback.\n The data is binary-safe and has already been decoded from any protocol-level\n encoding. A zero-length data string is an explicit empty representation; it\n does not clear the clipboard.\n\n This struct has a frozen layout and will not gain fields in future versions.\n"]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ClipboardContent {
+    #[doc = " MIME type of the representation."]
+    pub mime: String,
+    #[doc = " Decoded, binary-safe representation data."]
+    pub data: String,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of ClipboardContent"][::std::mem::size_of::<ClipboardContent>() - 32usize];
+    ["Alignment of ClipboardContent"][::std::mem::align_of::<ClipboardContent>() - 8usize];
+    ["Offset of field: ClipboardContent::mime"]
+        [::std::mem::offset_of!(ClipboardContent, mime) - 0usize];
+    ["Offset of field: ClipboardContent::data"]
+        [::std::mem::offset_of!(ClipboardContent, data) - 16usize];
+};
+impl Default for ClipboardContent {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[doc = " A semantic, atomic clipboard write.\n\n This is a sized struct. The callback must only access fields present in the\n size reported by `size`. The request, contents array, MIME strings, and\n data strings are all borrowed and valid only for the callback duration.\n\n All entries in `contents` are representations of the same logical value\n and must be committed atomically. A `contents_len` of zero requests that\n the destination be cleared. This is distinct from a content entry whose data\n has zero length.\n"]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct ClipboardWrite {
+    #[doc = " Size of this struct in bytes."]
+    pub size: usize,
+    #[doc = " Clipboard destination."]
+    pub location: ClipboardLocation::Type,
+    #[doc = " Borrowed array of MIME representations."]
+    pub contents: *const ClipboardContent,
+    #[doc = " Number of entries in contents; zero means clear the destination."]
+    pub contents_len: usize,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 32usize];
+    ["Alignment of ClipboardWrite"][::std::mem::align_of::<ClipboardWrite>() - 8usize];
+    ["Offset of field: ClipboardWrite::size"]
+        [::std::mem::offset_of!(ClipboardWrite, size) - 0usize];
+    ["Offset of field: ClipboardWrite::location"]
+        [::std::mem::offset_of!(ClipboardWrite, location) - 8usize];
+    ["Offset of field: ClipboardWrite::contents"]
+        [::std::mem::offset_of!(ClipboardWrite, contents) - 16usize];
+    ["Offset of field: ClipboardWrite::contents_len"]
+        [::std::mem::offset_of!(ClipboardWrite, contents_len) - 24usize];
+};
+impl Default for ClipboardWrite {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+pub mod ClipboardWriteResult {
+    #[doc = " Result of a clipboard write callback.\n\n Protocols without write acknowledgements, including OSC 52 and iTerm2\n OSC 1337 Copy, ignore this result.\n"]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " The clipboard write completed successfully."]
+    pub const SUCCESS: Type = 0;
+    #[doc = " The clipboard write was denied by policy or the user."]
+    pub const DENIED: Type = 1;
+    #[doc = " The destination or one or more representations are unsupported."]
+    pub const UNSUPPORTED: Type = 2;
+    #[doc = " The clipboard is temporarily unavailable."]
+    pub const BUSY: Type = 3;
+    #[doc = " One or more representations contain invalid data."]
+    pub const INVALID_DATA: Type = 4;
+    #[doc = " The clipboard write failed due to an I/O error."]
+    pub const IO_ERROR: Type = 5;
+    #[doc = " The clipboard write failed due to an I/O error."]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+#[doc = " Callback function type for clipboard_write.\n\n Called synchronously for a complete logical clipboard write. Protocol\n details such as OSC 52 selectors, base64 encoding, multipart chunks,\n aliases, and terminators are normalized before this callback is invoked.\n OSC 52 and iTerm2 OSC 1337 Copy writes therefore use the same callback\n shape. OSC 52 clipboard read requests (\"?\") are always ignored and never\n forwarded to this callback.\n\n"]
+pub type TerminalClipboardWriteFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        terminal: Terminal,
+        userdata: *mut ::std::os::raw::c_void,
+        write: *const ClipboardWrite,
+    ) -> ClipboardWriteResult::Type,
+>;
 #[doc = " Callback function type for color scheme queries (CSI ? 996 n).\n\n Called when the terminal receives a color scheme device status report\n query. Return true and fill *out_scheme with the current color scheme,\n or return false to silently ignore the query.\n\n"]
 pub type TerminalColorSchemeFn = ::std::option::Option<
     unsafe extern "C" fn(
@@ -2267,7 +2389,9 @@ pub mod TerminalOption {
     pub const GLYPH_PROTOCOL: Type = 24;
     #[doc = " Callback invoked when the terminal pwd changes via escape\n sequences (OSC 7, OSC 9, or OSC 1337 CurrentDir). Set to NULL\n to ignore pwd change events.\n\n Input type: GhosttyTerminalPwdChangedFn"]
     pub const PWD_CHANGED: Type = 25;
-    #[doc = " Callback invoked when the terminal pwd changes via escape\n sequences (OSC 7, OSC 9, or OSC 1337 CurrentDir). Set to NULL\n to ignore pwd change events.\n\n Input type: GhosttyTerminalPwdChangedFn"]
+    #[doc = " Callback invoked when the running program performs a clipboard write.\n OSC 52 and iTerm2 OSC 1337 Copy writes are normalized to an atomic set\n of decoded MIME representations. Set to NULL to ignore clipboard writes.\n Clipboard read requests are always ignored; see\n GhosttyTerminalClipboardWriteFn.\n\n Input type: GhosttyTerminalClipboardWriteFn"]
+    pub const CLIPBOARD_WRITE: Type = 26;
+    #[doc = " Callback invoked when the running program performs a clipboard write.\n OSC 52 and iTerm2 OSC 1337 Copy writes are normalized to an atomic set\n of decoded MIME representations. Set to NULL to ignore clipboard writes.\n Clipboard read requests are always ignored; see\n GhosttyTerminalClipboardWriteFn.\n\n Input type: GhosttyTerminalClipboardWriteFn"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod TerminalData {
@@ -2383,6 +2507,21 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Scroll the terminal viewport.\n\n Scrolls the terminal's viewport according to the given behavior.\n When using GHOSTTY_SCROLL_VIEWPORT_DELTA, set the delta field in\n the value union to specify the number of rows to scroll (negative\n for up, positive for down). When using GHOSTTY_SCROLL_VIEWPORT_ROW,\n set the row field to the absolute row offset from the top of the\n scrollable area (the same row space as the offset field of\n GhosttyTerminalScrollbar). For other behaviors, the value is ignored.\n\n"]
     pub fn ghostty_terminal_scroll_viewport(terminal: Terminal, behavior: TerminalScrollViewport);
+}
+unsafe extern "C" {
+    #[doc = " Return the current compression activity token.\n\n The token is opaque and only equality comparisons are meaningful. An\n embedding application should cache it and restart its compression idle\n delay whenever the value changes. The value may wrap and changes in either\n direction have the same meaning.\n\n This function only observes terminal state. It does not perform or schedule\n compression.\n\n         is NULL\n"]
+    pub fn ghostty_terminal_compression_activity(
+        terminal: Terminal,
+        out_activity: *mut u64,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Compress eligible terminal scrollback.\n\n Incremental mode performs bounded work suitable for an idle callback. A\n pending result means the application should invoke another step while the\n terminal remains idle. A complete result means no continuation is needed\n until ghostty_terminal_compression_activity() changes. Full mode performs\n one synchronous scan and can stall on large scrollback buffers.\n\n Compression is opportunistic. Complete means the pass has finished, not\n that every page was compressed: pages may be unprofitable or encounter an\n allocation or reclamation failure. Compression changes only the terminal's\n storage representation and never its logical contents or scrollback limit.\n Accessing compressed history restores it transparently.\n\n This function is not thread-safe with other operations on the same\n terminal. The caller must serialize it with writes, rendering, searches,\n and other terminal access.\n\n         or mode is invalid\n"]
+    pub fn ghostty_terminal_compress(
+        terminal: Terminal,
+        mode: TerminalCompressionMode::Type,
+        out_result: *mut TerminalCompressionResult::Type,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get the current value of a terminal mode.\n\n Returns the value of the mode identified by the given mode.\n\n             if it is reset\n         is NULL or the mode does not correspond to a known mode\n"]
@@ -3525,7 +3664,7 @@ pub mod Key {
 unsafe extern "C" {
     #[doc = " Create a new key event instance.\n\n Creates a new key event with default values. The event must be freed using\n ghostty_key_event_free() when no longer needed.\n\n"]
     pub fn ghostty_key_event_new(allocator: *const Allocator, event: *mut KeyEvent)
-    -> Result::Type;
+        -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Free a key event instance.\n\n Releases all resources associated with the key event. After this call,\n the event handle becomes invalid and must not be used.\n\n"]
