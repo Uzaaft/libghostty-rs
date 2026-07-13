@@ -223,16 +223,122 @@ impl From<RgbColor> for ffi::ColorRgb {
 }
 
 /// A 256-color palette.
-pub type Palette = [RgbColor; 256];
+#[derive(Clone, Copy, Debug)]
+pub struct Palette(pub [RgbColor; 256]);
+
+// Saves a bit of typing
+pub(crate) type RawPalette = [ffi::ColorRgb; 256];
+
+impl From<RawPalette> for Palette {
+    fn from(v: RawPalette) -> Self {
+        Self(v.map(RgbColor::from))
+    }
+}
+impl From<Palette> for RawPalette {
+    fn from(v: Palette) -> Self {
+        v.0.map(ffi::ColorRgb::from)
+    }
+}
+
+impl Default for Palette {
+    /// Get Ghostty's built-in default 256-color palette.
+    ///
+    /// Returns Ghostty's base16 defaults, the xterm 6x6x6 color cube, and the
+    /// grayscale ramp.
+    fn default() -> Self {
+        let mut raw = [ffi::ColorRgb::default(); 256];
+        unsafe { ffi::ghostty_color_palette_default(raw.as_mut_ptr()) };
+        raw.into()
+    }
+}
+
+impl Palette {
+    /// Get the color at the given palette index.
+    pub fn get(&self, index: PaletteIndex) -> RgbColor {
+        self.0[index.0 as usize]
+    }
+
+    /// Set the color at the given palette index.
+    pub fn set(&mut self, index: PaletteIndex, color: RgbColor) {
+        self.0[index.0 as usize] = color;
+    }
+
+    /// Parse a Ghostty palette entry.
+    ///
+    /// Accepts Ghostty palette config syntax: `N=COLOR`. `N` is a palette index
+    /// from 0 to 255 in decimal or in `0x`, `0o`, or `0b`-prefixed form. Spaces and
+    /// tabs around `N` and `COLOR` are ignored. `COLOR` accepts the same syntax as
+    /// [`RgbColor::parse`].
+    pub fn parse_palette_entry(value: &str) -> Result<(PaletteIndex, RgbColor)> {
+        let mut index = MaybeUninit::uninit();
+        let mut rgb = MaybeUninit::uninit();
+        let result = unsafe {
+            ffi::ghostty_color_parse_palette_entry(
+                value.as_ptr().cast(),
+                value.len(),
+                index.as_mut_ptr(),
+                rgb.as_mut_ptr(),
+            )
+        };
+        crate::error::from_result(result)?;
+        Ok((
+            PaletteIndex(unsafe { index.assume_init() }),
+            unsafe { rgb.assume_init() }.into(),
+        ))
+    }
+
+    /// Generate a 256-color palette from base colors.
+    ///
+    /// The base palette supplies indices 0-15, which are always preserved. If
+    /// `base` is [`None`], Ghostty's default palette is used. If `skip` is
+    /// [`None`], no extra indices are skipped. Set bits in `skip` preserve those
+    /// indices from `base`. The 216-color cube at indices 16-231 is generated with
+    /// trilinear CIELAB interpolation, and the grayscale ramp at indices 232-255 is
+    /// interpolated from the background to the foreground.
+    ///
+    /// For light themes, `harmonious` controls whether the generated palette keeps
+    /// the background-to-foreground orientation. When false, Ghostty swaps the
+    /// light background and dark foreground so the cube and ramp run dark-to-light.
+    #[must_use]
+    pub fn generate(
+        base: Option<&Self>,
+        skip: Option<&PaletteMask>,
+        background: RgbColor,
+        foreground: RgbColor,
+        harmonious: bool,
+    ) -> Self {
+        let raw_base = base.map(|palette| palette.0.map(ffi::ColorRgb::from));
+        let base_ptr = raw_base
+            .as_ref()
+            .map_or(std::ptr::null(), |palette| palette.as_ptr());
+        let skip_ptr = skip
+            .as_ref()
+            .map_or(std::ptr::null(), |mask| &raw const mask.0);
+        let mut raw_out = [ffi::ColorRgb::default(); 256];
+        let bg: ffi::ColorRgb = background.into();
+        let fg: ffi::ColorRgb = foreground.into();
+
+        unsafe {
+            ffi::ghostty_color_palette_generate(
+                base_ptr,
+                skip_ptr,
+                &raw const bg,
+                &raw const fg,
+                harmonious,
+                raw_out.as_mut_ptr(),
+            );
+        }
+
+        raw_out.into()
+    }
+}
 
 /// A 256-bit mask of palette indices.
 ///
-/// Index `i` is set iff `(bits[i >> 6] >> (i & 63)) & 1` is 1. The mask is
-/// typically initialized to zero and then populated with [`PaletteMask::set`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub struct PaletteMask {
-    bits: [u64; 4],
-}
+/// The mask is typically initialized to zero and then populated with
+/// [`PaletteMask::set`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PaletteMask(ffi::ColorPaletteMask);
 
 impl PaletteMask {
     /// Create an empty palette mask.
@@ -244,148 +350,85 @@ impl PaletteMask {
     /// Set a palette index in this mask.
     pub fn set(&mut self, index: PaletteIndex) {
         let index = usize::from(index.0);
-        self.bits[index / 64] |= 1_u64 << (index % 64);
+        self.0.bits[index / 64] |= 1_u64 << (index % 64);
     }
 
     /// Return whether a palette index is set in this mask.
     #[must_use]
     pub fn is_set(self, index: PaletteIndex) -> bool {
         let index = usize::from(index.0);
-        (self.bits[index / 64] & (1_u64 << (index % 64))) != 0
+        (self.0.bits[index / 64] & (1_u64 << (index % 64))) != 0
     }
 }
-
-/// Get Ghostty's built-in default 256-color palette.
-///
-/// Returns Ghostty's base16 defaults, the xterm 6x6x6 color cube, and the
-/// grayscale ramp.
-#[must_use]
-pub fn default_palette() -> Palette {
-    let mut raw = [ffi::ColorRgb::default(); 256];
-    unsafe { ffi::ghostty_color_palette_default(raw.as_mut_ptr()) };
-    raw.map(RgbColor::from)
+impl PartialEq for PaletteMask {
+    fn eq(&self, v: &Self) -> bool {
+        self.0.bits.eq(&v.0.bits)
+    }
 }
+impl Eq for PaletteMask {}
 
-/// Generate a 256-color palette from base colors.
-///
-/// The base palette supplies indices 0-15, which are always preserved. If
-/// `base` is [`None`], Ghostty's default palette is used. If `skip` is
-/// [`None`], no extra indices are skipped. Set bits in `skip` preserve those
-/// indices from `base`. The 216-color cube at indices 16-231 is generated with
-/// trilinear CIELAB interpolation, and the grayscale ramp at indices 232-255 is
-/// interpolated from the background to the foreground.
-///
-/// For light themes, `harmonious` controls whether the generated palette keeps
-/// the background-to-foreground orientation. When false, Ghostty swaps the
-/// light background and dark foreground so the cube and ramp run dark-to-light.
-#[must_use]
-pub fn generate_palette(
-    base: Option<&Palette>,
-    skip: Option<&PaletteMask>,
-    background: RgbColor,
-    foreground: RgbColor,
-    harmonious: bool,
-) -> Palette {
-    let raw_base = base.map(|palette| palette.map(ffi::ColorRgb::from));
-    let base_ptr = raw_base
-        .as_ref()
-        .map_or(std::ptr::null(), |palette| palette.as_ptr());
-    let raw_skip = skip.map(|mask| ffi::ColorPaletteMask { bits: mask.bits });
-    let skip_ptr = raw_skip.as_ref().map_or(std::ptr::null(), |mask| mask);
-    let mut raw_out = [ffi::ColorRgb::default(); 256];
-
-    unsafe {
-        ffi::ghostty_color_palette_generate(
-            base_ptr,
-            skip_ptr,
-            background.into(),
-            foreground.into(),
-            harmonious,
-            raw_out.as_mut_ptr(),
-        );
+impl RgbColor {
+    /// Parse an X11 color name.
+    ///
+    /// The color name is resolved from Ghostty's embedded rgb.txt table. Leading
+    /// and trailing spaces and tabs are trimmed, and matching is ASCII
+    /// case-insensitive. Hex values are not accepted by this function.
+    pub fn parse_x11_color(name: &str) -> Result<Self> {
+        let mut out = MaybeUninit::uninit();
+        let result = unsafe {
+            ffi::ghostty_color_parse_x11(name.as_ptr().cast(), name.len(), out.as_mut_ptr())
+        };
+        crate::error::from_result(result)?;
+        Ok(unsafe { out.assume_init() }.into())
     }
 
-    raw_out.map(RgbColor::from)
-}
+    /// Parse a flexible Ghostty color value.
+    ///
+    /// Accepts Ghostty's terminal color syntax: X11 color names, hex colors in 3-,
+    /// 6-, 9-, or 12-digit form (the leading `#` is optional for 3- and 6-digit
+    /// values), and `rgb:<red>/<green>/<blue>` or
+    /// `rgbi:<red>/<green>/<blue>` specifications. Leading and trailing spaces and
+    /// tabs are trimmed.
+    pub fn parse(value: &str) -> Result<Self> {
+        let mut out = MaybeUninit::uninit();
+        let result = unsafe {
+            ffi::ghostty_color_parse(value.as_ptr().cast(), value.len(), out.as_mut_ptr())
+        };
+        crate::error::from_result(result)?;
+        Ok(unsafe { out.assume_init() }.into())
+    }
 
-/// Parse an X11 color name.
-///
-/// The color name is resolved from Ghostty's embedded rgb.txt table. Leading
-/// and trailing spaces and tabs are trimmed, and matching is ASCII
-/// case-insensitive. Hex values are not accepted by this function.
-pub fn parse_x11_color(name: &str) -> Result<RgbColor> {
-    let mut out = MaybeUninit::uninit();
-    let result =
-        unsafe { ffi::ghostty_color_parse_x11(name.as_ptr().cast(), name.len(), out.as_mut_ptr()) };
-    crate::error::from_result(result)?;
-    Ok(unsafe { out.assume_init() }.into())
-}
+    /// Calculate W3C relative luminance for an RGB color.
+    ///
+    /// Returns a normalized value from 0.0 for black to 1.0 for white. See
+    /// <https://www.w3.org/TR/WCAG20/#relativeluminancedef>.
+    #[must_use]
+    pub fn luminance(self) -> f64 {
+        let this: ffi::ColorRgb = self.into();
+        unsafe { ffi::ghostty_color_luminance(&raw const this) }
+    }
 
-/// Parse a flexible Ghostty color value.
-///
-/// Accepts Ghostty's terminal color syntax: X11 color names, hex colors in 3-,
-/// 6-, 9-, or 12-digit form (the leading `#` is optional for 3- and 6-digit
-/// values), and `rgb:<red>/<green>/<blue>` or
-/// `rgbi:<red>/<green>/<blue>` specifications. Leading and trailing spaces and
-/// tabs are trimmed.
-pub fn parse_color(value: &str) -> Result<RgbColor> {
-    let mut out = MaybeUninit::uninit();
-    let result =
-        unsafe { ffi::ghostty_color_parse(value.as_ptr().cast(), value.len(), out.as_mut_ptr()) };
-    crate::error::from_result(result)?;
-    Ok(unsafe { out.assume_init() }.into())
-}
+    /// Calculate perceived luminance for an RGB color.
+    ///
+    /// Returns a normalized value from 0.0 for black to 1.0 for white. Ghostty
+    /// treats a background color as light when this exceeds 0.5. This is not the
+    /// metric used internally by [`Palette::generate`], which uses CIELAB lightness.
+    #[must_use]
+    pub fn perceived_luminance(self) -> f64 {
+        let this: ffi::ColorRgb = self.into();
+        unsafe { ffi::ghostty_color_perceived_luminance(&raw const this) }
+    }
 
-/// Parse a Ghostty palette entry.
-///
-/// Accepts Ghostty palette config syntax: `N=COLOR`. `N` is a palette index
-/// from 0 to 255 in decimal or in `0x`, `0o`, or `0b`-prefixed form. Spaces and
-/// tabs around `N` and `COLOR` are ignored. `COLOR` accepts the same syntax as
-/// [`parse_color`].
-pub fn parse_palette_entry(value: &str) -> Result<(PaletteIndex, RgbColor)> {
-    let mut index = MaybeUninit::uninit();
-    let mut rgb = MaybeUninit::uninit();
-    let result = unsafe {
-        ffi::ghostty_color_parse_palette_entry(
-            value.as_ptr().cast(),
-            value.len(),
-            index.as_mut_ptr(),
-            rgb.as_mut_ptr(),
-        )
-    };
-    crate::error::from_result(result)?;
-    Ok((
-        PaletteIndex(unsafe { index.assume_init() }),
-        unsafe { rgb.assume_init() }.into(),
-    ))
-}
-
-/// Calculate W3C relative luminance for an RGB color.
-///
-/// Returns a normalized value from 0.0 for black to 1.0 for white. See
-/// <https://www.w3.org/TR/WCAG20/#relativeluminancedef>.
-#[must_use]
-pub fn luminance(color: RgbColor) -> f64 {
-    unsafe { ffi::ghostty_color_luminance(color.into()) }
-}
-
-/// Calculate perceived luminance for an RGB color.
-///
-/// Returns a normalized value from 0.0 for black to 1.0 for white. Ghostty
-/// treats a background color as light when this exceeds 0.5. This is not the
-/// metric used internally by [`generate_palette`], which uses CIELAB lightness.
-#[must_use]
-pub fn perceived_luminance(color: RgbColor) -> f64 {
-    unsafe { ffi::ghostty_color_perceived_luminance(color.into()) }
-}
-
-/// Calculate the WCAG contrast ratio between two RGB colors.
-///
-/// The contrast ratio is symmetric and ranges from 1.0 for identical colors to
-/// 21.0 for black and white.
-#[must_use]
-pub fn contrast(a: RgbColor, b: RgbColor) -> f64 {
-    unsafe { ffi::ghostty_color_contrast(a.into(), b.into()) }
+    /// Calculate the WCAG contrast ratio between two RGB colors.
+    ///
+    /// The contrast ratio is symmetric and ranges from 1.0 for identical colors to
+    /// 21.0 for black and white.
+    #[must_use]
+    pub fn contrast(self, other: RgbColor) -> f64 {
+        let this: ffi::ColorRgb = self.into();
+        let that: ffi::ColorRgb = other.into();
+        unsafe { ffi::ghostty_color_contrast(&raw const this, &raw const that) }
+    }
 }
 
 /// An entry in Ghostty's X11 color name table.
@@ -422,7 +465,7 @@ impl X11ColorNames {
     ///
     /// Entries are in rgb.txt order. Aliases are separate entries, such as
     /// `"medium spring green"` and `"MediumSpringGreen"`. Names are the exact
-    /// supported spellings from rgb.txt; [`parse_x11_color`] also matches them
+    /// supported spellings from rgb.txt; [`RgbColor::parse_x11_color`] also matches them
     /// case-insensitively.
     #[must_use]
     pub fn new() -> Self {
@@ -480,8 +523,13 @@ impl Iterator for X11ColorNamesIter {
         self.entries.size_hint()
     }
 }
-
+impl DoubleEndedIterator for X11ColorNamesIter {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.entries.next_back().map(x11_color_name_from_entry)
+    }
+}
 impl ExactSizeIterator for X11ColorNamesIter {}
+impl std::iter::FusedIterator for X11ColorNamesIter {}
 
 fn x11_color_name_from_entry(entry: &ffi::ColorX11Entry) -> X11ColorName {
     let name = unsafe { CStr::from_ptr(entry.name) };
