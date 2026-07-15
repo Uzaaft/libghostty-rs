@@ -79,7 +79,7 @@
         commonArgs =
           {
             pname = "libghostty-rs";
-            version = "0.2.0";
+            version = "0.2.1";
             inherit src;
             strictDeps = true;
             cargoExtraArgs = "--locked --features libghostty-vt-sys/pkg-config";
@@ -150,7 +150,7 @@
 
           cargo-fmt = craneCheckLib.cargoFmt {
             pname = "libghostty-rs";
-            version = "0.2.0";
+            version = "0.2.1";
             inherit src;
           };
 
