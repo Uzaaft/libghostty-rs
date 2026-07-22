@@ -261,10 +261,22 @@ impl Terminal<'_, '_> {
     pub fn is_kitty_image_from_file_allowed(&self) -> Result<bool> {
         self.get(ffi::TerminalData::KITTY_IMAGE_MEDIUM_FILE)
     }
-    /// Whether the temporary file medium is enabled for Kitty image loading
-    /// on the active screen.
-    pub fn is_kitty_image_from_temp_file_allowed(&self) -> Result<bool> {
-        self.get(ffi::TerminalData::KITTY_IMAGE_MEDIUM_TEMP_FILE)
+    /// The directory allowed for Kitty image loading via the temporary file
+    /// medium on the active screen, or `None` when the medium is disabled.
+    ///
+    /// Returns a borrowed string, valid until the next mutating terminal call
+    /// (e.g. [`Terminal::vt_write`] or [`Terminal::reset`]).
+    pub fn kitty_image_temp_file_dir(&self) -> Result<Option<&str>> {
+        let str = self.get::<ffi::String>(ffi::TerminalData::KITTY_IMAGE_MEDIUM_TEMP_FILE)?;
+        if str.len == 0 {
+            return Ok(None);
+        }
+        // SAFETY: We trust libghostty to return a valid borrowed string,
+        // while we uphold that no mutation could happen during its lifetime.
+        let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
+        std::str::from_utf8(str)
+            .map(Some)
+            .map_err(|_| Error::InvalidValue)
     }
     /// Whether the shared memory medium is enabled for Kitty image loading
     /// on the active screen.
@@ -287,11 +299,16 @@ impl Terminal<'_, '_> {
         self.set(ffi::TerminalOption::KITTY_IMAGE_MEDIUM_FILE, &allowed)?;
         Ok(self)
     }
-    /// Enable or disable Kitty image loading via the temporary file medium.
+    /// Enable Kitty image loading via the temporary file medium, restricted
+    /// to the given directory. A `None` value disables the medium. The
+    /// string is copied into the terminal.
     ///
     /// Has no effect when Kitty graphics are disabled at build time.
-    pub fn set_kitty_image_from_temp_file_allowed(&mut self, allowed: bool) -> Result<&mut Self> {
-        self.set(ffi::TerminalOption::KITTY_IMAGE_MEDIUM_TEMP_FILE, &allowed)?;
+    pub fn set_kitty_image_temp_file_dir(&mut self, dir: Option<&str>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::KITTY_IMAGE_MEDIUM_TEMP_FILE,
+            dir.map(ffi::String::from).as_ref(),
+        )?;
         Ok(self)
     }
     /// Enable or disable Kitty image loading via the shared memory medium.

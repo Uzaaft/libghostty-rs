@@ -119,8 +119,9 @@ async fn main() -> Result<()> {
         .set_kitty_image_storage_limit(64 * 1024 * 1024)?
         // Allow images to be transmitted via file, temp file, and shared
         // memory mediums in addition to the default inline (direct) medium.
+        // The temp file medium is restricted to the system temp directory.
         .set_kitty_image_from_file_allowed(true)?
-        .set_kitty_image_from_temp_file_allowed(true)?
+        .set_kitty_image_temp_file_dir(Some(&std::env::temp_dir().to_string_lossy()))?
         .set_kitty_image_from_shared_mem_allowed(true)?;
 
     // Register effects so the terminal can respond to VT queries (device
