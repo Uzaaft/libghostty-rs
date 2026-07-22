@@ -2,7 +2,7 @@
 
 ## Building
 
-- Requires Zig 0.15.x on PATH and a Nix dev shell
+- Requires Zig 0.16.x on PATH and a Nix dev shell
 - Enter dev shell: `nix develop`
 - Check: `cargo check`
 - Test: `cargo test -p libghostty-vt-sys`

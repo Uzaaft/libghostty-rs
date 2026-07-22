@@ -19,7 +19,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     ghostty = {
-      url = "github:ghostty-org/ghostty/a887df42c56f6de86c0fe6da9c4eeca37931e083";
+      url = "github:ghostty-org/ghostty/ab0b9da9e88fcb4b0533a1854e84628f663930af";
     };
   };
 
@@ -58,7 +58,7 @@
         craneCheckLib = (crane.mkLib pkgs).overrideToolchain checkToolchain;
         unfilteredRoot = ./.;
 
-        zigPkg = zig.packages.${system}."0.15.2";
+        zigPkg = zig.packages.${system}."0.16.0";
         ghosttyLib = ghostty.packages.${system}.libghostty-vt;
 
         src = pkgs.lib.fileset.toSource {
