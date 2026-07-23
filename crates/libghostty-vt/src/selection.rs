@@ -198,6 +198,21 @@ impl<'t> Selection<'t> {
 
 /// Methods related to [selections](crate::selection).
 impl Terminal<'_, '_> {
+    /// Get the active screen's current selection.
+    ///
+    /// On success, returns an untracked snapshot of the terminal-owned selection.
+    /// The [`Selection`] object is caller-owned and may be kept, but the grid
+    /// references inside it are untracked borrowed references into the active screen.
+    /// They are only valid until the next mutating terminal call, such as
+    /// the various `Terminal::set_*` methods, [`Terminal::vt_write`],
+    /// [`Terminal::resize`], or [`Terminal::reset`].
+    ///
+    /// Returns `Ok(None)` when there is no active selection.
+    pub fn selection(&self) -> Result<Option<Selection<'_>>> {
+        self.get_optional::<ffi::Selection>(ffi::TerminalData::SELECTION)
+            .map(|v| v.map(|raw| unsafe { Selection::from_raw(raw) }))
+    }
+
     /// Set the active screen selection.
     ///
     /// The selection's grid references must be valid for this terminal's
