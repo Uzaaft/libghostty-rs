@@ -191,6 +191,7 @@
 use std::{
     cell::RefCell,
     mem::{ManuallyDrop, MaybeUninit},
+    path::Path,
 };
 
 use crate::{
@@ -304,10 +305,16 @@ impl Terminal<'_, '_> {
     /// string is copied into the terminal.
     ///
     /// Has no effect when Kitty graphics are disabled at build time.
-    pub fn set_kitty_image_temp_file_dir(&mut self, dir: Option<&str>) -> Result<&mut Self> {
+    pub fn set_kitty_image_temp_file_dir(&mut self, dir: Option<&Path>) -> Result<&mut Self> {
+        // GhosttyString carries UTF-8, so reject paths that
+        // [`Terminal::kitty_image_temp_file_dir`] could never read back.
+        let dir = dir
+            .map(|dir| dir.to_str().ok_or(Error::InvalidValue))
+            .transpose()?
+            .map(ffi::String::from);
         self.set_optional(
             ffi::TerminalOption::KITTY_IMAGE_MEDIUM_TEMP_FILE,
-            dir.map(ffi::String::from).as_ref(),
+            dir.as_ref(),
         )?;
         Ok(self)
     }
