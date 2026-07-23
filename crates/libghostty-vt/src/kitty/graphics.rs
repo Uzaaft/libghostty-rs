@@ -190,6 +190,7 @@
 
 use std::{
     cell::RefCell,
+    ffi::OsStr,
     mem::{ManuallyDrop, MaybeUninit},
     path::Path,
 };
@@ -265,19 +266,32 @@ impl Terminal<'_, '_> {
     /// The directory allowed for Kitty image loading via the temporary file
     /// medium on the active screen, or `None` when the medium is disabled.
     ///
-    /// Returns a borrowed string, valid until the next mutating terminal call
+    /// Returns a borrowed path, valid until the next mutating terminal call
     /// (e.g. [`Terminal::vt_write`] or [`Terminal::reset`]).
-    pub fn kitty_image_temp_file_dir(&self) -> Result<Option<&str>> {
+    pub fn kitty_image_temp_file_dir(&self) -> Result<Option<&Path>> {
         let str = self.get::<ffi::String>(ffi::TerminalData::KITTY_IMAGE_MEDIUM_TEMP_FILE)?;
         if str.len == 0 {
             return Ok(None);
         }
         // SAFETY: We trust libghostty to return a valid borrowed string,
         // while we uphold that no mutation could happen during its lifetime.
-        let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
-        std::str::from_utf8(str)
-            .map(Some)
-            .map_err(|_| Error::InvalidValue)
+        let bytes = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
+        // SAFETY:
+        // Whilst the `OsStr::from_encoded_bytes_unchecked` function states that the
+        // exact OsStr encoding format is an implementation detail and no external bytes
+        // should rely on which exact encoding is used... In reality this should always
+        // work without issue, since both Zig and Rust basically share the same underlying
+        // string format.
+        //
+        // On Unix-like platforms, both Zig and Rust agree that a file path is just an
+        // arbitrary sequence of bytes without any NULs in between. The tricky part is
+        // that Windows uses (noncompliant) UTF-16 file paths natively and it just so
+        // happens both Zig and Rust use WTF-8 as a workaround against that whole can
+        // of worms, though in Rust it's more of an implementation detail.
+        // The Kitty graphics protocol itself is poorly defined on Windows, but for all
+        // intents and purposes, the bytes are always valid `OsStr`s and `Path`s.
+        let os_str = unsafe { OsStr::from_encoded_bytes_unchecked(bytes) };
+        Ok(Some(Path::new(os_str)))
     }
     /// Whether the shared memory medium is enabled for Kitty image loading
     /// on the active screen.
