@@ -48,4 +48,4 @@ jobs:
         run: cargo build -p libghostty-vt --target ${{ matrix.target }}
 
       - name: Test libghostty-vt
-        run: cargo test -p libghostty-vt --target ${{ matrix.target }}
+        run: cargo test -p libghostty-vt --lib --target ${{ matrix.target }}
