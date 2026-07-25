@@ -207,7 +207,16 @@ fn build_vendored(link_mode: LinkMode) {
     }
     match link_mode {
         LinkMode::Dynamic => println!("cargo:rustc-link-lib=dylib=ghostty-vt"),
-        LinkMode::Static => println!("cargo:rustc-link-lib=static=ghostty-vt"),
+        LinkMode::Static => {
+            // MSVC resolves `ghostty-vt` to `ghostty-vt.lib`, which is the DLL
+            // import library. Ghostty names the actual static archive
+            // `ghostty-vt-static.lib` to avoid that collision.
+            if target.contains("windows") && target.contains("msvc") {
+                println!("cargo:rustc-link-lib=static=ghostty-vt-static");
+            } else {
+                println!("cargo:rustc-link-lib=static=ghostty-vt");
+            }
+        }
     }
     emit_include_metadata(&[include_dir]);
 }
