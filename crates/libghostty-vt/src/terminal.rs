@@ -635,6 +635,16 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn is_mouse_tracking(&self) -> Result<bool> {
         self.get(Data::MOUSE_TRACKING)
     }
+    /// Whether VT processing encountered a non-gracefully handled error that
+    /// may have prevented a terminal-owned semantic update.
+    ///
+    /// Processing remains best-effort, and [`Terminal::reset`] does not clear
+    /// this flag; it is purely informational. Gracefully handled protocol
+    /// failures, configured limits, malformed or unsupported input, and
+    /// failures limited to external effects or query responses do not set it.
+    pub fn vt_processing_error(&self) -> Result<bool> {
+        self.get(Data::VT_PROCESSING_ERROR)
+    }
     /// Get the terminal title as set by escape sequences (e.g. OSC 0/2).
     ///
     /// Returns a borrowed string, valid until the next call to

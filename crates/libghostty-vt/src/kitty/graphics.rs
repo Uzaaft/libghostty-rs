@@ -190,7 +190,9 @@
 
 use std::{
     cell::RefCell,
+    ffi::OsStr,
     mem::{ManuallyDrop, MaybeUninit},
+    path::Path,
 };
 
 use crate::{
@@ -261,10 +263,35 @@ impl Terminal<'_, '_> {
     pub fn is_kitty_image_from_file_allowed(&self) -> Result<bool> {
         self.get(ffi::TerminalData::KITTY_IMAGE_MEDIUM_FILE)
     }
-    /// Whether the temporary file medium is enabled for Kitty image loading
-    /// on the active screen.
-    pub fn is_kitty_image_from_temp_file_allowed(&self) -> Result<bool> {
-        self.get(ffi::TerminalData::KITTY_IMAGE_MEDIUM_TEMP_FILE)
+    /// The directory allowed for Kitty image loading via the temporary file
+    /// medium on the active screen, or `None` when the medium is disabled.
+    ///
+    /// Returns a borrowed path, valid until the next mutating terminal call
+    /// (e.g. [`Terminal::vt_write`] or [`Terminal::reset`]).
+    pub fn kitty_image_temp_file_dir(&self) -> Result<Option<&Path>> {
+        let str = self.get::<ffi::String>(ffi::TerminalData::KITTY_IMAGE_MEDIUM_TEMP_FILE)?;
+        if str.len == 0 {
+            return Ok(None);
+        }
+        // SAFETY: We trust libghostty to return a valid borrowed string,
+        // while we uphold that no mutation could happen during its lifetime.
+        let bytes = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
+        // SAFETY:
+        // Whilst the `OsStr::from_encoded_bytes_unchecked` function states that the
+        // exact OsStr encoding format is an implementation detail and no external bytes
+        // should rely on which exact encoding is used... In reality this should always
+        // work without issue, since both Zig and Rust basically share the same underlying
+        // string format.
+        //
+        // On Unix-like platforms, both Zig and Rust agree that a file path is just an
+        // arbitrary sequence of bytes without any NULs in between. The tricky part is
+        // that Windows uses (noncompliant) UTF-16 file paths natively and it just so
+        // happens both Zig and Rust use WTF-8 as a workaround against that whole can
+        // of worms, though in Rust it's more of an implementation detail.
+        // The Kitty graphics protocol itself is poorly defined on Windows, but for all
+        // intents and purposes, the bytes are always valid `OsStr`s and `Path`s.
+        let os_str = unsafe { OsStr::from_encoded_bytes_unchecked(bytes) };
+        Ok(Some(Path::new(os_str)))
     }
     /// Whether the shared memory medium is enabled for Kitty image loading
     /// on the active screen.
@@ -287,11 +314,22 @@ impl Terminal<'_, '_> {
         self.set(ffi::TerminalOption::KITTY_IMAGE_MEDIUM_FILE, &allowed)?;
         Ok(self)
     }
-    /// Enable or disable Kitty image loading via the temporary file medium.
+    /// Enable Kitty image loading via the temporary file medium, restricted
+    /// to the given directory. A `None` value disables the medium. The
+    /// string is copied into the terminal.
     ///
     /// Has no effect when Kitty graphics are disabled at build time.
-    pub fn set_kitty_image_from_temp_file_allowed(&mut self, allowed: bool) -> Result<&mut Self> {
-        self.set(ffi::TerminalOption::KITTY_IMAGE_MEDIUM_TEMP_FILE, &allowed)?;
+    pub fn set_kitty_image_temp_file_dir(&mut self, dir: Option<&Path>) -> Result<&mut Self> {
+        // GhosttyString carries UTF-8, so reject paths that
+        // [`Terminal::kitty_image_temp_file_dir`] could never read back.
+        let dir = dir
+            .map(|dir| dir.to_str().ok_or(Error::InvalidValue))
+            .transpose()?
+            .map(ffi::String::from);
+        self.set_optional(
+            ffi::TerminalOption::KITTY_IMAGE_MEDIUM_TEMP_FILE,
+            dir.as_ref(),
+        )?;
         Ok(self)
     }
     /// Enable or disable Kitty image loading via the shared memory medium.

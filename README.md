@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Building
 
-Requires [Zig](https://ziglang.org/) 0.15.x on PATH. By default, the ghostty
+Requires [Zig](https://ziglang.org/) 0.16.x on PATH. By default, the ghostty
 source is fetched automatically at build time from the pinned commit in
 `build.rs`. Set `GHOSTTY_SOURCE_DIR` to make the build use a local Ghostty
 checkout instead. Package managers that need network-free builds can also set
