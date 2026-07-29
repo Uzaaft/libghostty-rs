@@ -561,11 +561,23 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn rows(&self) -> Result<u16> {
         self.get(Data::ROWS)
     }
-    /// Get the cursor column position (inner-indexed).
+    /// Get the total width of the terminal in pixels.
+    ///
+    /// This is `cols * cell_width_px` as set by [`Terminal::resize`].
+    pub fn width_px(&self) -> Result<u32> {
+        self.get(Data::WIDTH_PX)
+    }
+    /// Get the total height of the terminal in pixels.
+    ///
+    /// This is `rows * cell_height_px` as set by [`Terminal::resize`].
+    pub fn height_px(&self) -> Result<u32> {
+        self.get(Data::HEIGHT_PX)
+    }
+    /// Get the cursor column position (0-indexed).
     pub fn cursor_x(&self) -> Result<u16> {
         self.get(Data::CURSOR_X)
     }
-    /// Get the cursor row position within the active area (inner-indexed).
+    /// Get the cursor row position within the active area (0-indexed).
     pub fn cursor_y(&self) -> Result<u16> {
         self.get(Data::CURSOR_Y)
     }
@@ -592,9 +604,16 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     /// Get the scrollbar state for the terminal viewport.
     ///
-    /// This may be expensive to calculate depending on where the viewport is
-    /// (arbitrary pins are expensive). The caller should take care to only call
-    /// this as needed and not too frequently.
+    /// This is amortized `O(1)`: the total is maintained incrementally as
+    /// the terminal is modified and the viewport offset is cached. The
+    /// first read after the viewport moves to an arbitrary position that
+    /// isn't an absolute row (e.g. scrolling to a selection) may cost
+    /// `O(pages)` to compute the offset, after which it is cached again.
+    ///
+    /// There is intentionally no change notification for scroll state.
+    /// Callers building scrollbars should poll this once per frame or
+    /// per write batch and diff the result to detect changes; this is
+    /// what Ghostty's own renderer does.
     pub fn scrollbar(&self) -> Result<Scrollbar> {
         self.get(Data::SCROLLBAR)
     }
@@ -602,9 +621,16 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn active_screen(&self) -> Result<Screen> {
         self.get(Data::ACTIVE_SCREEN)
     }
+    /// Whether the viewport is currently pinned to the active area.
+    ///
+    /// This is true when the viewport is following the active terminal area,
+    /// and false when the user has scrolled into history.
+    pub fn viewport_active(&self) -> Result<bool> {
+        self.get(Data::VIEWPORT_ACTIVE)
+    }
     /// Get whether any mouse tracking mode is active.
     ///
-    /// Returns true if any of the mouse tracking modes (X1inner, normal, button,
+    /// Returns true if any of the mouse tracking modes (X10, normal, button,
     /// or any-event) are enabled.
     pub fn is_mouse_tracking(&self) -> Result<bool> {
         self.get(Data::MOUSE_TRACKING)
@@ -619,7 +645,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn vt_processing_error(&self) -> Result<bool> {
         self.get(Data::VT_PROCESSING_ERROR)
     }
-    /// Get the terminal title as set by escape sequences (e.g. OSC inner/2).
+    /// Get the terminal title as set by escape sequences (e.g. OSC 0/2).
     ///
     /// Returns a borrowed string, valid until the next call to
     /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
