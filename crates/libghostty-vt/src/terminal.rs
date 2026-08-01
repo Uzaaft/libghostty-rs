@@ -1439,6 +1439,35 @@ pub enum ClipboardWriteError {
     IoError = ffi::ClipboardWriteResult::IO_ERROR,
 }
 
+/// A request to show a desktop notification.
+#[derive(Debug, Copy, Clone)]
+pub struct DesktopNotification<'t> {
+    ptr: *const ffi::TerminalDesktopNotification,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> DesktopNotification<'t> {
+    unsafe fn from_raw(raw: *const ffi::TerminalDesktopNotification) -> Self {
+        Self {
+            ptr: raw,
+            _phan: PhantomData,
+        }
+    }
+
+    /// Get the notification title, or an empty string when the protocol omits it.
+    pub fn title(self) -> &'t str {
+        // SAFETY: We trust libghostty to give us a valid underlying ptr
+        // AND that the title contains to a valid UTF-8 string.
+        unsafe { (*self.ptr).title.to_str() }
+    }
+    /// Notification body.
+    pub fn body(self) -> &'t str {
+        // SAFETY: We trust libghostty to give us a valid underlying ptr
+        // AND that the title contains to a valid UTF-8 string.
+        unsafe { (*self.ptr).body.to_str() }
+    }
+}
+
 //---------------------------------------
 // Callbacks
 //---------------------------------------
@@ -1765,6 +1794,17 @@ handlers! {
             Ok(_) => ffi::ClipboardWriteResult::SUCCESS,
             Err(e) => e.into()
         }
+    }
+
+    pub fn on_desktop_notification(
+        &mut self,
+        tag = CLIPBOARD_WRITE,
+        from = GhosttyTerminalDesktopNotificationFn(
+            notif: *const ffi::TerminalDesktopNotification
+        ),
+        to = <'t>DesktopNotificationFn(DesktopNotification<'t>),
+    ) |term, func| {
+        func(&term, unsafe { DesktopNotification::from_raw(notif) });
     }
 }
 
