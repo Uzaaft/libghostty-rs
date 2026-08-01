@@ -1468,6 +1468,57 @@ impl<'t> DesktopNotification<'t> {
     }
 }
 
+/// A progress report emitted by the running program.
+#[derive(Debug, Copy, Clone)]
+pub struct ProgressReport<'t> {
+    ptr: *const ffi::TerminalProgressReport,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> ProgressReport<'t> {
+    unsafe fn from_raw(raw: *const ffi::TerminalProgressReport) -> Self {
+        Self {
+            ptr: raw,
+            _phan: PhantomData,
+        }
+    }
+
+    /// Literal progress state reported by the running program.
+    pub fn state(self) -> Result<ProgressState> {
+        // SAFETY: We trust libghostty to give us a valid underlying ptr
+        unsafe { *self.ptr }
+            .state
+            .try_into()
+            .map_err(|_| Error::InvalidValue)
+    }
+
+    /// Progress percentage from 0 through 100, or `None` when omitted.
+    pub fn progress(self) -> Option<u8> {
+        // SAFETY: We trust libghostty to give us a valid underlying ptr
+        match unsafe { *self.ptr }.progress {
+            ..=-1 => None,
+            v => Some(v as u8),
+        }
+    }
+}
+
+/// State of a terminal progress report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(u32)]
+#[non_exhaustive]
+pub enum ProgressState {
+    /// Remove any visible progress indication.
+    Remove = ffi::TerminalProgressState::REMOVE,
+    /// Show determinate progress.
+    Set = ffi::TerminalProgressState::SET,
+    /// Show a failed progress state.
+    Error = ffi::TerminalProgressState::ERROR,
+    /// Show indeterminate progress.
+    Indeterminate = ffi::TerminalProgressState::INDETERMINATE,
+    /// Show paused progress.
+    Pause = ffi::TerminalProgressState::PAUSE,
+}
+
 //---------------------------------------
 // Callbacks
 //---------------------------------------
@@ -1774,7 +1825,6 @@ handlers! {
 
     /// Call the given function when the running program performs a clipboard write.
     ///
-    ///
     /// Protocol details such as OSC 52 selectors, base64 encoding, multipart
     /// chunks, aliases, and terminators are normalized before this callback is
     /// invoked. OSC 52 and iTerm2 OSC 1337 Copy writes therefore use the same
@@ -1796,15 +1846,30 @@ handlers! {
         }
     }
 
+    /// Callback invoked when the running program requests a desktop
+    /// notification via OSC 9 or OSC 777.
     pub fn on_desktop_notification(
         &mut self,
-        tag = CLIPBOARD_WRITE,
+        tag = DESKTOP_NOTIFICATION,
         from = GhosttyTerminalDesktopNotificationFn(
             notif: *const ffi::TerminalDesktopNotification
         ),
         to = <'t>DesktopNotificationFn(DesktopNotification<'t>),
     ) |term, func| {
         func(&term, unsafe { DesktopNotification::from_raw(notif) });
+    }
+
+    /// Call the given function when the running program reports progress
+    /// via OSC 9;4.
+    pub fn on_progress_report(
+        &mut self,
+        tag = PROGRESS_REPORT,
+        from = GhosttyTerminalProgressReportFn(
+            progress: *const ffi::TerminalProgressReport
+        ),
+        to = <'t>ProgressReportFn(ProgressReport<'t>),
+    ) |term, func| {
+        func(&term, unsafe { ProgressReport::from_raw(progress) });
     }
 }
 
