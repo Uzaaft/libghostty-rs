@@ -22,7 +22,6 @@ use macroquad::{
 use nix::sys::wait;
 
 use libghostty_vt::{
-    Terminal, TerminalOptions,
     alloc::Bytes,
     build_info,
     key::{self, Key},
@@ -34,7 +33,7 @@ use libghostty_vt::{
     terminal::{
         ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Point,
         PointCoordinate, PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes,
-        SizeReportSize,
+        SizeReportSize, Terminal,
     },
 };
 
@@ -102,11 +101,8 @@ async fn main() -> Result<()> {
     // Create a ghostty virtual terminal with the computed grid and 1000
     // lines of scrollback.  This holds all the parsed screen state (cells,
     // cursor, styles, modes) but knows nothing about the pty or the window.
-    let mut terminal = Terminal::new(TerminalOptions {
-        cols,
-        rows,
-        max_scrollback: 1000,
-    })?;
+    let mut terminal = Terminal::new(cols, rows)?;
+    terminal.set_scrollback_max_lines(Some(1000))?;
 
     // The terminal options don't include cell pixel dimensions, so
     // issue an initial resize to set them.  Without this, Kitty

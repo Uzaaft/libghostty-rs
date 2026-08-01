@@ -71,7 +71,6 @@
 //! ```
 //! use libghostty_vt::{
 //!     Terminal,
-//!     TerminalOptions,
 //!     alloc::{Allocator, Bytes},
 //!     kitty::graphics,
 //! };
@@ -109,79 +108,75 @@
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     graphics::set_png_decoder(Some(Box::new(StubPngDecoder)))?;
 //!
-//!     let mut terminal = Terminal::new(TerminalOptions {
-//!        cols: 80,
-//!        rows: 24,
-//!        max_scrollback: 0
-//!    })?;
+//!     let mut terminal = Terminal::new(80, 24)?;
 //!
-//!    // Set cell pixel dimensions so kitty graphics can compute grid sizes.
-//!    terminal.resize(80, 24, 8, 16)?;
+//!     // Set cell pixel dimensions so kitty graphics can compute grid sizes.
+//!     terminal.resize(80, 24, 8, 16)?;
 //!
-//!    // Set a storage limit (64MiB) to enable Kitty graphics.
-//!    terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?;
+//!     // Set a storage limit (64MiB) to enable Kitty graphics.
+//!     terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?;
 //!
-//!    // Install pty_write to see the protocol response.
-//!    terminal.on_pty_write(|_, data| println!("{}", data.escape_ascii()))?;
+//!     // Install pty_write to see the protocol response.
+//!     terminal.on_pty_write(|_, data| println!("{}", data.escape_ascii()))?;
 //!
-//!    // Send a Kitty graphics command with an inline 1x1 PNG image.
-//!    //
-//!    // The escape sequence is:
-//!    //   ESC _G a=T,f=100,q=1; <base64 PNG data> ESC \
-//!    //
-//!    // Where:
-//!    //   a=T   — transmit and display
-//!    //   f=100 — PNG format
-//!    //   q=1   — request a response (q=0 would suppress it)
-//!    println!("Sending Kitty graphics PNG image:");
-//!    terminal.vt_write(
-//!      b"\x1b_Ga=T,f=100,q=1;\
-//!       iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA\
-//!       DUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\
-//!      \x1b\\"
-//!    );
+//!     // Send a Kitty graphics command with an inline 1x1 PNG image.
+//!     //
+//!     // The escape sequence is:
+//!     //   ESC _G a=T,f=100,q=1; <base64 PNG data> ESC \
+//!     //
+//!     // Where:
+//!     //   a=T   — transmit and display
+//!     //   f=100 — PNG format
+//!     //   q=1   — request a response (q=0 would suppress it)
+//!     println!("Sending Kitty graphics PNG image:");
+//!     terminal.vt_write(
+//!       b"\x1b_Ga=T,f=100,q=1;\
+//!        iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA\
+//!        DUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\
+//!       \x1b\\"
+//!     );
 //!
-//!    let graphics = terminal.kitty_graphics()?;
-//!    let mut iter = graphics::PlacementIterator::new()?;
-//!    let mut placements = iter.update(&graphics)?;
+//!     let graphics = terminal.kitty_graphics()?;
+//!     let mut iter = graphics::PlacementIterator::new()?;
+//!     let mut placements = iter.update(&graphics)?;
 //!
-//!    let mut placement_count = 0usize;
-//!    while let Some(placement) = placements.next() {
-//!        placement_count += 1;
-//!        let image_id = placement.image_id()?;
+//!     let mut placement_count = 0usize;
+//!     while let Some(placement) = placements.next() {
+//!         placement_count += 1;
+//!         let image_id = placement.image_id()?;
+//!         println!(
+//!             "  placement #{}: image_id={} placement_id={} virtual={} z={}",
+//!             placement_count,
+//!             image_id,
+//!             placement.placement_id()?,
+//!             placement.is_virtual()?,
+//!             placement.z()?,
+//!        );
+//!
+//!        // Look up the image and print its properties.
+//!        let image = graphics.image(image_id).unwrap();
 //!        println!(
-//!            "  placement #{}: image_id={} placement_id={} virtual={} z={}",
-//!            placement_count,
-//!            image_id,
-//!            placement.placement_id()?,
-//!            placement.is_virtual()?,
-//!            placement.z()?,
-//!       );
+//!            "    image: number={} size={}x{} format={:?} data_len={}",
+//!            image.number()?,
+//!            image.width()?,
+//!            image.height()?,
+//!            image.format()?,
+//!            image.data()?.len(),
+//!        );
 //!
-//!       // Look up the image and print its properties.
-//!       let image = graphics.image(image_id).unwrap();
-//!       println!(
-//!           "    image: number={} size={}x{} format={:?} data_len={}",
-//!           image.number()?,
-//!           image.width()?,
-//!           image.height()?,
-//!           image.format()?,
-//!           image.data()?.len(),
-//!       );
-//!
-//!       let pixel_size = placement.pixel_size(&image, &terminal)?;
-//!       println!(
-//!           "    rendered pixel size: {}x{}",
-//!           pixel_size.width, pixel_size.height,
-//!       );
-//!       let grid_size = placement.grid_size(&image, &terminal)?;
-//!       println!(
-//!           "    grid size: {} cols x {} rows",
-//!           grid_size.cols, grid_size.rows,
-//!       );
-//!    }
-//!    println!("Total placements: {placement_count}");
-//!    Ok(())
+//!        let pixel_size = placement.pixel_size(&image, &terminal)?;
+//!        println!(
+//!            "    rendered pixel size: {}x{}",
+//!            pixel_size.width, pixel_size.height,
+//!        );
+//!        let grid_size = placement.grid_size(&image, &terminal)?;
+//!        println!(
+//!            "    grid size: {} cols x {} rows",
+//!            grid_size.cols, grid_size.rows,
+//!        );
+//!     }
+//!     println!("Total placements: {placement_count}");
+//!     Ok(())
 //! }
 //! ```
 //!

@@ -12,16 +12,12 @@ Rust bindings and safe API for [libghostty-vt](https://ghostty.org), the virtual
 ## Quick Start
 
 ```rust
-use libghostty_vt::{Terminal, TerminalOptions, RenderState};
+use libghostty_vt::{Terminal, RenderState};
 use libghostty_vt::render::{RowIterator, CellIterator};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create a terminal with 80 columns, 24 rows, and scrollback.
-    let mut terminal = Terminal::new(TerminalOptions {
-        cols: 80,
-        rows: 24,
-        max_scrollback: 10_000,
-    })?;
+    // Create a terminal with 80 columns and 24 rows.
+    let mut terminal = Terminal::new(80, 24)?;
 
     // Register an effect handler for PTY write-back (e.g. query responses).
     terminal.on_pty_write(|_term, data| {

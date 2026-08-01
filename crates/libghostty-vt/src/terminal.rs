@@ -25,14 +25,10 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 /// ## Example: VT stream processing
 ///
 /// ```
-/// use libghostty_vt::{Terminal, TerminalOptions};
+/// use libghostty_vt::Terminal;
 ///
 /// // Create a terminal
-/// let mut terminal = Terminal::new(TerminalOptions {
-///     cols: 80,
-///     rows: 24,
-///     max_scrollback: 0,
-/// }).unwrap();
+/// let mut terminal = Terminal::new(80, 24).unwrap();
 ///
 /// // Feed VT data into the terminal
 /// terminal.vt_write(b"Hello, World!\r\n");
@@ -96,7 +92,7 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 ///
 /// ```rust
 /// use std::cell::Cell;
-/// use libghostty_vt::{Terminal, TerminalOptions};
+/// use libghostty_vt::Terminal;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// // Set up a simple bell counter.
@@ -110,12 +106,7 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 /// // during the lifetime of the terminal.
 /// let bell_count = Cell::new(0usize);
 ///
-/// let mut terminal = Terminal::new(TerminalOptions {
-///     cols: 80,
-///     rows: 24,
-///     max_scrollback: 0,
-/// })?;
-///
+/// let mut terminal = Terminal::new(80, 24)?;
 /// terminal
 ///     .on_pty_write(|_term, data| {
 ///         println!("Replying {} bytes to the PTY", data.len());
@@ -234,27 +225,6 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
     vtable: Box<VTable<'alloc, 'cb>>,
 }
 
-/// Terminal initialization options.
-#[derive(Clone, Copy, Debug)]
-pub struct Options {
-    /// Terminal width in cells. Must be greater than zero.
-    pub cols: u16,
-    /// Terminal height in cells. Must be greater than zero.
-    pub rows: u16,
-    /// Maximum number of lines to keep in scrollback history.
-    pub max_scrollback: usize,
-}
-
-impl From<Options> for ffi::TerminalOptions {
-    fn from(value: Options) -> Self {
-        Self {
-            cols: value.cols,
-            rows: value.rows,
-            max_scrollback: value.max_scrollback,
-        }
-    }
-}
-
 /// Default visual style used when the cursor style is reset.
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
@@ -272,26 +242,35 @@ pub enum CursorStyle {
 
 impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Create a new terminal instance.
-    pub fn new(opts: Options) -> Result<Self> {
+    ///
+    /// The terminal starts with various reasonable defaults e.g. around
+    /// scrollback limits. Use the `Terminal::set_*` family of methods
+    /// to change any options prior to using the terminal.
+    pub fn new(cols: u16, rows: u16) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null(), opts) }
+        unsafe { Self::new_inner(std::ptr::null(), cols, rows) }
     }
 
     /// Create a new terminal instance with a custom allocator.
+    ///
+    /// The terminal starts with various reasonable defaults e.g. around
+    /// scrollback limits. Use the `Terminal::set_*` family of methods
+    /// to change any options prior to using the terminal.
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
     pub fn new_with_alloc<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
-        opts: Options,
+        cols: u16,
+        rows: u16,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
-        unsafe { Self::new_inner(alloc.to_raw(), opts) }
+        unsafe { Self::new_inner(alloc.to_raw(), cols, rows) }
     }
 
-    unsafe fn new_inner(alloc: *const ffi::Allocator, opts: Options) -> Result<Self> {
+    unsafe fn new_inner(alloc: *const ffi::Allocator, cols: u16, rows: u16) -> Result<Self> {
         let mut raw: ffi::Terminal = std::ptr::null_mut();
-        let result = unsafe { ffi::ghostty_terminal_new(alloc, &raw mut raw, opts.into()) };
+        let result = unsafe { ffi::ghostty_terminal_new(alloc, &raw mut raw, cols, rows) };
         from_result(result)?;
         Ok(Self {
             inner: Object::new(raw)?,
@@ -573,6 +552,69 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn height_px(&self) -> Result<u32> {
         self.get(Data::HEIGHT_PX)
     }
+
+    /// The configured maximum scrollback allocation in bytes.
+    ///
+    /// This always reports the primary screen's configured value, including
+    /// while an alternate screen is active.
+    ///
+    /// Returns `None` when the configured byte limit is unlimited.
+    pub fn scrollback_max_bytes(&self) -> Result<Option<usize>> {
+        self.get_optional(Data::SCROLLBACK_MAX_BYTES)
+    }
+
+    /// Set the maximum scrollback allocation in bytes.
+    ///
+    /// This is an estimate. Internally, libghostty only prunes bytes up
+    /// to a "page"-granularity. A page is the minimum allocated unit of
+    /// grid space within Ghostty. A page at the time of writing these docs
+    /// is about 400KB, so the byte limit will be within this delta.
+    ///
+    /// This works alongside the line limit configuration. If both are set,
+    /// the first-reached limit is used first. Both limits are dependent
+    /// on external state (byte limit can be reached with less lines if
+    /// more styles are used for example, line limit can be reached with
+    /// a narrower terminal viewport). So, they are useful together.
+    ///
+    /// Lowering the limit immediately removes eligible complete historical
+    /// pages. A value of zero disables scrollback and erases retained history.
+    /// A `None` value removes the byte limit.
+    pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<()> {
+        self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())
+    }
+
+    /// The configured maximum number of physical scrollback lines.
+    ///
+    /// This always reports the primary screen's configured value, including
+    /// while an alternate screen is active.
+    ///
+    /// Returns `None` when the configured line limit is unlimited.
+    pub fn scrollback_max_lines(&self) -> Result<Option<usize>> {
+        self.get_optional(Data::SCROLLBACK_MAX_LINES)
+    }
+
+    /// Set the maximum number of physical lines retained in scrollback.
+    ///
+    /// This is an estimate. Internally, libghostty only prunes lines up
+    /// to a "page"-granularity. A page is the minimum allocated unit of
+    /// grid space within Ghostty. As a result, the actual available scrollback
+    /// lines will almost always be higher than configured. The magnitude
+    /// of the difference depends on the number of used styles, graphemes, etc.
+    /// since the row-count in a page is dynamic based on that. In general,
+    /// it ranges from dozens to a hundred or so lines.
+    ///
+    /// This works alongside the byte limit configuration. If both are set,
+    /// the first-reached limit is used first. Both limits are dependent
+    /// on external state (byte limit can be reached with less lines if
+    /// more styles are used for example, line limit can be reached with
+    /// a narrower terminal viewport). So, they are useful together.
+    ///
+    /// Lowering the limit immediately removes eligible complete historical
+    /// pages. A `None` value pointer removes the line limit.
+    pub fn set_scrollback_max_lines(&mut self, v: Option<usize>) -> Result<()> {
+        self.set_optional(Opt::SCROLLBACK_MAX_LINES, v.as_ref())
+    }
+
     /// Get the cursor column position (0-indexed).
     pub fn cursor_x(&self) -> Result<u16> {
         self.get(Data::CURSOR_X)
@@ -1736,12 +1778,7 @@ mod tests {
 
     #[inline(never)]
     fn build_terminal<'cb>(callback_count: &'cb RefCell<usize>) -> Terminal<'static, 'cb> {
-        let mut terminal = Terminal::new(Options {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 1000,
-        })
-        .expect("terminal should initialize");
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
             .on_device_attributes(move |_term| {
@@ -1813,12 +1850,7 @@ mod tests {
         let captured_title: RefCell<String> = RefCell::new(String::new());
         let callback_count: Cell<usize> = Cell::new(0);
 
-        let mut terminal = Terminal::new(Options {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 0,
-        })
-        .expect("terminal should initialize");
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
             .on_title_changed(|term| {
@@ -1848,12 +1880,7 @@ mod tests {
         let captured_pwd: RefCell<String> = RefCell::new(String::new());
         let callback_count: Cell<usize> = Cell::new(0);
 
-        let mut terminal = Terminal::new(Options {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 0,
-        })
-        .expect("terminal should initialize");
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
             .on_pwd_changed(|term| {
@@ -1874,12 +1901,7 @@ mod tests {
 
     #[test]
     fn default_cursor_reset_uses_configured_style_and_blink() {
-        let mut terminal = Terminal::new(Options {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 0,
-        })
-        .expect("terminal should initialize");
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         let mut render_state = RenderState::new().expect("render state should initialize");
 
         terminal
@@ -1908,12 +1930,7 @@ mod tests {
 
     #[test]
     fn glyph_protocol_enabled_setting_updates() {
-        let mut terminal = Terminal::new(Options {
-            cols: 80,
-            rows: 24,
-            max_scrollback: 0,
-        })
-        .expect("terminal should initialize");
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
             .set_glyph_protocol_enabled(false)
@@ -1937,12 +1954,7 @@ mod tests {
     }
 
     fn tiny_terminal() -> Terminal<'static, 'static> {
-        Terminal::new(Options {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 100,
-        })
-        .expect("terminal should initialize")
+        Terminal::new(8, 3).expect("terminal should initialize")
     }
 
     fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> u32 {

@@ -1,9 +1,9 @@
 use std::{error::Error, io};
 
 use libghostty_vt::{
-    Terminal, TerminalOptions,
     screen::TrackedGridRef,
     terminal::{Point, PointCoordinate, PointSpace},
+    Terminal,
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -24,11 +24,7 @@ fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRe
 }
 
 fn main() -> Result<()> {
-    let mut terminal = Terminal::new(TerminalOptions {
-        cols: 8,
-        rows: 3,
-        max_scrollback: 100,
-    })?;
+    let mut terminal = Terminal::new(8, 3).unwrap();
 
     terminal.vt_write(b"alpha\r\nbravo\r\ncharlie");
 

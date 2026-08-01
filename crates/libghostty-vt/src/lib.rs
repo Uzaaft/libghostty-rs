@@ -116,7 +116,7 @@ pub use crate::{
     error::Error,
     log::{Logger, set_logger},
     render::RenderState,
-    terminal::{Options as TerminalOptions, Terminal},
+    terminal::Terminal,
 };
 
 pub(crate) fn sys_set<T>(opt: ffi::SysOption::Type, val: *const T) -> error::Result<()> {
