@@ -1178,6 +1178,7 @@ impl Mode {
     pub const SYNC_OUTPUT: Self = Self::new(2026, ModeKind::Dec);
     pub const GRAPHEME_CLUSTER: Self = Self::new(2027, ModeKind::Dec);
     pub const COLOR_SCHEME_REPORT: Self = Self::new(2031, ModeKind::Dec);
+    pub const VISIBILITY_REPORT: Self = Self::new(2033, ModeKind::Dec);
     pub const IN_BAND_RESIZE: Self = Self::new(2048, ModeKind::Dec);
 }
 
