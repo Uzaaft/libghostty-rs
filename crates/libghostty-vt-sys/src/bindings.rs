@@ -2483,6 +2483,24 @@ pub type TerminalWritePtyFn = ::std::option::Option<
 pub type TerminalXtversionFn = ::std::option::Option<
     unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void) -> String,
 >;
+#[doc = " A terminal mode and boolean value used for mode configuration and queries.\n\n For GHOSTTY_TERMINAL_DATA_MODE, initialize `mode` before calling\n ghostty_terminal_get(). On success, `value` contains the current mode value.\n\n This struct has a frozen layout and will not gain fields in future versions.\n"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct TerminalModeConfig {
+    #[doc = " Mode to configure or query."]
+    pub mode: Mode,
+    #[doc = " Value to set, or the current value returned by a query."]
+    pub value: bool,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of TerminalModeConfig"][::std::mem::size_of::<TerminalModeConfig>() - 4usize];
+    ["Alignment of TerminalModeConfig"][::std::mem::align_of::<TerminalModeConfig>() - 2usize];
+    ["Offset of field: TerminalModeConfig::mode"]
+        [::std::mem::offset_of!(TerminalModeConfig, mode) - 0usize];
+    ["Offset of field: TerminalModeConfig::value"]
+        [::std::mem::offset_of!(TerminalModeConfig, value) - 2usize];
+};
 pub mod TerminalOption {
     #[doc = " Terminal option identifiers.\n\n These values are used with ghostty_terminal_set() to configure\n terminal callbacks and associated state.\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -2552,7 +2570,11 @@ pub mod TerminalOption {
     pub const CONTINUATION_MAX_BYTES: Type = 31;
     #[doc = " Enable window title reports in response to CSI 21 t.\n\n This is disabled by default because a running program can set a title and\n query it back into the pty input stream, potentially injecting commands\n that execute after user interaction. Passing NULL or a pointer to false\n disables title reporting.\n\n Input type: bool*"]
     pub const TITLE_REPORT: Type = 32;
-    #[doc = " Enable window title reports in response to CSI 21 t.\n\n This is disabled by default because a running program can set a title and\n query it back into the pty input stream, potentially injecting commands\n that execute after user interaction. Passing NULL or a pointer to false\n disables title reporting.\n\n Input type: bool*"]
+    #[doc = " Set the reset default for a terminal mode.\n\n This unconditionally updates both the current value and the value restored\n by a full terminal reset (RIS).\n\n Some recognized modes represent transitions or mirror additional terminal\n state and cannot safely be configured as reset defaults. Those modes return\n GHOSTTY_INVALID_VALUE. A NULL value pointer also returns\n GHOSTTY_INVALID_VALUE.\n\n Input type: GhosttyTerminalModeConfig*"]
+    pub const MODE_DEFAULT: Type = 33;
+    #[doc = " Set the current value of a terminal mode.\n\n This does not change the value restored by a full terminal reset (RIS).\n A NULL value pointer or unknown mode returns GHOSTTY_INVALID_VALUE.\n\n Input type: GhosttyTerminalModeConfig*"]
+    pub const MODE: Type = 34;
+    #[doc = " Set the current value of a terminal mode.\n\n This does not change the value restored by a full terminal reset (RIS).\n A NULL value pointer or unknown mode returns GHOSTTY_INVALID_VALUE.\n\n Input type: GhosttyTerminalModeConfig*"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod TerminalData {
@@ -2632,7 +2654,9 @@ pub mod TerminalData {
     pub const SCROLLBACK_MAX_LINES: Type = 35;
     #[doc = " The configured maximum retained VT continuation size in bytes.\n\n A value of zero means continuation tracking is disabled. This reports the\n configured limit even when a current unfinished continuation is\n temporarily unavailable.\n\n Output type: size_t *"]
     pub const CONTINUATION_MAX_BYTES: Type = 36;
-    #[doc = " The configured maximum retained VT continuation size in bytes.\n\n A value of zero means continuation tracking is disabled. This reports the\n configured limit even when a current unfinished continuation is\n temporarily unavailable.\n\n Output type: size_t *"]
+    #[doc = " Get the current value of a terminal mode.\n\n The caller must initialize the `mode` field. On success, the `value` field\n is updated with the current value. A NULL pointer or unknown mode returns\n GHOSTTY_INVALID_VALUE.\n\n Input/output type: GhosttyTerminalModeConfig *"]
+    pub const MODE: Type = 37;
+    #[doc = " Get the current value of a terminal mode.\n\n The caller must initialize the `mode` field. On success, the `value` field\n is updated with the current value. A NULL pointer or unknown mode returns\n GHOSTTY_INVALID_VALUE.\n\n Input/output type: GhosttyTerminalModeConfig *"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
@@ -2714,18 +2738,6 @@ unsafe extern "C" {
         mode: TerminalCompressionMode::Type,
         out_result: *mut TerminalCompressionResult::Type,
     ) -> Result::Type;
-}
-unsafe extern "C" {
-    #[doc = " Get the current value of a terminal mode.\n\n Returns the value of the mode identified by the given mode.\n\n             if it is reset\n         is NULL or the mode does not correspond to a known mode\n"]
-    pub fn ghostty_terminal_mode_get(
-        terminal: Terminal,
-        mode: Mode,
-        out_value: *mut bool,
-    ) -> Result::Type;
-}
-unsafe extern "C" {
-    #[doc = " Set the value of a terminal mode.\n\n Sets the mode identified by the given mode to the specified value.\n\n         is NULL or the mode does not correspond to a known mode\n"]
-    pub fn ghostty_terminal_mode_set(terminal: Terminal, mode: Mode, value: bool) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Get data from a terminal instance.\n\n Extracts typed data from the given terminal based on the specified\n data type. The output pointer must be of the appropriate type for the\n requested data kind. Valid data types and output types are documented\n in the `GhosttyTerminalData` enum.\n\n         is NULL or the data type is invalid\n"]
