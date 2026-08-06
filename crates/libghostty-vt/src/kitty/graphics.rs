@@ -161,7 +161,7 @@
 //!            image.width()?,
 //!            image.height()?,
 //!            image.format()?,
-//!            image.data()?.len(),
+//!            image.data()?.unwrap().len(),
 //!        );
 //!
 //!        let pixel_size = placement.pixel_size(&image, &terminal)?;
@@ -421,16 +421,21 @@ impl<'t> Image<'t> {
     pub fn height(&self) -> Result<u32> {
         self.get(ffi::KittyGraphicsImageData::HEIGHT)
     }
-    /// Generation stamp assigned when this image was added to or replaced in the storage.
+
+    /// Generation stamp assigned when this image was added to (or replaced in)
+    /// the storage.
     ///
     /// A changed generation for a given image ID means the pixel contents may
     /// have changed even when the dimensions, format, and data length are
-    /// identical, for example a retransmission of the same image ID, so texture
+    /// identical (e.g. a retransmission of the same image ID), so texture
     /// caches must key staleness on this value rather than on size heuristics.
     ///
-    /// Stamps are unique and monotonically increasing process-wide and are drawn
-    /// from the same sequence as [`Graphics::generation`]. Never zero for a
-    /// stored image, so zero can be used as an empty sentinel by callers.
+    /// Stamps are unique and monotonically increasing process-wide and are
+    /// drawn from the same sequence as [`Graphics::generation`]. Never zero
+    /// for a stored image, so zero can be used as an "empty" sentinel by
+    /// callers. Pending payload completion preserves this value to retain
+    /// image age; consumers detect that completion through
+    /// [`Graphics::generation`] and retry [`Image::data`].
     pub fn generation(&self) -> Result<u64> {
         self.get(ffi::KittyGraphicsImageData::GENERATION)
     }
@@ -444,15 +449,29 @@ impl<'t> Image<'t> {
         self.get::<ffi::KittyImageCompression::Type>(ffi::KittyGraphicsImageData::COMPRESSION)
             .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
+
     /// Borrowed pointer to the raw pixel data.
     ///
     /// Valid as long as the underlying terminal is not mutated.
-    pub fn data(&self) -> Result<&'t [u8]> {
+    ///
+    /// Returns `None` when the image metadata is resident but its pixel
+    /// payload is pending.
+    ///
+    /// The data is always fully decoded, uncompressed pixels in the format
+    /// reported by [`Image::format`]: zlib payloads are inflated and PNG
+    /// payloads are decoded to RGBA at transmission time, before the image
+    /// is stored. Consumers can upload this directly to the GPU without any
+    /// decode step.
+    pub fn data(&self) -> Result<Option<&'t [u8]>> {
         let ptr = self.get::<*const u8>(ffi::KittyGraphicsImageData::DATA_PTR)?;
+        if ptr.is_null() {
+            return Ok(None);
+        }
+
         let len = self.get::<usize>(ffi::KittyGraphicsImageData::DATA_LEN)?;
 
         // SAFETY: We trust libghostty to return valid results
-        Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
+        Ok(Some(unsafe { std::slice::from_raw_parts(ptr, len) }))
     }
 }
 
