@@ -109,6 +109,7 @@ pub mod render;
 pub mod screen;
 pub mod selection;
 pub mod sgr;
+pub mod snapshot;
 pub mod style;
 pub mod unicode;
 

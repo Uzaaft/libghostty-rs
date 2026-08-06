@@ -275,6 +275,10 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let mut raw: ffi::Terminal = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_terminal_new(alloc, &raw mut raw, cols, rows) };
         from_result(result)?;
+        unsafe { Self::from_raw(raw) }
+    }
+
+    pub(crate) unsafe fn from_raw(raw: ffi::Terminal) -> Result<Self> {
         Ok(Self {
             inner: Object::new(raw)?,
             vtable: Box::new(VTable::default()),
