@@ -431,18 +431,63 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     /// Get the current value of a terminal mode.
     pub fn mode(&self, mode: Mode) -> Result<bool> {
-        let mut value = false;
+        let mut mode = ffi::TerminalModeConfig {
+            mode: mode.into(),
+            value: false,
+        };
+
         let result = unsafe {
-            ffi::ghostty_terminal_mode_get(self.inner.as_raw(), mode.into(), &raw mut value)
+            ffi::ghostty_terminal_get(
+                self.inner.as_raw(),
+                Data::MODE,
+                &raw mut mode as *mut std::ffi::c_void,
+            )
         };
         from_result(result)?;
-        Ok(value)
+        Ok(mode.value)
     }
 
-    /// Set the value of a terminal mode.
+    /// Set the current value of a terminal mode.
+    ///
+    /// This does not change the value restored by a full terminal reset (RIS).
     pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
-        let result =
-            unsafe { ffi::ghostty_terminal_mode_set(self.inner.as_raw(), mode.into(), value) };
+        let mode = ffi::TerminalModeConfig {
+            mode: mode.into(),
+            value,
+        };
+
+        let result = unsafe {
+            ffi::ghostty_terminal_set(
+                self.inner.as_raw(),
+                Opt::MODE,
+                &raw const mode as *const std::ffi::c_void,
+            )
+        };
+        from_result(result)?;
+        Ok(self)
+    }
+
+    /// Set the reset default for a terminal mode.
+    ///
+    /// This unconditionally updates both the current value and the value
+    /// restored by a full terminal reset (RIS).
+    ///
+    /// Some recognized modes represent transitions or mirror additional
+    /// terminal state and cannot safely be configured as reset defaults.
+    /// Those modes return [`Error::InvalidValue`].
+    pub fn set_default_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
+        let mode = ffi::TerminalModeConfig {
+            mode: mode.into(),
+            value,
+        };
+
+        let result = unsafe {
+            ffi::ghostty_terminal_set(
+                self.inner.as_raw(),
+                Opt::MODE_DEFAULT,
+                &raw const mode as *const std::ffi::c_void,
+            )
+        };
         from_result(result)?;
         Ok(self)
     }
