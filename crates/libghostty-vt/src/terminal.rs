@@ -792,7 +792,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
     /// Get the currently active screen.
     pub fn active_screen(&self) -> Result<Screen> {
-        self.get(Data::ACTIVE_SCREEN)
+        self.get::<ffi::TerminalScreen::Type>(Data::ACTIVE_SCREEN)
+            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
     /// Whether the viewport is currently pinned to the active area.
     ///
