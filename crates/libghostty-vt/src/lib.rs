@@ -98,6 +98,7 @@ pub mod build_info;
 pub mod error;
 pub mod fmt;
 pub mod focus;
+pub(crate) mod io;
 pub mod key;
 pub mod kitty;
 pub mod log;
