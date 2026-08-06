@@ -1,10 +1,13 @@
 //! Types and functions around terminal state management.
 
-use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
+use std::{io::Write, marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
-    alloc::{Allocator, Object},
-    error::{Error, Result, from_optional_result_uninit, from_result, from_result_with_len},
+    alloc::{Allocator, Bytes, Object},
+    error::{
+        Error, Result, from_optional_result, from_optional_result_uninit,
+        from_optional_result_with_len, from_result, from_result_with_len,
+    },
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
     key,
     screen::{GridRef, Screen, TrackedGridRef},
@@ -483,6 +486,131 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         };
         from_result(result)?;
         Ok(CompressionActivity(value))
+    }
+
+    /// The configured maximum retained VT continuation size in bytes.
+    ///
+    /// A value of zero means continuation tracking is disabled. This reports
+    /// the configured limit even when a current unfinished continuation is
+    /// temporarily unavailable.
+    pub fn continuation_max_bytes(&self) -> Result<usize> {
+        self.get(Data::CONTINUATION_MAX_BYTES)
+    }
+
+    /// Set the maximum number of replay-safe VT continuation bytes retained.
+    ///
+    /// Continuation bytes reconstruct an escape sequence or UTF-8 codepoint
+    /// which was unfinished at the end of the most recent [`Terminal::vt_write`]
+    /// call. They are used automatically by terminal snapshots and may also be
+    /// exported directly with the continuation APIs.
+    ///
+    /// Tracking is disabled by default. A nonzero value enables tracking and
+    /// sets its byte limit. Passing zero disables tracking. Lowering the limit
+    /// below an already-retained continuation, or enabling tracking while the
+    /// parser is already unfinished, makes the current continuation unavailable
+    /// because earlier bytes cannot be reconstructed. Tracking recovers
+    /// automatically after a later write reaches the ground state or contains
+    /// a fresh replay start.
+    pub fn set_continuation_max_bytes(&mut self, v: usize) -> Result<()> {
+        self.set(Opt::CONTINUATION_MAX_BYTES, &v)
+    }
+
+    /// Write the terminal's replay-safe VT continuation to a callback writer.
+    ///
+    /// The continuation is the exact byte suffix needed to reconstruct
+    /// unfinished VT parser or UTF-8 decoder state in an equivalent terminal.
+    /// It is empty when the stream is at ground. The callback is invoked
+    /// synchronously and may be called more than once. It must not call
+    /// terminal APIs with the same terminal handle.
+    ///
+    /// Continuation tracking must have been enabled by calling
+    /// [`Terminal::set_continuation_max_bytes`] with a nonzero value before
+    /// the input that produced the continuation was written.    
+    ///
+    /// # Errors
+    ///
+    /// This function returns [`Error::IoError`] if the callback rejects a
+    /// write, [`Error::LimitExceeded`] if output accounting overflows, or
+    /// [`Error::InvalidValue`] if an argument is invalid, tracking is disabled,
+    /// or the current continuation is unavailable.
+    pub fn continuation_write<W: Write>(&mut self, writer: &mut W) -> Result<()> {
+        let writer = crate::io::to_writer(writer);
+        let result =
+            unsafe { ffi::ghostty_terminal_continuation_write(self.inner.as_raw(), writer) };
+        from_result(result)
+    }
+
+    /// Return an allocated copy of the terminal's replay-safe VT continuation.
+    ///
+    /// The returned bytes are allocated with allocator, or the default allocator
+    /// when allocator is `None`. An empty continuation is a successful zero-length
+    /// allocation. Continuation tracking must have been enabled by callling
+    /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
+    /// input that produced the continuation was written.
+    ///
+    /// The caller must serialize this operation with all other access to the same
+    /// terminal.
+    ///
+    /// # Errors
+    ///
+    /// This function returns [`Error::OutOfMemory`] on allocation failure, or
+    /// [`Error::InvalidValue`] if an argument is invalid, tracking is disabled,
+    /// or the current continuation is unavailable.
+    pub fn continuation_alloc<'a, 'ctx: 'a>(
+        &self,
+        alloc: Option<&'a Allocator<'ctx>>,
+    ) -> Result<Option<Bytes<'a>>> {
+        let mut out = std::ptr::null_mut();
+        let mut out_len = 0usize;
+        let alloc = alloc.map_or(std::ptr::null(), |v| v.to_raw());
+
+        let result = unsafe {
+            ffi::ghostty_terminal_continuation_alloc(
+                self.inner.as_raw(),
+                alloc,
+                &raw mut out,
+                &raw mut out_len,
+            )
+        };
+
+        let out = from_optional_result(result, out)?;
+        Ok(out
+            .and_then(NonNull::new)
+            .map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
+    }
+
+    /// Copy the terminal's replay-safe VT continuation into a caller buffer.
+    ///
+    /// Pass an empty `buf` to query the required size. A size query returns
+    /// [`Error::OutOfSpace`] with the required size, including zero when the
+    /// stream is at ground. If a non-empty buffer is too small, the function
+    /// has the same result and reports the full required size.
+    ///
+    /// Continuation tracking must have been enabled by callling
+    /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
+    /// input that produced the continuation was written.
+    ///
+    /// The caller must serialize this operation with all other access to the same
+    /// terminal.
+    ///
+    /// # Errors
+    ///
+    /// This function returns [`Error::OutOfSpace`] for a size query or
+    /// insufficient buffer, or [`Error::InvalidValue`] if an argument is invalid,
+    /// tracking is disabled, or the current continuation is unavailable.
+    pub fn continuation_buf(&self, buf: &mut [u8]) -> Result<Option<usize>> {
+        let mut written = 0usize;
+
+        let result = unsafe {
+            ffi::ghostty_terminal_continuation_buf(
+                self.inner.as_raw(),
+                buf.as_mut_ptr(),
+                buf.len(),
+                &raw mut written,
+            )
+        };
+
+        from_optional_result_with_len(result, written)
     }
 
     pub(crate) fn get<T>(&self, tag: ffi::TerminalData::Type) -> Result<T> {
