@@ -511,8 +511,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// because earlier bytes cannot be reconstructed. Tracking recovers
     /// automatically after a later write reaches the ground state or contains
     /// a fresh replay start.
-    pub fn set_continuation_max_bytes(&mut self, v: usize) -> Result<()> {
-        self.set(Opt::CONTINUATION_MAX_BYTES, &v)
+    pub fn set_continuation_max_bytes(&mut self, v: usize) -> Result<&mut Self> {
+        self.set(Opt::CONTINUATION_MAX_BYTES, &v)?;
+        Ok(self)
     }
 
     /// Write the terminal's replay-safe VT continuation to a callback writer.
@@ -707,8 +708,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Lowering the limit immediately removes eligible complete historical
     /// pages. A value of zero disables scrollback and erases retained history.
     /// A `None` value removes the byte limit.
-    pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<()> {
-        self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())
+    pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())?;
+        Ok(self)
     }
 
     /// The configured maximum number of physical scrollback lines.
@@ -739,8 +741,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// Lowering the limit immediately removes eligible complete historical
     /// pages. A `None` value pointer removes the line limit.
-    pub fn set_scrollback_max_lines(&mut self, v: Option<usize>) -> Result<()> {
-        self.set_optional(Opt::SCROLLBACK_MAX_LINES, v.as_ref())
+    pub fn set_scrollback_max_lines(&mut self, v: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(Opt::SCROLLBACK_MAX_LINES, v.as_ref())?;
+        Ok(self)
     }
 
     /// Get the cursor column position (0-indexed).
@@ -934,7 +937,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// This prevents malicious input from causing unbounded memory allocation.
     /// A `None` value removes all overrides, reverting to the built-in defaults.
     pub fn set_apc_max_bytes(&mut self, max: Option<usize>) -> Result<&mut Self> {
-        self.set_optional(ffi::TerminalOption::APC_MAX_BYTES, max.as_ref())?;
+        self.set_optional(Opt::APC_MAX_BYTES, max.as_ref())?;
         Ok(self)
     }
 
@@ -943,7 +946,19 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Disabling the protocol makes the terminal ignore Glyph Protocol APC
     /// sequences and clears the session's glyph glossary.
     pub fn set_glyph_protocol_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
-        self.set(ffi::TerminalOption::GLYPH_PROTOCOL, &enabled)?;
+        self.set(Opt::GLYPH_PROTOCOL, &enabled)?;
+        Ok(self)
+    }
+
+    /// Enable window title reports in response to `CSI 21 t`.
+    ///
+    /// This is disabled by default because a running program can set a title
+    /// and query it back into the pty input stream, potentially injecting
+    /// commands that execute after user interaction.
+    ///
+    /// Passing `false` disables title reporting.
+    pub fn set_title_report_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
+        self.set(Opt::TITLE_REPORT, &enabled)?;
         Ok(self)
     }
 }
