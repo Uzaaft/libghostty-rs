@@ -91,7 +91,11 @@ pub mod Result {
     pub const OUT_OF_SPACE: Type = -3;
     #[doc = " The requested value has no value"]
     pub const NO_VALUE: Type = -4;
-    #[doc = " The requested value has no value"]
+    #[doc = " Operation failed while reading from or writing to external I/O"]
+    pub const IO_ERROR: Type = -5;
+    #[doc = " Operation failed because encoded input exceeded a configured limit"]
+    pub const LIMIT_EXCEEDED: Type = -6;
+    #[doc = " Operation failed because encoded input exceeded a configured limit"]
     pub const RESULT_MAX_VALUE: Type = 2147483647;
 }
 #[repr(C)]
@@ -101,6 +105,13 @@ pub struct TerminalImpl {
 }
 #[doc = " Opaque handle to a terminal instance.\n"]
 pub type Terminal = *mut TerminalImpl;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct SnapshotDecoderImpl {
+    _unused: [u8; 0],
+}
+#[doc = " Opaque handle to an incremental terminal snapshot decoder.\n"]
+pub type SnapshotDecoder = *mut SnapshotDecoderImpl;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct TrackedGridRefImpl {
@@ -1721,6 +1732,69 @@ unsafe extern "C" {
         out_written: *mut usize,
     ) -> Result::Type;
 }
+#[doc = " Read bytes from a source.\n\n The callback must set @p out_read to a value no greater than @p capacity\n when returning true. A positive value reports progress; it may be less than\n capacity and does not indicate end-of-file. A zero value is definitive\n end-of-file. It must not be used to report temporary input starvation or a\n would-block condition.\n\n Returning false reports a fatal read error and the value of @p out_read is\n ignored. The library does not inspect or modify errno.\n\n All pointer arguments are borrowed and valid only for the duration of the\n callback. The callback is invoked synchronously on the calling thread.\n"]
+pub type ReaderFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        userdata: *mut ::std::os::raw::c_void,
+        buffer: *mut u8,
+        capacity: usize,
+        out_read: *mut usize,
+    ) -> bool,
+>;
+#[doc = " Write bytes to a destination.\n\n Returning true means all @p len bytes were accepted. Returning false\n reports a fatal write error. A callback wrapping an interface that permits\n partial writes must retry internally until the full slice is accepted or\n an error occurs.\n\n On failure, the destination may already contain a prefix of the bytes. The\n calling operation fails and must not be resumed from that partial output.\n The library does not inspect or modify errno.\n\n callback is invoked synchronously on the calling thread. Successful return\n means the bytes were handed to the destination; it does not imply that the\n destination was flushed or made durable.\n"]
+pub type WriterFn = ::std::option::Option<
+    unsafe extern "C" fn(
+        userdata: *mut ::std::os::raw::c_void,
+        data: *const u8,
+        len: usize,
+    ) -> bool,
+>;
+#[doc = " A byte source callback and its opaque context.\n\n The struct is passed by value. @p read must be non-NULL."]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Reader {
+    pub read: ReaderFn,
+    pub userdata: *mut ::std::os::raw::c_void,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of Reader"][::std::mem::size_of::<Reader>() - 16usize];
+    ["Alignment of Reader"][::std::mem::align_of::<Reader>() - 8usize];
+    ["Offset of field: Reader::read"][::std::mem::offset_of!(Reader, read) - 0usize];
+    ["Offset of field: Reader::userdata"][::std::mem::offset_of!(Reader, userdata) - 8usize];
+};
+impl Default for Reader {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[doc = " A byte destination callback and its opaque context.\n\n The struct is passed by value. @p write must be non-NULL."]
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct Writer {
+    pub write: WriterFn,
+    pub userdata: *mut ::std::os::raw::c_void,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of Writer"][::std::mem::size_of::<Writer>() - 16usize];
+    ["Alignment of Writer"][::std::mem::align_of::<Writer>() - 8usize];
+    ["Offset of field: Writer::write"][::std::mem::offset_of!(Writer, write) - 0usize];
+    ["Offset of field: Writer::userdata"][::std::mem::offset_of!(Writer, userdata) - 8usize];
+};
+impl Default for Writer {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
 pub mod KittyGraphicsData {
     #[doc = " Queryable data kinds for ghostty_kitty_graphics_get().\n"]
     pub type Type = ::std::os::raw::c_uint;
@@ -1816,13 +1890,13 @@ pub mod KittyGraphicsImageData {
     pub const FORMAT: Type = 5;
     #[doc = " Compression of the image. Always\n GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE; compressed payloads are\n inflated before storage.\n\n Output type: GhosttyKittyImageCompression *"]
     pub const COMPRESSION: Type = 6;
-    #[doc = " Borrowed pointer to the raw pixel data. Valid as long as the\n underlying terminal is not mutated.\n\n The data is always fully decoded, uncompressed pixels in the\n format reported by GHOSTTY_KITTY_IMAGE_DATA_FORMAT: zlib payloads\n are inflated and PNG payloads are decoded to RGBA at transmission\n time, before the image is stored. Consumers can upload this\n directly to the GPU without any decode step.\n\n Output type: const uint8_t **"]
+    #[doc = " Borrowed pointer to the raw pixel data. Valid as long as the\n underlying terminal is not mutated. Returns GHOSTTY_NO_VALUE when\n the image metadata is resident but its pixel payload is pending.\n\n The data is always fully decoded, uncompressed pixels in the\n format reported by GHOSTTY_KITTY_IMAGE_DATA_FORMAT: zlib payloads\n are inflated and PNG payloads are decoded to RGBA at transmission\n time, before the image is stored. Consumers can upload this\n directly to the GPU without any decode step.\n\n Output type: const uint8_t **"]
     pub const DATA_PTR: Type = 7;
-    #[doc = " Length of the raw pixel data in bytes. Always equal to\n width * height * bytes-per-pixel for the reported format.\n\n Output type: size_t *"]
+    #[doc = " Length of the raw pixel data in bytes. Always equal to\n width * height * bytes-per-pixel for the reported format. For a\n pending image, this is the expected length reserved against the\n storage limit even though DATA_PTR is not available yet.\n\n Output type: size_t *"]
     pub const DATA_LEN: Type = 8;
-    #[doc = " Generation stamp assigned when this image was added to (or\n replaced in) the storage. A changed generation for a given image\n ID means the pixel contents may have changed even when the\n dimensions, format, and data length are identical (e.g. a\n retransmission of the same image ID), so texture caches must key\n staleness on this value rather than on size heuristics.\n\n Stamps are unique and monotonically increasing process-wide and\n are drawn from the same sequence as\n GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION. Never zero for a stored\n image, so zero can be used as an \"empty\" sentinel by callers.\n\n Output type: uint64_t *"]
+    #[doc = " Generation stamp assigned when this image was added to (or\n replaced in) the storage. A changed generation for a given image\n ID means the pixel contents may have changed even when the\n dimensions, format, and data length are identical (e.g. a\n retransmission of the same image ID), so texture caches must key\n staleness on this value rather than on size heuristics.\n\n Stamps are unique and monotonically increasing process-wide and\n are drawn from the same sequence as\n GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION. Never zero for a stored\n image, so zero can be used as an \"empty\" sentinel by callers. Pending\n payload completion preserves this value to retain image age; consumers\n detect that completion through GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION\n and retry DATA_PTR.\n\n Output type: uint64_t *"]
     pub const GENERATION: Type = 9;
-    #[doc = " Generation stamp assigned when this image was added to (or\n replaced in) the storage. A changed generation for a given image\n ID means the pixel contents may have changed even when the\n dimensions, format, and data length are identical (e.g. a\n retransmission of the same image ID), so texture caches must key\n staleness on this value rather than on size heuristics.\n\n Stamps are unique and monotonically increasing process-wide and\n are drawn from the same sequence as\n GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION. Never zero for a stored\n image, so zero can be used as an \"empty\" sentinel by callers.\n\n Output type: uint64_t *"]
+    #[doc = " Generation stamp assigned when this image was added to (or\n replaced in) the storage. A changed generation for a given image\n ID means the pixel contents may have changed even when the\n dimensions, format, and data length are identical (e.g. a\n retransmission of the same image ID), so texture caches must key\n staleness on this value rather than on size heuristics.\n\n Stamps are unique and monotonically increasing process-wide and\n are drawn from the same sequence as\n GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION. Never zero for a stored\n image, so zero can be used as an \"empty\" sentinel by callers. Pending\n payload completion preserves this value to retain image age; consumers\n detect that completion through GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION\n and retry DATA_PTR.\n\n Output type: uint64_t *"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Combined rendering geometry for a placement in a single sized struct.\n\n Combines the results of ghostty_kitty_graphics_placement_pixel_size(),\n ghostty_kitty_graphics_placement_grid_size(),\n ghostty_kitty_graphics_placement_viewport_pos(), and\n ghostty_kitty_graphics_placement_source_rect() into one call. This is\n an optimization over calling those four functions individually,\n particularly useful in environments with high per-call overhead such\n as FFI or Cgo.\n\n This struct uses the sized-struct ABI pattern. Initialize with\n GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsPlacementRenderInfo) before calling\n ghostty_kitty_graphics_placement_render_info().\n"]
@@ -2474,7 +2548,11 @@ pub mod TerminalOption {
     pub const DESKTOP_NOTIFICATION: Type = 29;
     #[doc = " Callback invoked when the running program reports progress via OSC 9;4.\n Set to NULL to ignore progress reports.\n\n Input type: GhosttyTerminalProgressReportFn"]
     pub const PROGRESS_REPORT: Type = 30;
-    #[doc = " Callback invoked when the running program reports progress via OSC 9;4.\n Set to NULL to ignore progress reports.\n\n Input type: GhosttyTerminalProgressReportFn"]
+    #[doc = " Set the maximum number of replay-safe VT continuation bytes retained.\n\n Continuation bytes reconstruct an escape sequence or UTF-8 codepoint\n which was unfinished at the end of the most recent\n ghostty_terminal_vt_write() call. They are used automatically by terminal\n snapshots and may also be exported directly with the continuation APIs.\n\n Tracking is disabled by default. A nonzero value enables tracking and\n sets its byte limit. Passing NULL or a pointer to zero disables tracking.\n Lowering the limit below an already-retained\n continuation, or enabling tracking while the parser is already\n unfinished, makes the current continuation unavailable because earlier\n bytes cannot be reconstructed. Tracking recovers automatically after a\n later write reaches the ground state or contains a fresh replay start.\n\n Input type: size_t*"]
+    pub const CONTINUATION_MAX_BYTES: Type = 31;
+    #[doc = " Enable window title reports in response to CSI 21 t.\n\n This is disabled by default because a running program can set a title and\n query it back into the pty input stream, potentially injecting commands\n that execute after user interaction. Passing NULL or a pointer to false\n disables title reporting.\n\n Input type: bool*"]
+    pub const TITLE_REPORT: Type = 32;
+    #[doc = " Enable window title reports in response to CSI 21 t.\n\n This is disabled by default because a running program can set a title and\n query it back into the pty input stream, potentially injecting commands\n that execute after user interaction. Passing NULL or a pointer to false\n disables title reporting.\n\n Input type: bool*"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod TerminalData {
@@ -2552,7 +2630,9 @@ pub mod TerminalData {
     pub const SCROLLBACK_MAX_BYTES: Type = 34;
     #[doc = " The configured maximum number of physical scrollback lines.\n\n This always reports the primary screen's configured value, including\n while an alternate screen is active. Returns GHOSTTY_NO_VALUE when the\n configured line limit is unlimited.\n\n Output type: size_t *"]
     pub const SCROLLBACK_MAX_LINES: Type = 35;
-    #[doc = " The configured maximum number of physical scrollback lines.\n\n This always reports the primary screen's configured value, including\n while an alternate screen is active. Returns GHOSTTY_NO_VALUE when the\n configured line limit is unlimited.\n\n Output type: size_t *"]
+    #[doc = " The configured maximum retained VT continuation size in bytes.\n\n A value of zero means continuation tracking is disabled. This reports the\n configured limit even when a current unfinished continuation is\n temporarily unavailable.\n\n Output type: size_t *"]
+    pub const CONTINUATION_MAX_BYTES: Type = 36;
+    #[doc = " The configured maximum retained VT continuation size in bytes.\n\n A value of zero means continuation tracking is disabled. This reports the\n configured limit even when a current unfinished continuation is\n temporarily unavailable.\n\n Output type: size_t *"]
     pub const MAX_VALUE: Type = 2147483647;
 }
 unsafe extern "C" {
@@ -2593,6 +2673,28 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Write VT-encoded data to the terminal for processing.\n\n Feeds raw bytes through the terminal's VT stream parser, updating\n terminal state accordingly. By default, sequences that require output\n (queries, device status reports) are silently ignored. Use\n ghostty_terminal_set() with GHOSTTY_TERMINAL_OPT_WRITE_PTY to install\n a callback that receives response data.\n\n This never fails. Any erroneous input or errors in processing the\n input are logged internally but do not cause this function to fail\n because this input is assumed to be untrusted and from an external\n source; so the primary goal is to keep the terminal state consistent and\n not allow malformed input to corrupt or crash.\n\n"]
     pub fn ghostty_terminal_vt_write(terminal: Terminal, data: *const u8, len: usize);
+}
+unsafe extern "C" {
+    #[doc = " Write the terminal's replay-safe VT continuation to a callback writer.\n\n The continuation is the exact byte suffix needed to reconstruct unfinished\n VT parser or UTF-8 decoder state in an equivalent terminal. It is empty\n when the stream is at ground. The callback is invoked synchronously and\n may be called more than once. It must not call terminal APIs with the same\n terminal handle.\n\n Continuation tracking must have been enabled by setting\n GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES to a nonzero value before the\n input that produced the continuation was written.\n\n The caller must serialize this operation with ghostty_terminal_vt_write()\n and all other access to the same terminal.\n\n         a write, GHOSTTY_LIMIT_EXCEEDED if output accounting overflows, or\n         GHOSTTY_INVALID_VALUE if an argument is invalid, tracking is\n         disabled, or the current continuation is unavailable\n"]
+    pub fn ghostty_terminal_continuation_write(terminal: Terminal, writer: Writer) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Copy the terminal's replay-safe VT continuation into a caller buffer.\n\n Pass NULL for buf with buf_len zero to query the required size. A size query\n returns GHOSTTY_OUT_OF_SPACE and stores the required size in out_written,\n including zero when the stream is at ground. If a non-NULL buffer is too\n small, the function has the same result and reports the full required size.\n Continuation tracking must have been enabled by setting\n GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES to a nonzero value before the\n input that produced the continuation was written.\n\n The caller must serialize this operation with all other access to the same\n terminal.\n\n             GHOSTTY_OUT_OF_SPACE (must not be NULL)\n         insufficient buffer, or GHOSTTY_INVALID_VALUE if an argument is\n         invalid, tracking is disabled, or the current continuation is\n         unavailable\n"]
+    pub fn ghostty_terminal_continuation_buf(
+        terminal: Terminal,
+        buf: *mut u8,
+        buf_len: usize,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Return an allocated copy of the terminal's replay-safe VT continuation.\n\n The returned bytes are allocated with allocator, or the default allocator\n when allocator is NULL. The caller must release them with ghostty_free(),\n passing the same allocator and returned length. An empty continuation is a\n successful zero-length allocation.\n Continuation tracking must have been enabled by setting\n GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES to a nonzero value before the\n input that produced the continuation was written.\n\n The caller must serialize this operation with all other access to the same\n terminal.\n\n         failure, or GHOSTTY_INVALID_VALUE if an argument is invalid,\n         tracking is disabled, or the current continuation is unavailable\n"]
+    pub fn ghostty_terminal_continuation_alloc(
+        terminal: Terminal,
+        allocator: *const Allocator,
+        out_ptr: *mut *mut u8,
+        out_len: *mut usize,
+    ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Scroll the terminal viewport.\n\n Scrolls the terminal's viewport according to the given behavior.\n When using GHOSTTY_SCROLL_VIEWPORT_DELTA, set the delta field in\n the value union to specify the number of rows to scroll (negative\n for up, positive for down). When using GHOSTTY_SCROLL_VIEWPORT_ROW,\n set the row field to the absolute row offset from the top of the\n scrollable area (the same row space as the offset field of\n GhosttyTerminalScrollbar). For other behaviors, the value is ignored.\n\n"]
@@ -4145,6 +4247,123 @@ unsafe extern "C" {
         bracketed: bool,
         buf: *mut ::std::os::raw::c_char,
         buf_len: usize,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+pub mod SnapshotDecoderOption {
+    #[doc = " Configurable snapshot decoder options.\n\n Options may only be changed before decoding starts. Calling\n ghostty_snapshot_decoder_set() after ghostty_snapshot_decoder_ready() or\n ghostty_snapshot_decoder_decode() returns GHOSTTY_INVALID_VALUE."]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Largest non-ground continuation the decoder will accept.\n\n A value of zero accepts only snapshots whose VT parser is in the ground\n state. The decoder default matches the largest built-in APC protocol\n buffer limit, currently 65 MiB.\n\n This is an input validation limit only. It does not configure continuation\n tracking on a terminal returned by the decoder.\n\n Input type: size_t *"]
+    pub const MAX_CONTINUATION_BYTES: Type = 0;
+    #[doc = " Largest non-ground continuation the decoder will accept.\n\n A value of zero accepts only snapshots whose VT parser is in the ground\n state. The decoder default matches the largest built-in APC protocol\n buffer limit, currently 65 MiB.\n\n This is an input validation limit only. It does not configure continuation\n tracking on a terminal returned by the decoder.\n\n Input type: size_t *"]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+pub mod SnapshotDecoderData {
+    #[doc = " Queryable snapshot decoder data.\n\n Each variant documents the output pointer type expected by\n ghostty_snapshot_decoder_get()."]
+    pub type Type = ::std::os::raw::c_uint;
+    #[doc = " Invalid data type. Never results in data extraction."]
+    pub const INVALID: Type = 0;
+    #[doc = " Current maximum accepted continuation size.\n\n This value is available in every non-failed decoder state.\n\n Output type: size_t *"]
+    pub const MAX_CONTINUATION_BYTES: Type = 1;
+    #[doc = " Number of snapshot source bytes consumed so far.\n\n At FINISH this identifies the first byte after the snapshot. Trailing\n bytes are not consumed. This value is unavailable after a decoding error,\n because the decoder can no longer guarantee its source position.\n\n Output type: size_t *"]
+    pub const SOURCE_OFFSET: Type = 2;
+    #[doc = " Advisory complete logical history extent for the primary screen.\n\n The value counts rows before the active area, including any resident\n overlap carried before READY. It becomes available after READY validates.\n\n Output type: uint64_t *"]
+    pub const HISTORY_ROWS_PRIMARY: Type = 3;
+    #[doc = " Advisory complete logical history extent for the alternate screen.\n\n The value has the same semantics and lifetime as\n GHOSTTY_SNAPSHOT_DECODER_DATA_HISTORY_ROWS_PRIMARY. Querying it returns\n GHOSTTY_NO_VALUE when the snapshot does not declare an alternate screen.\n\n Output type: uint64_t *"]
+    pub const HISTORY_ROWS_ALTERNATE: Type = 4;
+    #[doc = " Screen associated with the most recently decoded history page.\n\n This value is available only after ghostty_snapshot_decoder_next()\n returns GHOSTTY_SUCCESS. A later call to next replaces it or clears it\n when FINISH is reached or an error occurs.\n\n Output type: GhosttyTerminalScreen *"]
+    pub const PROGRESS_SCREEN: Type = 5;
+    #[doc = " Rows prepended by the most recently decoded history page.\n\n Zero means the page was consumed and authenticated but could not be\n applied to the live terminal.\n\n Output type: size_t *"]
+    pub const PROGRESS_ROWS: Type = 6;
+    #[doc = " Page records remaining in the same screen's HISTORY sequence.\n\n This is not a count of all pages remaining in the snapshot.\n\n Output type: uint32_t *"]
+    pub const PROGRESS_REMAINING: Type = 7;
+    #[doc = " Page records remaining in the same screen's HISTORY sequence.\n\n This is not a count of all pages remaining in the snapshot.\n\n Output type: uint32_t *"]
+    pub const MAX_VALUE: Type = 2147483647;
+}
+unsafe extern "C" {
+    #[doc = " Encode a complete terminal snapshot to a writer.\n\n The terminal's persistent VT stream supplies the continuation bytes needed\n to reconstruct unfinished parser state. The caller must prevent concurrent\n writes or other terminal mutation for the duration of this call. The writer\n callback must not call terminal APIs with the same terminal handle.\n A terminal can be encoded with tracking disabled when its VT parser and\n UTF-8 decoder are both at ground. If either is unfinished, tracking must\n have been enabled before the input that produced that state was written;\n otherwise this returns GHOSTTY_INVALID_VALUE.\n\n Encoding begins at the writer's current position. If an error occurs, the\n writer may contain a partial snapshot without a valid FINISH checkpoint.\n Calls to the writer are synchronous; this function does not flush or make\n the caller's destination durable.\n\n         output, GHOSTTY_LIMIT_EXCEEDED if output accounting overflows, or\n         another error code on failure\n"]
+    pub fn ghostty_snapshot_encode(terminal: Terminal, writer: Writer) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Encode a complete terminal snapshot to a caller-provided buffer.\n\n Pass NULL for buf with buf_len zero to query the required size. If the\n buffer is too small, this returns GHOSTTY_OUT_OF_SPACE and stores the\n required capacity in out_written. A non-NULL undersized buffer may contain\n a partial snapshot prefix. On success, out_written receives the number of\n bytes encoded.\n\n A terminal can be encoded with tracking disabled when its VT parser and\n UTF-8 decoder are both at ground. If either is unfinished, tracking must\n have been enabled before the input that produced that state was written;\n otherwise this returns GHOSTTY_INVALID_VALUE.\n\n             GHOSTTY_OUT_OF_SPACE (must not be NULL)\n"]
+    pub fn ghostty_snapshot_encode_buf(
+        terminal: Terminal,
+        buf: *mut u8,
+        buf_len: usize,
+        out_written: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Encode a complete terminal snapshot to an allocated buffer.\n\n The returned buffer is allocated with allocator, or the default allocator\n when allocator is NULL. The caller must release it with ghostty_free(),\n passing the same allocator used here.\n\n A terminal can be encoded with tracking disabled when its VT parser and\n UTF-8 decoder are both at ground. If either is unfinished, tracking must\n have been enabled before the input that produced that state was written;\n otherwise this returns GHOSTTY_INVALID_VALUE.\n\n"]
+    pub fn ghostty_snapshot_encode_alloc(
+        terminal: Terminal,
+        allocator: *const Allocator,
+        out_ptr: *mut *mut u8,
+        out_len: *mut usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Create a snapshot decoder that reads from a caller-provided reader.\n\n The decoder stores a copy of reader. Its read callback must not be NULL, and\n both the callback and its caller-owned context must remain valid until\n FINISH is reached or the decoder is freed. Reads are synchronous and occur\n only during ready, next, or decode calls. A zero-byte successful read is\n permanent end-of-file, not temporary starvation; nonblocking sources must\n wait outside the decoder or block in their callback. The read callback must\n not call APIs, including ghostty_snapshot_decoder_free(), on the decoder\n that owns it. Returning false reports GHOSTTY_IO_ERROR; returning true with\n zero bytes before a required checkpoint reports truncated snapshot data as\n GHOSTTY_INVALID_VALUE.\n\n                  for the default allocator\n"]
+    pub fn ghostty_snapshot_decoder_new(
+        allocator: *const Allocator,
+        decoder: *mut SnapshotDecoder,
+        reader: Reader,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Create a snapshot decoder over a borrowed byte buffer.\n\n The bytes are not copied. ptr must remain valid and immutable until FINISH\n is reached or the decoder is freed. Bytes after FINISH are not consumed;\n query GHOSTTY_SNAPSHOT_DECODER_DATA_SOURCE_OFFSET to locate them.\n\n                  for the default allocator\n"]
+    pub fn ghostty_snapshot_decoder_new_buf(
+        allocator: *const Allocator,
+        decoder: *mut SnapshotDecoder,
+        ptr: *const u8,
+        len: usize,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Free a snapshot decoder.\n\n This does not release the caller's ownership of a terminal returned by\n ready or decode. Abandoning an incremental decode leaves that terminal\n usable with whatever history had already been restored.\n\n"]
+    pub fn ghostty_snapshot_decoder_free(decoder: SnapshotDecoder);
+}
+unsafe extern "C" {
+    #[doc = " Set a snapshot decoder option.\n\n The value pointer must have the type documented by option. Options may only\n be changed before decoding starts.\n\n         started or an argument is invalid, or another error code on failure\n"]
+    pub fn ghostty_snapshot_decoder_set(
+        decoder: SnapshotDecoder,
+        option: SnapshotDecoderOption::Type,
+        value: *const ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Decode and authenticate the renderable snapshot prefix through READY.\n\n On success, terminal receives a caller-owned terminal with its persistent\n VT stream already restored from the snapshot continuation. The terminal is\n immediately usable for rendering and live input. Older scrollback remains\n to be restored with ghostty_snapshot_decoder_next().\n\n The restored parser state may be unfinished, but terminal continuation\n tracking is disabled; GHOSTTY_TERMINAL_DATA_CONTINUATION_MAX_BYTES returns\n zero. The decoder's continuation option is an input limit, not terminal\n runtime policy.\n\n The caller must keep the returned terminal alive until FINISH validates or\n the decoder is freed. The decoder borrows this terminal handle while it\n restores history; ghostty_snapshot_decoder_next() uses it automatically.\n\n This operation may only be called once and only before decoding starts.\n terminal is set to NULL on every error. A decoding, I/O, or allocation\n error after input consumption begins poisons the decoder, after which it\n must be freed. An invalid argument or lifecycle error detected before the\n operation consumes input does not poison it.\n\n"]
+    pub fn ghostty_snapshot_decoder_ready(
+        decoder: SnapshotDecoder,
+        terminal: *mut Terminal,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Decode one history page into the terminal returned by READY.\n\n Each GHOSTTY_SUCCESS consumes and authenticates one PAGE record. Query the\n GHOSTTY_SNAPSHOT_DECODER_DATA_PROGRESS_* values before calling next again.\n GHOSTTY_NO_VALUE means FINISH was validated; repeated calls after FINISH\n also return GHOSTTY_NO_VALUE.\n\n The terminal may be rendered, resized, and fed live PTY input between calls.\n If a history page can no longer be applied safely, it is still consumed and\n authenticated and progress reports zero rows. The decoder applies history\n to the caller-owned terminal produced by its READY operation.\n\n A decoding error invalidates the decoder's source position. The terminal\n remains caller-owned and usable with its already-restored history, but only\n ghostty_snapshot_decoder_free() may subsequently be called on the decoder.\n\n         error code on failure\n"]
+    pub fn ghostty_snapshot_decoder_next(decoder: SnapshotDecoder) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Decode and authenticate one complete snapshot.\n\n This is the one-shot form of READY followed by all history pages through\n FINISH. It may only be called before decoding starts. Bytes following FINISH\n are left unread. On success terminal receives a caller-owned terminal with\n its persistent VT stream restored. Continuation tracking on the returned\n terminal is disabled and GHOSTTY_TERMINAL_DATA_CONTINUATION_MAX_BYTES\n returns zero. terminal is set to NULL on every error.\n A decoding, I/O, or allocation error after input consumption begins poisons\n the decoder, after which it must be freed. An invalid argument or\n lifecycle error detected before the operation consumes input does not\n poison it.\n\n"]
+    pub fn ghostty_snapshot_decoder_decode(
+        decoder: SnapshotDecoder,
+        terminal: *mut Terminal,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Get typed data from a snapshot decoder.\n\n The output pointer must have the type documented by data. A phase-dependent\n value that is not currently available returns GHOSTTY_NO_VALUE.\n\n         is unavailable, or another error code on failure\n"]
+    pub fn ghostty_snapshot_decoder_get(
+        decoder: SnapshotDecoder,
+        data: SnapshotDecoderData::Type,
+        out: *mut ::std::os::raw::c_void,
+    ) -> Result::Type;
+}
+unsafe extern "C" {
+    #[doc = " Get multiple snapshot decoder data fields in a single call.\n\n Each keys element selects a data kind and the corresponding values element\n points to storage of the documented output type. Processing stops at the\n first error. On success out_written is set to count; on error it is set to\n the number of values written before the failing key. Invalid array arguments\n report zero values written.\n\n"]
+    pub fn ghostty_snapshot_decoder_get_multi(
+        decoder: SnapshotDecoder,
+        count: usize,
+        keys: *const SnapshotDecoderData::Type,
+        values: *mut *mut ::std::os::raw::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
