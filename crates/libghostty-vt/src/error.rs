@@ -18,6 +18,10 @@ pub enum Error {
         /// Required minimum size of the buffer.
         required: usize,
     },
+    /// Operation failed while reading from or writing to external I/O.
+    IoError,
+    /// Operation failed because encoded input exceeded a configured limit.
+    LimitExceeded,
 }
 
 impl std::fmt::Display for Error {
@@ -28,6 +32,8 @@ impl std::fmt::Display for Error {
             Self::OutOfSpace { required } => {
                 write!(f, "out of space, {required} bytes required")
             }
+            Self::IoError => write!(f, "external IO error"),
+            Self::LimitExceeded => write!(f, "encoded input exceeded configured limit"),
         }
     }
 }
@@ -39,6 +45,8 @@ pub(crate) fn from_result(code: ffi::Result::Type) -> Result<()> {
         ffi::Result::SUCCESS => Ok(()),
         ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
         ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: 0 }),
+        ffi::Result::IO_ERROR => Err(Error::IoError),
+        ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         _ => Err(Error::InvalidValue),
     }
 }
@@ -53,6 +61,8 @@ pub(crate) fn from_optional_result_uninit<T>(
         ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
         ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: 0 }),
         ffi::Result::NO_VALUE => Ok(None),
+        ffi::Result::IO_ERROR => Err(Error::IoError),
+        ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         _ => Err(Error::InvalidValue),
     }
 }
@@ -64,6 +74,8 @@ pub(crate) fn from_optional_result<T>(code: ffi::Result::Type, v: T) -> Result<O
         ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
         ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: 0 }),
         ffi::Result::NO_VALUE => Ok(None),
+        ffi::Result::IO_ERROR => Err(Error::IoError),
+        ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         _ => Err(Error::InvalidValue),
     }
 }
@@ -73,6 +85,8 @@ pub(crate) fn from_result_with_len(code: ffi::Result::Type, len: usize) -> Resul
         ffi::Result::SUCCESS => Ok(len),
         ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
         ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: len }),
+        ffi::Result::IO_ERROR => Err(Error::IoError),
+        ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         _ => Err(Error::InvalidValue),
     }
 }
@@ -86,6 +100,8 @@ pub(crate) fn from_optional_result_with_len(
         ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
         ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: len }),
         ffi::Result::NO_VALUE => Ok(None),
+        ffi::Result::IO_ERROR => Err(Error::IoError),
+        ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         _ => Err(Error::InvalidValue),
     }
 }
