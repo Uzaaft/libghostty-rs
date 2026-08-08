@@ -69,6 +69,12 @@ fn main() {
         return;
     }
 
+    // Miri cannot load or call the native Ghostty library. The Miri suite stays
+    // within Rust-owned seams, so there is nothing to build or link for it.
+    if env::var("CARGO_CFG_MIRI").is_ok() {
+        return;
+    }
+
     let link_mode = LinkMode::current();
 
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");

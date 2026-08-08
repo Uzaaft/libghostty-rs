@@ -41,6 +41,10 @@
 
         rustVersion = "1.90.0";
         buildToolchain = pkgs.rust-bin.stable.${rustVersion}.minimal;
+        rustTargets = pkgs.lib.optionals pkgs.stdenv.isLinux [
+          "x86_64-unknown-linux-gnu"
+          "x86_64-unknown-linux-musl"
+        ];
 
         checkToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
           extensions = ["clippy" "rustfmt"];
@@ -48,11 +52,16 @@
 
         devToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
           extensions = ["rust-src" "rust-std" "clippy" "rustfmt" "rust-analyzer"];
-          targets = pkgs.lib.optionals pkgs.stdenv.isLinux [
-            "x86_64-unknown-linux-gnu"
-            "x86_64-unknown-linux-musl"
-          ];
+          targets = rustTargets;
         };
+
+        miriToolchain = pkgs.rust-bin.selectLatestNightlyWith (
+          toolchain:
+            toolchain.default.override {
+              extensions = ["rust-src" "rust-std" "miri"];
+              targets = rustTargets;
+            }
+        );
 
         craneLib = (crane.mkLib pkgs).overrideToolchain buildToolchain;
         craneCheckLib = (crane.mkLib pkgs).overrideToolchain checkToolchain;
@@ -60,6 +69,15 @@
 
         zigPkg = zig.packages.${system}."0.16.0";
         ghosttyLib = ghostty.packages.${system}.libghostty-vt;
+
+        miriCommand = pkgs.writeShellApplication {
+          name = "libghostty-miri";
+          runtimeInputs = [miriToolchain];
+          text = ''
+            cargo miri test --locked -p libghostty-vt-sys --lib
+            cargo miri test --locked -p libghostty-vt --lib alloc::tests::
+          '';
+        };
 
         src = pkgs.lib.fileset.toSource {
           root = unfilteredRoot;
@@ -163,6 +181,10 @@
           );
         };
 
+        apps.miri = flake-utils.lib.mkApp {
+          drv = miriCommand;
+        };
+
         devShells.default = craneLib.devShell {
           packages = [
             devToolchain
@@ -203,6 +225,10 @@
               pkgs.libxi
             ]}"
           '';
+        };
+
+        devShells.miri = pkgs.mkShell {
+          packages = [miriToolchain];
         };
       }
     );

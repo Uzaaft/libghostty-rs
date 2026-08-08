@@ -63,3 +63,24 @@ jobs:
       - name: Run flake checks
         if: matrix.flake_check
         run: nix flake check --print-build-logs
+
+  miri:
+    name: Linux Miri
+    runs-on: namespace-profile-linux-x86-sm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Namespace cache
+        uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1.4.3
+        with:
+          cache: |
+            nix
+            rust
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Miri soundness checks
+        run: nix run .#miri

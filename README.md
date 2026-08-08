@@ -93,6 +93,21 @@ cargo test -p libghostty-vt-sys
 cargo build -p ghostling_rs
 ```
 
+### Miri Verification
+
+Run the Rust-owned soundness checks with:
+
+```sh
+nix run .#miri
+```
+
+The command supplies its own nightly Miri toolchain and checks both binding and
+wrapper crates. These checks intentionally stay on Rust-owned unsafe seams such
+as string, slice, and allocator plumbing. They do not execute the native
+Ghostty FFI backend.
+
+Use `nix develop .#miri` when working interactively with the same toolchain.
+
 ### Running the example
 
 Run the examples by entering the folder, and run:

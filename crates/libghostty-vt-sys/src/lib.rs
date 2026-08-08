@@ -44,3 +44,33 @@ impl bindings::String {
         unsafe { std::str::from_utf8_unchecked(slice) }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::bindings;
+
+    #[test]
+    fn sized_macro_sets_the_size_field() {
+        let colors = crate::sized!(bindings::RenderStateColors);
+        assert_eq!(
+            colors.size,
+            std::mem::size_of::<bindings::RenderStateColors>()
+        );
+    }
+
+    #[test]
+    fn ffi_string_round_trips_static_str() {
+        let raw = bindings::String::from("ghostty");
+        assert_eq!(raw.len, "ghostty".len());
+        // SAFETY: The source string is `'static` and valid UTF-8.
+        assert_eq!(unsafe { raw.to_str() }, "ghostty");
+    }
+
+    #[test]
+    fn ffi_string_round_trips_borrowed_string() {
+        let owned = String::from("terminal");
+        let raw = bindings::String::from(owned.as_str());
+        // SAFETY: `owned` outlives the conversion and contains valid UTF-8.
+        assert_eq!(unsafe { raw.to_str() }, "terminal");
+    }
+}
