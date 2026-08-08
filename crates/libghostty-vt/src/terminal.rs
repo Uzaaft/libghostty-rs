@@ -650,11 +650,19 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// tracking is disabled, or the current continuation is unavailable.
     pub fn continuation_buf(&self, buf: &mut [u8]) -> Result<Option<usize>> {
         let mut written = 0usize;
+        // The C API uses a NULL pointer to distinguish an explicit size query
+        // from a zero-capacity destination. Rust empty slices have a non-NULL
+        // dangling pointer, so translate that representation at this boundary.
+        let buf_ptr = if buf.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            buf.as_mut_ptr()
+        };
 
         let result = unsafe {
             ffi::ghostty_terminal_continuation_buf(
                 self.inner.as_raw(),
-                buf.as_mut_ptr(),
+                buf_ptr,
                 buf.len(),
                 &raw mut written,
             )
