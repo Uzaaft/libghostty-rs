@@ -312,7 +312,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// input does not poison it.    
     pub fn ready<'cb>(self) -> Result<IncrementalDecoder<'alloc, 'r, 'cb>> {
         let mut raw: ffi::Terminal = std::ptr::null_mut();
-        let result = unsafe { ffi::ghostty_snapshot_decoder_decode(self.inner.as_raw(), &mut raw) };
+        let result = unsafe { ffi::ghostty_snapshot_decoder_ready(self.inner.as_raw(), &mut raw) };
         from_result(result)?;
         Ok(IncrementalDecoder {
             decoder: self,
