@@ -21,9 +21,6 @@ jobs:
           - name: Windows x86_64 MSVC
             runner: windows-latest
             target: x86_64-pc-windows-msvc
-          - name: Windows aarch64 MSVC
-            runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v4
 
