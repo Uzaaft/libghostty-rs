@@ -10,6 +10,9 @@ Raw FFI bindings for libghostty-vt.
 - Set `GHOSTTY_ZIG_SYSTEM_DIR` to force Zig package resolution through a
   pre-fetched `zig build --system` directory. This is intended for Nix and other
   sandboxed package managers that cannot fetch during build scripts.
+- Vendored builds target Zig's portable `baseline` CPU by default. Set
+  `LIBGHOSTTY_VT_SYS_CPU` to `native`, a named CPU model such as `x86_64_v3`, or
+  another Zig CPU expression to optimize for known deployment hardware.
 - Set `LIBGHOSTTY_VT_SYS_OPTIMIZE` to `Debug`, `ReleaseSafe`, `ReleaseFast`, or
   `ReleaseSmall` to override the Zig optimize mode used by vendored builds.
 - If the `pkg-config` feature is enabled, the build will use an installed
