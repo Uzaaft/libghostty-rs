@@ -77,6 +77,7 @@ fn main() {
 
     let link_mode = LinkMode::current();
 
+    println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_CPU");
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
@@ -132,12 +133,23 @@ fn build_vendored(link_mode: LinkMode) {
     let zig_global_cache_dir = out_dir.join("zig-global-cache");
 
     let optimize = zig_optimize_mode();
+    let cpu = env::var("LIBGHOSTTY_VT_SYS_CPU").unwrap_or_else(|_| "baseline".to_owned());
+    assert!(
+        !cpu.is_empty(),
+        "LIBGHOSTTY_VT_SYS_CPU must not be empty when set"
+    );
 
     let mut build = Command::new("zig");
     build
         .arg("build")
         .arg("-Demit-lib-vt=true")
         .arg(format!("-Doptimize={optimize}"))
+        // Cargo artifacts may run on older CPUs than the build host. Without
+        // an explicit CPU model, Zig may emit host-specific instructions that
+        // make distributed binaries fail with an illegal instruction. Users
+        // building for a known machine can explicitly request `native` or a
+        // named Zig CPU model through LIBGHOSTTY_VT_SYS_CPU.
+        .arg(format!("-Dcpu={cpu}"))
         .arg("-Demit-xcframework=false")
         .arg("-Dapp-runtime=none")
         .arg("--prefix")
