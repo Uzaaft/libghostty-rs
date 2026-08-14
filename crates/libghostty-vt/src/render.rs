@@ -58,14 +58,9 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// // Create a terminal and render state, then update the render state
 /// // from the terminal. The render state captures a snapshot of everything
 /// // needed to draw a frame.
-/// use libghostty_vt::{Terminal, TerminalOptions, RenderState};
+/// use libghostty_vt::{Terminal, RenderState};
 ///
-/// let mut terminal = Terminal::new(TerminalOptions {
-///     cols: 40,
-///     rows: 5,
-///     max_scrollback: 10000,
-/// }).unwrap();
-///
+/// let mut terminal = Terminal::new(40, 5).unwrap();
 /// let mut render_state = RenderState::new().unwrap();
 ///
 /// // Feed some styled content into the terminal.
@@ -79,14 +74,10 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// ## Splitting an update
 ///
 /// ```rust
-/// use libghostty_vt::{RenderState, Terminal, TerminalOptions};
+/// use libghostty_vt::{RenderState, Terminal};
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let terminal = Terminal::new(TerminalOptions {
-///     cols: 80,
-///     rows: 25,
-///     max_scrollback: 10000,
-/// })?;
+/// let terminal = Terminal::new(80, 25)?;
 /// let mut render_state = RenderState::new()?;
 ///
 /// // Use `update` unless you need to minimize how long terminal access is
@@ -107,12 +98,8 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// ```rust
 /// // Check the global dirty state to decide how much work the renderer
 /// // needs to do. After rendering, reset it to false.
-/// # use libghostty_vt::{Terminal, TerminalOptions, RenderState, render::Dirty};
-/// # let terminal = Terminal::new(TerminalOptions {
-/// #     cols: 80,
-/// #     rows: 25,
-/// #     max_scrollback: 10000,
-/// # }).unwrap();
+/// # use libghostty_vt::{Terminal, RenderState, render::Dirty};
+/// # let terminal = Terminal::new(80, 25).unwrap();
 /// # let mut render_state = RenderState::new().unwrap();
 /// let snapshot = render_state.update(&terminal).unwrap();
 ///
@@ -128,12 +115,8 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// ```rust
 /// // Retrieve colors (background, foreground, palette) from the render
 /// // state. These are needed to resolve palette-indexed cell colors.
-/// # use libghostty_vt::{Terminal, TerminalOptions, RenderState};
-/// # let terminal = Terminal::new(TerminalOptions {
-/// #     cols: 80,
-/// #     rows: 25,
-/// #     max_scrollback: 10000,
-/// # }).unwrap();
+/// # use libghostty_vt::{Terminal, RenderState};
+/// # let terminal = Terminal::new(80, 25).unwrap();
 /// # let mut render_state = RenderState::new().unwrap();
 /// let snapshot = render_state.update(&terminal).unwrap();
 /// let colors = snapshot.colors().unwrap();
@@ -153,12 +136,8 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// ```rust
 /// // Read cursor position and visual style from the render state.
 /// use libghostty_vt::render::CursorViewport;
-/// # use libghostty_vt::{Terminal, TerminalOptions, RenderState};
-/// # let terminal = Terminal::new(TerminalOptions {
-/// #     cols: 80,
-/// #     rows: 25,
-/// #     max_scrollback: 10000,
-/// # }).unwrap();
+/// # use libghostty_vt::{Terminal, RenderState};
+/// # let terminal = Terminal::new(80, 25).unwrap();
 /// # let mut render_state = RenderState::new().unwrap();
 /// let snapshot = render_state.update(&terminal).unwrap();
 ///
@@ -176,15 +155,11 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// // Iterate rows via the row iterator. For each dirty row, iterate its
 /// // cells, read codepoints/graphemes and styles, and emit ANSI-colored
 /// // output as a simple "renderer".
-/// use libghostty_vt::{Terminal, TerminalOptions, RenderState};
+/// use libghostty_vt::{Terminal, RenderState};
 /// use libghostty_vt::style::Underline;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # let terminal = Terminal::new(TerminalOptions {
-/// #     cols: 80,
-/// #     rows: 25,
-/// #     max_scrollback: 10000,
-/// # }).unwrap();
+/// # let terminal = Terminal::new(80, 25).unwrap();
 /// # let mut render_state = RenderState::new()?;
 /// use libghostty_vt::render::{RowIterator, CellIterator};
 ///
@@ -979,7 +954,7 @@ pub enum CursorVisualStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::{Options, Terminal};
+    use crate::terminal::Terminal;
 
     /// Guards the `set_dirty` → `update` → `dirty()` round-trip. If
     /// `Snapshot::set(value: &T)` calls `from_ref(&value)`, the result has
@@ -988,12 +963,7 @@ mod tests {
     /// propagates them, and `dirty()` fails enum decoding.
     #[test]
     fn dirty_decodes_after_set_dirty_then_update() {
-        let terminal = Terminal::new(Options {
-            cols: 8,
-            rows: 3,
-            max_scrollback: 0,
-        })
-        .unwrap();
+        let terminal = Terminal::new(8, 3).unwrap();
         let mut state = RenderState::new().unwrap();
 
         state

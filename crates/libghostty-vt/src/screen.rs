@@ -15,7 +15,7 @@ use crate::{
 /// Terminal screen identifier.
 ///
 /// Identifies which screen buffer is active in the terminal.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, int_enum::IntEnum)]
 #[repr(u32)]
 pub enum Screen {
     /// The primary (normal) screen.

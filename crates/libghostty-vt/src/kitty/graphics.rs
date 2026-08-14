@@ -71,7 +71,6 @@
 //! ```
 //! use libghostty_vt::{
 //!     Terminal,
-//!     TerminalOptions,
 //!     alloc::{Allocator, Bytes},
 //!     kitty::graphics,
 //! };
@@ -109,79 +108,75 @@
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     graphics::set_png_decoder(Some(Box::new(StubPngDecoder)))?;
 //!
-//!     let mut terminal = Terminal::new(TerminalOptions {
-//!        cols: 80,
-//!        rows: 24,
-//!        max_scrollback: 0
-//!    })?;
+//!     let mut terminal = Terminal::new(80, 24)?;
 //!
-//!    // Set cell pixel dimensions so kitty graphics can compute grid sizes.
-//!    terminal.resize(80, 24, 8, 16)?;
+//!     // Set cell pixel dimensions so kitty graphics can compute grid sizes.
+//!     terminal.resize(80, 24, 8, 16)?;
 //!
-//!    // Set a storage limit (64MiB) to enable Kitty graphics.
-//!    terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?;
+//!     // Set a storage limit (64MiB) to enable Kitty graphics.
+//!     terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?;
 //!
-//!    // Install pty_write to see the protocol response.
-//!    terminal.on_pty_write(|_, data| println!("{}", data.escape_ascii()))?;
+//!     // Install pty_write to see the protocol response.
+//!     terminal.on_pty_write(|_, data| println!("{}", data.escape_ascii()))?;
 //!
-//!    // Send a Kitty graphics command with an inline 1x1 PNG image.
-//!    //
-//!    // The escape sequence is:
-//!    //   ESC _G a=T,f=100,q=1; <base64 PNG data> ESC \
-//!    //
-//!    // Where:
-//!    //   a=T   — transmit and display
-//!    //   f=100 — PNG format
-//!    //   q=1   — request a response (q=0 would suppress it)
-//!    println!("Sending Kitty graphics PNG image:");
-//!    terminal.vt_write(
-//!      b"\x1b_Ga=T,f=100,q=1;\
-//!       iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA\
-//!       DUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\
-//!      \x1b\\"
-//!    );
+//!     // Send a Kitty graphics command with an inline 1x1 PNG image.
+//!     //
+//!     // The escape sequence is:
+//!     //   ESC _G a=T,f=100,q=1; <base64 PNG data> ESC \
+//!     //
+//!     // Where:
+//!     //   a=T   — transmit and display
+//!     //   f=100 — PNG format
+//!     //   q=1   — request a response (q=0 would suppress it)
+//!     println!("Sending Kitty graphics PNG image:");
+//!     terminal.vt_write(
+//!       b"\x1b_Ga=T,f=100,q=1;\
+//!        iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA\
+//!        DUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\
+//!       \x1b\\"
+//!     );
 //!
-//!    let graphics = terminal.kitty_graphics()?;
-//!    let mut iter = graphics::PlacementIterator::new()?;
-//!    let mut placements = iter.update(&graphics)?;
+//!     let graphics = terminal.kitty_graphics()?;
+//!     let mut iter = graphics::PlacementIterator::new()?;
+//!     let mut placements = iter.update(&graphics)?;
 //!
-//!    let mut placement_count = 0usize;
-//!    while let Some(placement) = placements.next() {
-//!        placement_count += 1;
-//!        let image_id = placement.image_id()?;
+//!     let mut placement_count = 0usize;
+//!     while let Some(placement) = placements.next() {
+//!         placement_count += 1;
+//!         let image_id = placement.image_id()?;
+//!         println!(
+//!             "  placement #{}: image_id={} placement_id={} virtual={} z={}",
+//!             placement_count,
+//!             image_id,
+//!             placement.placement_id()?,
+//!             placement.is_virtual()?,
+//!             placement.z()?,
+//!        );
+//!
+//!        // Look up the image and print its properties.
+//!        let image = graphics.image(image_id).unwrap();
 //!        println!(
-//!            "  placement #{}: image_id={} placement_id={} virtual={} z={}",
-//!            placement_count,
-//!            image_id,
-//!            placement.placement_id()?,
-//!            placement.is_virtual()?,
-//!            placement.z()?,
-//!       );
+//!            "    image: number={} size={}x{} format={:?} data_len={}",
+//!            image.number()?,
+//!            image.width()?,
+//!            image.height()?,
+//!            image.format()?,
+//!            image.data()?.unwrap().len(),
+//!        );
 //!
-//!       // Look up the image and print its properties.
-//!       let image = graphics.image(image_id).unwrap();
-//!       println!(
-//!           "    image: number={} size={}x{} format={:?} data_len={}",
-//!           image.number()?,
-//!           image.width()?,
-//!           image.height()?,
-//!           image.format()?,
-//!           image.data()?.len(),
-//!       );
-//!
-//!       let pixel_size = placement.pixel_size(&image, &terminal)?;
-//!       println!(
-//!           "    rendered pixel size: {}x{}",
-//!           pixel_size.width, pixel_size.height,
-//!       );
-//!       let grid_size = placement.grid_size(&image, &terminal)?;
-//!       println!(
-//!           "    grid size: {} cols x {} rows",
-//!           grid_size.cols, grid_size.rows,
-//!       );
-//!    }
-//!    println!("Total placements: {placement_count}");
-//!    Ok(())
+//!        let pixel_size = placement.pixel_size(&image, &terminal)?;
+//!        println!(
+//!            "    rendered pixel size: {}x{}",
+//!            pixel_size.width, pixel_size.height,
+//!        );
+//!        let grid_size = placement.grid_size(&image, &terminal)?;
+//!        println!(
+//!            "    grid size: {} cols x {} rows",
+//!            grid_size.cols, grid_size.rows,
+//!        );
+//!     }
+//!     println!("Total placements: {placement_count}");
+//!     Ok(())
 //! }
 //! ```
 //!
@@ -426,16 +421,21 @@ impl<'t> Image<'t> {
     pub fn height(&self) -> Result<u32> {
         self.get(ffi::KittyGraphicsImageData::HEIGHT)
     }
-    /// Generation stamp assigned when this image was added to or replaced in the storage.
+
+    /// Generation stamp assigned when this image was added to (or replaced in)
+    /// the storage.
     ///
     /// A changed generation for a given image ID means the pixel contents may
     /// have changed even when the dimensions, format, and data length are
-    /// identical, for example a retransmission of the same image ID, so texture
+    /// identical (e.g. a retransmission of the same image ID), so texture
     /// caches must key staleness on this value rather than on size heuristics.
     ///
-    /// Stamps are unique and monotonically increasing process-wide and are drawn
-    /// from the same sequence as [`Graphics::generation`]. Never zero for a
-    /// stored image, so zero can be used as an empty sentinel by callers.
+    /// Stamps are unique and monotonically increasing process-wide and are
+    /// drawn from the same sequence as [`Graphics::generation`]. Never zero
+    /// for a stored image, so zero can be used as an "empty" sentinel by
+    /// callers. Pending payload completion preserves this value to retain
+    /// image age; consumers detect that completion through
+    /// [`Graphics::generation`] and retry [`Image::data`].
     pub fn generation(&self) -> Result<u64> {
         self.get(ffi::KittyGraphicsImageData::GENERATION)
     }
@@ -449,15 +449,29 @@ impl<'t> Image<'t> {
         self.get::<ffi::KittyImageCompression::Type>(ffi::KittyGraphicsImageData::COMPRESSION)
             .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
+
     /// Borrowed pointer to the raw pixel data.
     ///
     /// Valid as long as the underlying terminal is not mutated.
-    pub fn data(&self) -> Result<&'t [u8]> {
+    ///
+    /// Returns `None` when the image metadata is resident but its pixel
+    /// payload is pending.
+    ///
+    /// The data is always fully decoded, uncompressed pixels in the format
+    /// reported by [`Image::format`]: zlib payloads are inflated and PNG
+    /// payloads are decoded to RGBA at transmission time, before the image
+    /// is stored. Consumers can upload this directly to the GPU without any
+    /// decode step.
+    pub fn data(&self) -> Result<Option<&'t [u8]>> {
         let ptr = self.get::<*const u8>(ffi::KittyGraphicsImageData::DATA_PTR)?;
+        if ptr.is_null() {
+            return Ok(None);
+        }
+
         let len = self.get::<usize>(ffi::KittyGraphicsImageData::DATA_LEN)?;
 
         // SAFETY: We trust libghostty to return valid results
-        Ok(unsafe { std::slice::from_raw_parts(ptr, len) })
+        Ok(Some(unsafe { std::slice::from_raw_parts(ptr, len) }))
     }
 }
 
