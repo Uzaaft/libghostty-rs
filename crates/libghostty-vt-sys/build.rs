@@ -147,6 +147,25 @@ fn build_vendored(link_mode: LinkMode) {
     // host-native and configures each Apple platform itself, so we build that
     // and pull out the library we need afterwards.
     let ios_platform = ios_xcframework_platform(&target);
+    if ios_platform.is_some() {
+        // Ghostty only emits the xcframework when zig itself runs on macOS
+        // (it shells out to xcodebuild). Without this check a Linux cross
+        // build would silently produce a host-native library and then fail on
+        // a confusing missing-xcframework assertion after the full build.
+        assert!(
+            host.contains("apple-darwin"),
+            "building for {target} requires a macOS host with Xcode and the iOS SDK \
+             (ghostty's emit-xcframework path runs host-native); host is {host}"
+        );
+        // The xcframework contains only static archives, and the flat layout
+        // below is populated from one of them. Fail up front instead of
+        // letting the shared-library search fail with a misleading message.
+        assert!(
+            matches!(link_mode, LinkMode::Static),
+            "building for {target} supports static linking only; \
+             disable the link-dynamic feature"
+        );
+    }
 
     let mut build = Command::new("zig");
     build
@@ -450,9 +469,14 @@ fn extract_xcframework_lib(install_prefix: &Path, platform: &str) {
         .join("lib")
         .join("ghostty-vt.xcframework")
         .join(platform);
+    // Ghostty emits iOS xcframework slices only when it detects the iOS SDK,
+    // silently skipping them otherwise, so a missing directory here almost
+    // always means the SDK is absent rather than a build failure.
     assert!(
         platform_dir.is_dir(),
-        "expected xcframework platform dir {platform} at {}",
+        "expected xcframework platform dir {platform} at {}; \
+         ghostty emits iOS slices only when the iOS SDK is detected, \
+         so install it via Xcode (Settings > Components)",
         platform_dir.display()
     );
     // ghostty names the Apple static libraries `libghostty-vt-fat.a`.
@@ -502,6 +526,7 @@ fn copy_dir_all(src: &Path, dst: &Path) {
         }
     }
 }
+
 fn zig_target(target: &str) -> String {
     let value = match target {
         "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu",
