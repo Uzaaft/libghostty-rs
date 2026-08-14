@@ -64,6 +64,13 @@ jobs:
         if: matrix.flake_check
         run: nix flake check --print-build-logs
 
+      # Exercises the vendored iOS xcframework build path, which needs a
+      # macOS host with the real Xcode toolchain (the dev shell strips the
+      # Nix SDK wrappers so zig detects the system SDKs).
+      - name: Check iOS vendored build
+        if: runner.os == 'macOS'
+        run: nix develop -c cargo check --locked -p libghostty-vt-sys --target aarch64-apple-ios
+
   miri:
     name: Linux Miri
     runs-on: namespace-profile-linux-x86-sm

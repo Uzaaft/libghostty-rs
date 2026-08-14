@@ -15,6 +15,11 @@ Raw FFI bindings for libghostty-vt.
   another Zig CPU expression to optimize for known deployment hardware.
 - Set `LIBGHOSTTY_VT_SYS_OPTIMIZE` to `Debug`, `ReleaseSafe`, `ReleaseFast`, or
   `ReleaseSmall` to override the Zig optimize mode used by vendored builds.
+- iOS targets (`aarch64-apple-ios`, `aarch64-apple-ios-sim`) build through
+  ghostty's xcframework emit instead of a flat cross build. This requires a
+  macOS host with Xcode and the iOS SDK installed, and supports static linking
+  only. The simulator library is arm64-only (what simulators run on Apple
+  silicon), so `x86_64-apple-ios` is not supported.
 - If the `pkg-config` feature is enabled, the build will use an installed
   `libghostty-vt` found through `pkg-config` only when `GHOSTTY_SOURCE_DIR` is
   unset. With the default static link mode, it probes Ghostty's

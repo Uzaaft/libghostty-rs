@@ -139,6 +139,34 @@ fn build_vendored(link_mode: LinkMode) {
         "LIBGHOSTTY_VT_SYS_CPU must not be empty when set"
     );
 
+    // iOS builds go through ghostty's emit-xcframework path instead of a flat
+    // `-Dtarget=<ios> --sysroot=<sdk>` invocation. The flat build breaks down
+    // for iOS: a generic target baseline can't compile simdutf's always_inline
+    // NEON intrinsics, and `--sysroot` applies globally so it leaks into the
+    // native codegen tools ghostty runs mid-build. The xcframework path runs
+    // host-native and configures each Apple platform itself, so we build that
+    // and pull out the library we need afterwards.
+    let ios_platform = ios_xcframework_platform(&target);
+    if ios_platform.is_some() {
+        // Ghostty only emits the xcframework when zig itself runs on macOS
+        // (it shells out to xcodebuild). Without this check a Linux cross
+        // build would silently produce a host-native library and then fail on
+        // a confusing missing-xcframework assertion after the full build.
+        assert!(
+            host.contains("apple-darwin"),
+            "building for {target} requires a macOS host with Xcode and the iOS SDK \
+             (ghostty's emit-xcframework path runs host-native); host is {host}"
+        );
+        // The xcframework contains only static archives, and the flat layout
+        // below is populated from one of them. Fail up front instead of
+        // letting the shared-library search fail with a misleading message.
+        assert!(
+            matches!(link_mode, LinkMode::Static),
+            "building for {target} supports static linking only; \
+             disable the link-dynamic feature"
+        );
+    }
+
     let mut build = Command::new("zig");
     build
         .arg("build")
@@ -149,8 +177,16 @@ fn build_vendored(link_mode: LinkMode) {
         // make distributed binaries fail with an illegal instruction. Users
         // building for a known machine can explicitly request `native` or a
         // named Zig CPU model through LIBGHOSTTY_VT_SYS_CPU.
+        //
+        // For iOS builds this only affects the host-native flat artifacts:
+        // ghostty resolves its own per-platform targets for the xcframework
+        // slices, so -Dcpu does not leak into them.
         .arg(format!("-Dcpu={cpu}"))
-        .arg("-Demit-xcframework=false")
+        .arg(if ios_platform.is_some() {
+            "-Demit-xcframework=true"
+        } else {
+            "-Demit-xcframework=false"
+        })
         .arg("-Dapp-runtime=none")
         .arg("--prefix")
         .arg(&install_prefix)
@@ -179,19 +215,28 @@ fn build_vendored(link_mode: LinkMode) {
             .arg(&zig_global_cache_dir);
     }
 
-    // Only pass -Dtarget when cross-compiling. For native builds, let zig
-    // auto-detect the host (matches how ghostty's own CMakeLists.txt works).
-    if target != host {
+    // Pass -Dtarget only for non-iOS cross targets; native builds let zig
+    // auto-detect the host. iOS builds run host-native inside the xcframework
+    // emit, so they must not pass -Dtarget or a global --sysroot.
+    if target != host && ios_platform.is_none() {
         let zig_target = zig_target(&target);
         build.arg(format!("-Dtarget={zig_target}"));
     }
 
     run(build, "zig build");
 
+    // The emit also installs host-native flat artifacts; replace them with the
+    // iOS library so the link emission below picks up the right arch.
+    if let Some(platform) = ios_platform {
+        extract_xcframework_lib(&install_prefix, platform);
+    }
+
     let lib_dir = install_prefix.join("lib");
     let include_dir = install_prefix.join("include");
     let search_dirs = library_search_dirs(&target, &install_prefix);
-    warn_unused_xcframework(&lib_dir);
+    if ios_platform.is_none() {
+        warn_unused_xcframework(&lib_dir);
+    }
 
     let has_requested_library = search_dirs.iter().any(|dir| {
         std::fs::read_dir(dir)
@@ -402,6 +447,84 @@ fn library_search_dirs(target: &str, install_prefix: &Path) -> Vec<PathBuf> {
         dirs.push(install_prefix.join("bin"));
     }
     dirs
+}
+
+/// The platform directory inside `ghostty-vt.xcframework` for an iOS Rust
+/// target, or `None` for targets that build directly via `-Dtarget`. Ghostty
+/// emits an arm64-only simulator library (what the simulator runs on Apple
+/// silicon), so x86_64-apple-ios is not supported here.
+fn ios_xcframework_platform(target: &str) -> Option<&'static str> {
+    match target {
+        "aarch64-apple-ios" => Some("ios-arm64"),
+        "aarch64-apple-ios-sim" => Some("ios-arm64-simulator"),
+        _ => None,
+    }
+}
+
+/// Copy an xcframework platform's static lib + headers into the flat
+/// `<prefix>/lib/libghostty-vt.a` and `<prefix>/include` layout the link
+/// emission expects, replacing the host-native artifacts the emit installed.
+fn extract_xcframework_lib(install_prefix: &Path, platform: &str) {
+    let platform_dir = install_prefix
+        .join("lib")
+        .join("ghostty-vt.xcframework")
+        .join(platform);
+    // Ghostty emits iOS xcframework slices only when it detects the iOS SDK,
+    // silently skipping them otherwise, so a missing directory here almost
+    // always means the SDK is absent rather than a build failure.
+    assert!(
+        platform_dir.is_dir(),
+        "expected xcframework platform dir {platform} at {}; \
+         ghostty emits iOS slices only when the iOS SDK is detected, \
+         so install it via Xcode (Settings > Components)",
+        platform_dir.display()
+    );
+    // ghostty names the Apple static libraries `libghostty-vt-fat.a`.
+    let src_lib = platform_dir.join("libghostty-vt-fat.a");
+    assert!(
+        src_lib.exists(),
+        "expected static lib at {}",
+        src_lib.display()
+    );
+
+    let lib_dir = install_prefix.join("lib");
+    let dest_lib = lib_dir.join("libghostty-vt.a");
+    std::fs::copy(&src_lib, &dest_lib).unwrap_or_else(|error| {
+        panic!(
+            "failed to copy {} -> {}: {error}",
+            src_lib.display(),
+            dest_lib.display()
+        )
+    });
+
+    // Headers are arch-independent, but prefer the platform's own copy.
+    let headers = platform_dir.join("Headers");
+    if headers.is_dir() {
+        copy_dir_all(&headers, &install_prefix.join("include"));
+    }
+}
+
+/// Recursively copy a directory tree (merging into `dst` if it exists).
+fn copy_dir_all(src: &Path, dst: &Path) {
+    std::fs::create_dir_all(dst)
+        .unwrap_or_else(|error| panic!("failed to create {}: {error}", dst.display()));
+    let entries = std::fs::read_dir(src)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", src.display()));
+    for entry in entries {
+        let entry = entry
+            .unwrap_or_else(|error| panic!("failed to read entry in {}: {error}", src.display()));
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        let file_type = entry
+            .file_type()
+            .unwrap_or_else(|error| panic!("failed to stat {}: {error}", from.display()));
+        if file_type.is_dir() {
+            copy_dir_all(&from, &to);
+        } else {
+            std::fs::copy(&from, &to)
+                .unwrap_or_else(|error| panic!("failed to copy {}: {error}", from.display()));
+        }
+    }
 }
 
 fn zig_target(target: &str) -> String {

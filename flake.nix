@@ -40,11 +40,23 @@
         };
 
         rustVersion = "1.90.0";
-        buildToolchain = pkgs.rust-bin.stable.${rustVersion}.minimal;
-        rustTargets = pkgs.lib.optionals pkgs.stdenv.isLinux [
-          "x86_64-unknown-linux-gnu"
-          "x86_64-unknown-linux-musl"
-        ];
+        # crane's devShell puts this toolchain's cargo/rustc ahead of the
+        # devToolchain in packages, so it must carry the cross targets too or
+        # its sysroot (without their std) shadows the devToolchain's.
+        buildToolchain = pkgs.rust-bin.stable.${rustVersion}.minimal.override {
+          targets = rustTargets;
+        };
+        rustTargets =
+          pkgs.lib.optionals pkgs.stdenv.isLinux [
+            "x86_64-unknown-linux-gnu"
+            "x86_64-unknown-linux-musl"
+          ]
+          ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+            # iOS builds go through the vendored zig xcframework path and
+            # need the target's std so the dev shell can cargo-check them.
+            "aarch64-apple-ios"
+            "aarch64-apple-ios-sim"
+          ];
 
         checkToolchain = pkgs.rust-bin.stable.${rustVersion}.default.override {
           extensions = ["clippy" "rustfmt"];
