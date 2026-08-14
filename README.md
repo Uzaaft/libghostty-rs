@@ -64,6 +64,11 @@ Vendored builds derive Zig's optimize mode from Cargo's profile: dev builds use
 `ReleaseFast`. Set `LIBGHOSTTY_VT_SYS_OPTIMIZE` to `Debug`, `ReleaseSafe`,
 `ReleaseFast`, or `ReleaseSmall` to override that choice explicitly.
 
+Vendored builds target Zig's portable `baseline` CPU so published binaries can
+run on older processors. For a binary that will run on the build machine, set
+`LIBGHOSTTY_VT_SYS_CPU=native`; a named Zig CPU model such as `x86_64_v3` can be
+used when all deployment machines support that target.
+
 The `pkg-config` path is opt-in. If you enable `libghostty-vt-sys/pkg-config`,
 the build will prefer an installed `libghostty-vt` discovered through
 `pkg-config` when `GHOSTTY_SOURCE_DIR` is unset. libghostty-vt is pre-1.0, so
