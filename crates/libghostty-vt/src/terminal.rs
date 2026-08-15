@@ -1,9 +1,12 @@
 //! Types and functions around terminal state management.
 
-use std::{io::Write, marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
+use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
+
+#[cfg(feature = "std")]
+use std::io::Write;
 
 use crate::{
-    alloc::{Allocator, Bytes, Object},
+    alloc::{self, Allocator, Bytes, Object},
     error::{
         Error, Result, from_optional_result, from_optional_result_uninit,
         from_optional_result_with_len, from_result, from_result_with_len,
@@ -86,18 +89,18 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 /// user data internally for callback dispatch purposes.
 ///
 /// You should instead use types that allow safe *interior mutability*
-/// (e.g. [`Cell`](std::cell::Cell) or [`RefCell`](std::cell::RefCell))
+/// (e.g. [`Cell`](core::cell::Cell) or [`RefCell`](core::cell::RefCell))
 /// and pass a shared reference into each effect handler that needs to mutate
 /// the shared state. Note that reference counting mechanisms like
-/// [`Rc`](std::rc::Rc) and [`Arc`](std::sync::Arc) are optional.
+/// [`Rc`](core::rc::Rc) and [`Arc`](core::sync::Arc) are optional.
 ///
 /// ## Example: Registering effects and processing VT data
 ///
 /// ```rust
-/// use std::cell::Cell;
+/// use core::cell::Cell;
 /// use libghostty_vt::Terminal;
 ///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # fn main() -> Result<(), Box<dyn core::error::Error>> {
 /// // Set up a simple bell counter.
 /// //
 /// // `usize` is a simple, `Copy`able type, which means `Cell`s are
@@ -225,7 +228,7 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
     // Keep callbacks in a heap allocation so C can store a userdata pointer
     // to the VTable itself. That pointer remains stable even if Terminal moves.
-    vtable: Box<VTable<'alloc, 'cb>>,
+    vtable: alloc::Box<'alloc, VTable<'alloc, 'cb>>,
 }
 
 /// Default visual style used when the cursor style is reset.
@@ -251,7 +254,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// to change any options prior to using the terminal.
     pub fn new(cols: u16, rows: u16) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null(), cols, rows) }
+        unsafe { Self::new_inner(core::ptr::null(), cols, rows) }
     }
 
     /// Create a new terminal instance with a custom allocator.
@@ -272,16 +275,19 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator, cols: u16, rows: u16) -> Result<Self> {
-        let mut raw: ffi::Terminal = std::ptr::null_mut();
+        let mut raw: ffi::Terminal = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_terminal_new(alloc, &raw mut raw, cols, rows) };
         from_result(result)?;
-        unsafe { Self::from_raw(raw) }
+        unsafe { Self::from_raw(alloc, raw) }
     }
 
-    pub(crate) unsafe fn from_raw(raw: ffi::Terminal) -> Result<Self> {
+    pub(crate) unsafe fn from_raw(
+        alloc: *const ffi::Allocator,
+        raw: ffi::Terminal,
+    ) -> Result<Self> {
         Ok(Self {
             inner: Object::new(raw)?,
-            vtable: Box::new(VTable::default()),
+            vtable: unsafe { alloc::Box::new(alloc, VTable::default())? },
         })
     }
 
@@ -386,7 +392,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// If the tracked grid reference outlives this terminal, the handle remains
     /// valid, but it will always return `false` or `Ok(None)`.
     pub fn track_grid_ref(&self, point: Point) -> Result<TrackedGridRef> {
-        let mut raw: ffi::TrackedGridRef = std::ptr::null_mut();
+        let mut raw: ffi::TrackedGridRef = core::ptr::null_mut();
         let result = unsafe {
             ffi::ghostty_terminal_grid_ref_track(self.inner.as_raw(), point.into(), &raw mut raw)
         };
@@ -420,7 +426,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let result = unsafe {
             ffi::ghostty_terminal_point_from_grid_ref(
                 self.inner.as_raw(),
-                std::ptr::from_ref(&grid_ref.inner),
+                core::ptr::from_ref(&grid_ref.inner),
                 space.into_raw(),
                 point.as_mut_ptr(),
             )
@@ -440,7 +446,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             ffi::ghostty_terminal_get(
                 self.inner.as_raw(),
                 Data::MODE,
-                &raw mut mode as *mut std::ffi::c_void,
+                &raw mut mode as *mut core::ffi::c_void,
             )
         };
         from_result(result)?;
@@ -460,7 +466,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             ffi::ghostty_terminal_set(
                 self.inner.as_raw(),
                 Opt::MODE,
-                &raw const mode as *const std::ffi::c_void,
+                &raw const mode as *const core::ffi::c_void,
             )
         };
         from_result(result)?;
@@ -485,7 +491,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             ffi::ghostty_terminal_set(
                 self.inner.as_raw(),
                 Opt::MODE_DEFAULT,
-                &raw const mode as *const std::ffi::c_void,
+                &raw const mode as *const core::ffi::c_void,
             )
         };
         from_result(result)?;
@@ -583,6 +589,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// write, [`Error::LimitExceeded`] if output accounting overflows, or
     /// [`Error::InvalidValue`] if an argument is invalid, tracking is disabled,
     /// or the current continuation is unavailable.
+    #[cfg(feature = "std")]
     pub fn continuation_write<W: Write>(&mut self, writer: &mut W) -> Result<()> {
         let writer = crate::io::to_writer(writer);
         let result =
@@ -610,9 +617,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         &self,
         alloc: Option<&'a Allocator<'ctx>>,
     ) -> Result<Option<Bytes<'a>>> {
-        let mut out = std::ptr::null_mut();
+        let mut out = core::ptr::null_mut();
         let mut out_len = 0usize;
-        let alloc = alloc.map_or(std::ptr::null(), |v| v.to_raw());
+        let alloc = alloc.map_or(core::ptr::null(), |v| v.to_raw());
 
         let result = unsafe {
             ffi::ghostty_terminal_continuation_alloc(
@@ -654,7 +661,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         // from a zero-capacity destination. Rust empty slices have a non-NULL
         // dangling pointer, so translate that representation at this boundary.
         let buf_ptr = if buf.is_empty() {
-            std::ptr::null_mut()
+            core::ptr::null_mut()
         } else {
             buf.as_mut_ptr()
         };
@@ -689,7 +696,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
     pub(crate) fn set<T>(&self, tag: ffi::TerminalOption::Type, v: &T) -> Result<()> {
         let result = unsafe {
-            ffi::ghostty_terminal_set(self.inner.as_raw(), tag, std::ptr::from_ref(v).cast())
+            ffi::ghostty_terminal_set(self.inner.as_raw(), tag, core::ptr::from_ref(v).cast())
         };
         from_result(result)
     }
@@ -698,7 +705,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub(crate) fn set_ptr(
         &self,
         tag: ffi::TerminalOption::Type,
-        ptr: *const std::ffi::c_void,
+        ptr: *const core::ffi::c_void,
     ) -> Result<()> {
         let result = unsafe { ffi::ghostty_terminal_set(self.inner.as_raw(), tag, ptr) };
         from_result(result)
@@ -709,9 +716,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         v: Option<&T>,
     ) -> Result<()> {
         let ptr = if let Some(v) = v {
-            std::ptr::from_ref(v)
+            core::ptr::from_ref(v)
         } else {
-            std::ptr::null()
+            core::ptr::null()
         };
 
         let result = unsafe { ffi::ghostty_terminal_set(self.inner.as_raw(), tag, ptr.cast()) };
@@ -824,7 +831,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// This is the style that will be applied to newly printed characters.
     pub fn cursor_style(&self) -> Result<style::Style> {
         self.get::<ffi::Style>(Data::CURSOR_STYLE)
-            .and_then(std::convert::TryInto::try_into)
+            .and_then(core::convert::TryInto::try_into)
     }
     /// Get the current Kitty keyboard protocol flags.
     pub fn kitty_keyboard_flags(&self) -> Result<key::KittyKeyFlags> {
@@ -885,8 +892,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let str = self.get::<ffi::String>(Data::TITLE)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
         // while we uphold that no mutation could happen during its lifetime.
-        let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
-        std::str::from_utf8(str).map_err(|_| Error::InvalidValue)
+        let str = unsafe { core::slice::from_raw_parts(str.ptr, str.len) };
+        core::str::from_utf8(str).map_err(|_| Error::InvalidValue)
     }
 
     /// Get the current working directory as set by escape sequences (e.g. OSC 7).
@@ -898,8 +905,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let str = self.get::<ffi::String>(Data::PWD)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
         // while we uphold that no mutation could happen during its lifetime.
-        let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
-        std::str::from_utf8(str).map_err(|_| Error::InvalidValue)
+        let str = unsafe { core::slice::from_raw_parts(str.ptr, str.len) };
+        core::str::from_utf8(str).map_err(|_| Error::InvalidValue)
     }
     /// The total number of rows in the active screen including scrollback.
     pub fn total_rows(&self) -> Result<usize> {
@@ -1548,14 +1555,14 @@ impl<'t> ClipboardWrite<'t> {
         // SAFETY: We trust libghostty to give us a valid pointer and length
         // within the lifetime of the callback.
         ClipboardContents(unsafe {
-            std::slice::from_raw_parts((*self.ptr).contents, (*self.ptr).contents_len).iter()
+            core::slice::from_raw_parts((*self.ptr).contents, (*self.ptr).contents_len).iter()
         })
     }
 }
 
 /// An iterator into a borrowed array of MIME representations.
 #[derive(Clone, Debug)]
-pub struct ClipboardContents<'t>(std::slice::Iter<'t, ffi::ClipboardContent>);
+pub struct ClipboardContents<'t>(core::slice::Iter<'t, ffi::ClipboardContent>);
 
 impl<'t> Iterator for ClipboardContents<'t> {
     type Item = ClipboardContent<'t>;
@@ -1577,7 +1584,7 @@ impl DoubleEndedIterator for ClipboardContents<'_> {
     }
 }
 impl ExactSizeIterator for ClipboardContents<'_> {}
-impl std::iter::FusedIterator for ClipboardContents<'_> {}
+impl core::iter::FusedIterator for ClipboardContents<'_> {}
 
 /// One MIME representation in a clipboard write.
 ///
@@ -1755,7 +1762,7 @@ pub enum ProgressState {
 ///
 ///     // Convert the raw parameters into Rust types.
 ///     // This is just to illustrate how.
-///     let slice = unsafe { std::slice::from_raw_parts(foo, bar) };
+///     let slice = unsafe { core::slice::from_raw_parts(foo, bar) };
 ///
 ///     // Call into user logic and return.
 ///     func(&terminal, slice)
@@ -1782,7 +1789,7 @@ macro_rules! handlers {
             $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
                 unsafe extern "C" fn callback(
                     t: $crate::ffi::Terminal,
-                    ud: *mut std::ffi::c_void,
+                    ud: *mut core::ffi::c_void,
                     $($rfname: $rfty),*
                 ) $(-> $rawrty)? {
                     // SAFETY: USERDATA is set to the boxed VTable pointee
@@ -1814,7 +1821,7 @@ macro_rules! handlers {
                     ret
                 }
 
-                self.vtable.$name = Some(::std::boxed::Box::new(f));
+                self.vtable.$name = Some(::core::boxed::Box::new(f));
 
                 // USERDATA is a raw pointer option: pass the heap allocation
                 // itself, not the address of the Box smart pointer field stored
@@ -1822,8 +1829,8 @@ macro_rules! handlers {
                 //
                 // Derive the pointer from a mutable reference so it carries
                 // write provenance – the callback later reborrows it as &mut.
-                let userdata = std::ptr::from_mut::<VTable<'alloc, 'cb>>(self.vtable.as_mut())
-                    as *const ::std::ffi::c_void;
+                let userdata = core::ptr::from_mut::<VTable<'alloc, 'cb>>(self.vtable.as_mut())
+                    as *const ::core::ffi::c_void;
                 self.set_ptr($crate::ffi::TerminalOption::USERDATA, userdata)?;
 
                 // The callback must be coerced into a function *pointer*
@@ -1831,7 +1838,7 @@ macro_rules! handlers {
                 // :)
                 let callback_ptr: unsafe extern "C" fn(
                     $crate::ffi::Terminal,
-                    *mut ::std::ffi::c_void,
+                    *mut ::core::ffi::c_void,
                     $($rfty),*
                 ) $(-> $rawrty)? = callback;
 
@@ -1839,7 +1846,7 @@ macro_rules! handlers {
                     $crate::ffi::ghostty_terminal_set(
                         self.inner.as_raw(),
                         $crate::ffi::TerminalOption::$tag,
-                        callback_ptr as *const ::std::ffi::c_void
+                        callback_ptr as *const ::core::ffi::c_void
                     )
                 };
                 $crate::error::from_result(result)?;
@@ -1871,7 +1878,7 @@ macro_rules! handlers {
         )*
 
         struct VTable<'alloc, 'cb> {
-            $($name: Option<::std::boxed::Box<dyn $fnty<'alloc, 'cb>>>),*
+            $($name: Option<::core::boxed::Box<dyn $fnty<'alloc, 'cb>>>),*
         }
 
         impl ::core::fmt::Debug for VTable<'_, '_> {
@@ -1902,7 +1909,7 @@ handlers! {
         // SAFETY: We trust libghostty to return valid memory given we
         // uphold all lifetime invariants (e.g. no `vt_write` calls
         // during this callback, which is guaranteed via the mutable reference).
-        let data = unsafe { std::slice::from_raw_parts(ptr, len) };
+        let data = unsafe { core::slice::from_raw_parts(ptr, len) };
         func(&term, data);
     }
 
@@ -2040,7 +2047,7 @@ handlers! {
         from = GhosttyTerminalClipboardWriteFn(
             write: *const ffi::ClipboardWrite
         ) -> ffi::ClipboardWriteResult::Type,
-        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>) -> std::result::Result<(), ClipboardWriteError>,
+        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>) -> core::result::Result<(), ClipboardWriteError>,
     ) |term, func| {
         match func(&term, unsafe { ClipboardWrite::from_raw(write) }) {
             Ok(_) => ffi::ClipboardWriteResult::SUCCESS,
@@ -2080,8 +2087,8 @@ mod tests {
     use super::*;
     use crate::RenderState;
     use crate::render::CursorVisualStyle;
-    use std::cell::{Cell, RefCell};
-    use std::mem::ManuallyDrop;
+    use core::cell::{Cell, RefCell};
+    use core::mem::ManuallyDrop;
 
     #[inline(never)]
     fn build_terminal<'cb>(callback_count: &'cb RefCell<usize>) -> Terminal<'static, 'cb> {
@@ -2114,13 +2121,13 @@ mod tests {
         // Keep the source allocation alive without running T's destructor.
         // We need the bytes to remain initialized until after the copy.
         let src = Box::new(ManuallyDrop::new(value));
-        let src_addr = std::ptr::from_ref(&**src).cast::<T>() as usize;
+        let src_addr = core::ptr::from_ref(&**src).cast::<T>() as usize;
 
         unsafe {
-            let dst_layout = std::alloc::Layout::new::<T>();
-            let dst_ptr = std::alloc::alloc(dst_layout).cast::<T>();
+            let dst_layout = core::alloc::Layout::new::<T>();
+            let dst_ptr = core::alloc::alloc(dst_layout).cast::<T>();
             if dst_ptr.is_null() {
-                std::alloc::handle_alloc_error(dst_layout);
+                core::alloc::handle_alloc_error(dst_layout);
             }
 
             let dst_addr = dst_ptr as usize;
@@ -2132,14 +2139,14 @@ mod tests {
             // SAFETY: src points to a fully initialized T wrapped in
             // ManuallyDrop, dst points to distinct uninitialized storage for
             // exactly one T, and the regions do not overlap.
-            std::ptr::copy_nonoverlapping(std::ptr::from_ref(&**src).cast::<T>(), dst_ptr, 1);
+            core::ptr::copy_nonoverlapping(core::ptr::from_ref(&**src).cast::<T>(), dst_ptr, 1);
 
             // SAFETY: src was allocated as Box<ManuallyDrop<T>> and must be
             // freed without dropping T because ownership was transferred by
             // the raw byte copy above.
-            std::alloc::dealloc(
+            core::alloc::dealloc(
                 Box::into_raw(src).cast::<u8>(),
-                std::alloc::Layout::new::<ManuallyDrop<T>>(),
+                core::alloc::Layout::new::<ManuallyDrop<T>>(),
             );
 
             // SAFETY: We just initialized dst_ptr by copying a valid T into it,

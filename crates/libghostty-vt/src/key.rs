@@ -12,11 +12,13 @@
 //!     *  Set event properties (action, key, modifiers, etc.)
 //!     *  Encode with [`Encoder::encode_to_vec`] (with a growable `Vec` buffer)
 //!        or [`Encoder::encode`] (with a fixed byte buffer).
-use std::mem::MaybeUninit;
+use core::mem::MaybeUninit;
+
+#[cfg(feature = "std")]
+use std::vec::Vec;
 
 use crate::{
-    Error,
-    alloc::{Allocator, Object},
+    alloc::{Allocator, Bytes, Object},
     error::{Result, from_result, from_result_with_len},
     ffi::{self, KeyEncoderOption as Opt},
     terminal::Terminal,
@@ -30,7 +32,7 @@ impl<'alloc> Encoder<'alloc> {
     /// Create a new key encoder instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new key encoder instance with a custom allocator.
@@ -43,7 +45,7 @@ impl<'alloc> Encoder<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
-        let mut raw: ffi::KeyEncoder = std::ptr::null_mut();
+        let mut raw: ffi::KeyEncoder = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_key_encoder_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -52,7 +54,7 @@ impl<'alloc> Encoder<'alloc> {
     unsafe fn setopt(
         &mut self,
         option: ffi::KeyEncoderOption::Type,
-        value: *const std::ffi::c_void,
+        value: *const core::ffi::c_void,
     ) {
         unsafe { ffi::ghostty_key_encoder_setopt(self.0.as_raw(), option, value) }
     }
@@ -65,6 +67,7 @@ impl<'alloc> Encoder<'alloc> {
     /// Not all key events produce output. For example, unmodified modifier
     /// keys typically don't generate escape sequences. Check the returned
     /// `Vec` to determine if any data was written.
+    #[cfg(feature = "std")]
     pub fn encode_to_vec(&mut self, event: &Event, vec: &mut Vec<u8>) -> Result<()> {
         let remaining = vec.capacity() - vec.len();
 
@@ -101,7 +104,7 @@ impl<'alloc> Encoder<'alloc> {
     pub fn encode(&mut self, event: &Event, buf: &mut [u8]) -> Result<usize> {
         // SAFETY: It is always safe to reinterpret T as a MaybeUninit<T>.
         self.encode_to_uninit_buf(event, unsafe {
-            std::slice::from_raw_parts_mut(buf.as_mut_ptr().cast(), buf.len())
+            core::slice::from_raw_parts_mut(buf.as_mut_ptr().cast(), buf.len())
         })
     }
 
@@ -145,7 +148,7 @@ impl<'alloc> Encoder<'alloc> {
         unsafe {
             self.setopt(
                 Opt::CURSOR_KEY_APPLICATION,
-                std::ptr::from_ref(&value).cast(),
+                core::ptr::from_ref(&value).cast(),
             );
         }
         self
@@ -155,7 +158,7 @@ impl<'alloc> Encoder<'alloc> {
         unsafe {
             self.setopt(
                 Opt::KEYPAD_KEY_APPLICATION,
-                std::ptr::from_ref(&value).cast(),
+                core::ptr::from_ref(&value).cast(),
             );
         }
         self
@@ -165,7 +168,7 @@ impl<'alloc> Encoder<'alloc> {
         unsafe {
             self.setopt(
                 Opt::IGNORE_KEYPAD_WITH_NUMLOCK,
-                std::ptr::from_ref(&value).cast(),
+                core::ptr::from_ref(&value).cast(),
             );
         }
         self
@@ -173,7 +176,7 @@ impl<'alloc> Encoder<'alloc> {
     /// Set terminal DEC mode 1036: alt sends escape prefix.
     pub fn set_alt_esc_prefix(&mut self, value: bool) -> &mut Self {
         unsafe {
-            self.setopt(Opt::ALT_ESC_PREFIX, std::ptr::from_ref(&value).cast());
+            self.setopt(Opt::ALT_ESC_PREFIX, core::ptr::from_ref(&value).cast());
         }
         self
     }
@@ -182,7 +185,7 @@ impl<'alloc> Encoder<'alloc> {
         unsafe {
             self.setopt(
                 Opt::MODIFY_OTHER_KEYS_STATE_2,
-                std::ptr::from_ref(&value).cast(),
+                core::ptr::from_ref(&value).cast(),
             );
         }
         self
@@ -191,14 +194,14 @@ impl<'alloc> Encoder<'alloc> {
     pub fn set_kitty_flags(&mut self, value: KittyKeyFlags) -> &mut Self {
         let value = value.bits();
         unsafe {
-            self.setopt(Opt::KITTY_FLAGS, std::ptr::from_ref(&value).cast());
+            self.setopt(Opt::KITTY_FLAGS, core::ptr::from_ref(&value).cast());
         }
         self
     }
     /// Set macOS option-as-alt setting.
     pub fn set_macos_option_as_alt(&mut self, value: OptionAsAlt) -> &mut Self {
         unsafe {
-            self.setopt(Opt::MACOS_OPTION_AS_ALT, std::ptr::from_ref(&value).cast());
+            self.setopt(Opt::MACOS_OPTION_AS_ALT, core::ptr::from_ref(&value).cast());
         }
         self
     }
@@ -210,7 +213,7 @@ impl<'alloc> Encoder<'alloc> {
     /// If `true`, `backspace` emits 0x08.
     pub fn set_backarrow_key_mode(&mut self, value: bool) -> &mut Self {
         unsafe {
-            self.setopt(Opt::BACKARROW_KEY_MODE, std::ptr::from_ref(&value).cast());
+            self.setopt(Opt::BACKARROW_KEY_MODE, core::ptr::from_ref(&value).cast());
         }
         self
     }
@@ -227,14 +230,15 @@ impl Drop for Encoder<'_> {
 #[derive(Debug)]
 pub struct Event<'alloc> {
     inner: Object<'alloc, ffi::KeyEventImpl>,
-    text: Option<String>,
+    alloc: *const ffi::Allocator,
+    text: Option<Bytes<'alloc>>,
 }
 
 impl<'alloc> Event<'alloc> {
     /// Create a new key event instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new key event instance with a custom allocator.
@@ -247,11 +251,12 @@ impl<'alloc> Event<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
-        let mut raw: ffi::KeyEvent = std::ptr::null_mut();
+        let mut raw: ffi::KeyEvent = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_key_event_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self {
             inner: Object::new(raw)?,
+            alloc,
             text: None,
         })
     }
@@ -330,21 +335,26 @@ impl<'alloc> Event<'alloc> {
     ///
     /// The event makes an internal copy of the text since the C API
     /// may reuse it without any rigid lifetime guarantees.
-    pub fn set_utf8<S: Into<String>>(&mut self, text: Option<S>) -> &mut Self {
-        self.text = text.map(Into::into);
-
-        match &self.text {
-            Some(text) => unsafe {
-                ffi::ghostty_key_event_set_utf8(
-                    self.inner.as_raw(),
-                    text.as_ptr().cast(),
-                    text.len(),
-                );
+    pub fn set_utf8(&mut self, text: Option<&str>) -> &mut Self {
+        self.text = match text {
+            Some(text) => match unsafe { Bytes::from_str(self.alloc, text) } {
+                Ok(b) => {
+                    unsafe {
+                        ffi::ghostty_key_event_set_utf8(
+                            self.inner.as_raw(),
+                            b.as_ptr().cast(),
+                            b.len(),
+                        );
+                    }
+                    Some(b)
+                }
+                Err(_) => None,
             },
             None => unsafe {
-                ffi::ghostty_key_event_set_utf8(self.inner.as_raw(), std::ptr::null(), 0);
+                ffi::ghostty_key_event_set_utf8(self.inner.as_raw(), core::ptr::null(), 0);
+                None
             },
-        }
+        };
         self
     }
 
@@ -352,7 +362,12 @@ impl<'alloc> Event<'alloc> {
     pub fn utf8(&mut self) -> Option<&str> {
         // We actually sidestep the `ghostty_key_event_get_utf8` method to
         // avoid unclear lifetimes. See `set_utf8`.
-        self.text.as_deref()
+
+        self.text
+            .as_deref()
+            // SAFETY: The only way `self.text` can be set is by copying valid
+            // UTF-8 string data.
+            .map(|s| unsafe { core::str::from_utf8_unchecked(s) })
     }
 
     /// Set the unshifted Unicode codepoint.

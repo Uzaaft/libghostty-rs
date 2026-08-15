@@ -1,7 +1,6 @@
 //! Adapting custom allocators to work with libghostty.
-use std::{
+use core::{
     borrow::Borrow,
-    ffi::c_void,
     marker::PhantomData,
     ops::{Deref, DerefMut},
     ptr::NonNull,
@@ -32,7 +31,7 @@ pub struct Allocator<'ctx> {
 
 impl Allocator<'_> {
     pub(crate) fn to_raw(&self) -> *const ffi::Allocator {
-        std::ptr::from_ref(&self.inner)
+        core::ptr::from_ref(&self.inner)
     }
     pub(crate) unsafe fn from_raw(raw: *const ffi::Allocator) -> Self {
         Self {
@@ -97,7 +96,7 @@ impl<'alloc> Bytes<'alloc> {
     /// Not really useful except in very niche cases.
     pub fn new(len: usize) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null(), len) }
+        unsafe { Self::new_inner(core::ptr::null(), len) }
     }
 
     /// Allocate `len` bytes with a custom allocator.
@@ -115,6 +114,18 @@ impl<'alloc> Bytes<'alloc> {
         let raw = unsafe { ffi::ghostty_alloc(alloc, len) };
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         Ok(unsafe { Self::from_raw_parts(ptr, len, alloc) })
+    }
+
+    /// Make a libghostty-owned copy of the given string.
+    ///
+    /// # Safety
+    ///
+    /// `alloc` must be a valid allocator with the `'alloc` lifetime.
+    pub(crate) unsafe fn from_str(alloc: *const ffi::Allocator, s: &str) -> Result<Self> {
+        // SAFETY: Caller guaranteed
+        let mut buf = unsafe { Self::new_inner(alloc, s.len())? };
+        buf.copy_from_slice(s.as_bytes());
+        Ok(buf)
     }
 
     pub(crate) unsafe fn from_raw_parts(
@@ -144,14 +155,14 @@ impl Deref for Bytes<'_> {
     #[inline]
     fn deref(&self) -> &Self::Target {
         // SAFETY: See Drop
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
+        unsafe { core::slice::from_raw_parts(self.ptr.as_ptr(), self.len) }
     }
 }
 impl DerefMut for Bytes<'_> {
     #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         // SAFETY: See Drop
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
+        unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
 }
 impl AsRef<[u8]> for Bytes<'_> {
@@ -171,23 +182,78 @@ impl Borrow<[u8]> for Bytes<'_> {
 }
 impl<'a> IntoIterator for &'a Bytes<'_> {
     type Item = &'a u8;
-    type IntoIter = std::slice::Iter<'a, u8>;
+    type IntoIter = core::slice::Iter<'a, u8>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.deref().iter()
     }
 }
 
+/// A heap object allocated by libghostty.
+#[derive(Debug)]
+pub(crate) struct Box<'alloc, T: ?Sized> {
+    pub(crate) ptr: NonNull<T>,
+    pub(crate) alloc: *const ffi::Allocator,
+    _phan: PhantomData<&'alloc ffi::Allocator>,
+}
+impl<'alloc, T> Box<'alloc, T> {
+    pub unsafe fn new(alloc: *const ffi::Allocator, v: T) -> Result<Self> {
+        let ptr = unsafe { ffi::ghostty_alloc(alloc, core::mem::size_of::<T>()) };
+        let ptr = NonNull::new(ptr.cast()).ok_or(Error::OutOfMemory)?;
+        unsafe {
+            ptr.write(v);
+        }
+
+        Ok(Self::from_raw(alloc, ptr))
+    }
+    pub fn as_ptr(&self) -> *mut T {
+        self.ptr.as_ptr()
+    }
+    pub fn from_raw(alloc: *const ffi::Allocator, ptr: NonNull<T>) -> Self {
+        Self {
+            ptr,
+            alloc,
+            _phan: PhantomData,
+        }
+    }
+}
+impl<'alloc, T: ?Sized> Deref for Box<'alloc, T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        unsafe { &*self.ptr.as_ptr() }
+    }
+}
+impl<'alloc, T: ?Sized> DerefMut for Box<'alloc, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.ptr.as_ptr() }
+    }
+}
+impl<'alloc, T: ?Sized> Drop for Box<'alloc, T> {
+    fn drop(&mut self) {
+        unsafe {
+            ffi::ghostty_free(
+                self.alloc,
+                self.ptr.as_ptr().cast(),
+                // SAFETY: `self.ptr` should point to valid data.
+                core::mem::size_of_val(self.deref()),
+            )
+        }
+    }
+}
+
 //------------------------------------
 // GlobalAlloc
 //------------------------------------
+// TODO: Add new `alloc` feature for `no_std` situation with an allocator
 
+#[cfg(feature = "std")]
 impl Allocator<'static> {
     /// A custom allocator based on Rust's built-in
     /// [global allocator](std::alloc::GlobalAlloc).
     pub const GLOBAL: Self = Self {
         inner: ffi::Allocator {
-            ctx: std::ptr::null_mut(),
+            ctx: core::ptr::null_mut(),
             vtable: &ffi::AllocatorVtable {
                 alloc: Some(_global_alloc),
                 free: Some(_global_free),
@@ -199,6 +265,7 @@ impl Allocator<'static> {
     };
 }
 
+#[cfg(feature = "std")]
 unsafe extern "C" fn _global_alloc(
     _allocator: *mut c_void,
     len: usize,
@@ -211,6 +278,7 @@ unsafe extern "C" fn _global_alloc(
     unsafe { std::alloc::alloc(layout).cast::<c_void>() }
 }
 
+#[cfg(feature = "std")]
 unsafe extern "C" fn _global_free(
     _allocator: *mut c_void,
     mem: *mut c_void,
@@ -223,6 +291,8 @@ unsafe extern "C" fn _global_free(
     };
     unsafe { std::alloc::dealloc(mem.cast::<u8>(), layout) }
 }
+
+#[cfg(feature = "std")]
 unsafe extern "C" fn _global_resize(
     _allocator: *mut c_void,
     _mem: *mut c_void,
@@ -233,6 +303,8 @@ unsafe extern "C" fn _global_resize(
 ) -> bool {
     false
 }
+
+#[cfg(feature = "std")]
 unsafe extern "C" fn _global_remap(
     _allocator: *mut c_void,
     mem: *mut c_void,
@@ -257,7 +329,7 @@ impl<'ctx, A: alloc::Allocator + 'ctx> From<A> for Allocator<'ctx> {
     fn from(value: A) -> Self {
         Self {
             inner: ffi::Allocator {
-                ctx: std::ptr::from_ref(value.by_ref()) as *mut std::ffi::c_void,
+                ctx: core::ptr::from_ref(value.by_ref()) as *mut core::ffi::c_void,
                 vtable: &ffi::AllocatorVtable {
                     alloc: Some(_alloc::<A>),
                     free: Some(_free::<A>),
@@ -282,7 +354,7 @@ unsafe extern "C" fn _alloc<A: alloc::Allocator>(
     unsafe { get_allocator::<A>(allocator) }
         .and_then(|alloc| alloc.allocate(layout?).ok())
         .map(|p| p.as_ptr().cast::<c_void>())
-        .unwrap_or(std::ptr::null_mut())
+        .unwrap_or(core::ptr::null_mut())
 }
 
 #[cfg(feature = "allocator_api")]
@@ -347,7 +419,7 @@ unsafe extern "C" fn _remap<A: alloc::Allocator>(
             }
         })
         .map(|p| p.as_ptr().cast::<c_void>())
-        .unwrap_or(std::ptr::null_mut())
+        .unwrap_or(core::ptr::null_mut())
 }
 
 /// Get the allocator back from a vtable function.
@@ -369,7 +441,7 @@ unsafe fn get_allocator<'a, A: alloc::Allocator>(ptr: *mut c_void) -> Option<&'a
 
 #[cfg(test)]
 mod tests {
-    use std::ptr::NonNull;
+    use core::ptr::NonNull;
 
     use super::{_global_alloc, _global_free, _global_remap};
 
@@ -382,14 +454,14 @@ mod tests {
         let alignment_log2 = 4u8;
         let expected_alignment = 1usize << alignment_log2;
 
-        let raw = unsafe { _global_alloc(std::ptr::null_mut(), len, alignment_log2, 0) };
+        let raw = unsafe { _global_alloc(core::ptr::null_mut(), len, alignment_log2, 0) };
         let mem = NonNull::new(raw.cast::<u8>()).expect("global allocator returned null");
 
         assert_eq!((mem.as_ptr() as usize) % expected_alignment, 0);
 
         unsafe {
             _global_free(
-                std::ptr::null_mut(),
+                core::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 len,
                 alignment_log2,
@@ -404,17 +476,17 @@ mod tests {
         let new_len = 32usize;
         let alignment_log2 = 3u8;
 
-        let raw = unsafe { _global_alloc(std::ptr::null_mut(), initial_len, alignment_log2, 0) };
+        let raw = unsafe { _global_alloc(core::ptr::null_mut(), initial_len, alignment_log2, 0) };
         let mem = NonNull::new(raw.cast::<u8>()).expect("global allocator returned null");
 
-        let initial = unsafe { std::slice::from_raw_parts_mut(mem.as_ptr(), initial_len) };
+        let initial = unsafe { core::slice::from_raw_parts_mut(mem.as_ptr(), initial_len) };
         for (index, byte) in initial.iter_mut().enumerate() {
             *byte = index as u8;
         }
 
         let raw = unsafe {
             _global_remap(
-                std::ptr::null_mut(),
+                core::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 initial_len,
                 alignment_log2,
@@ -424,14 +496,14 @@ mod tests {
         };
         let mem = NonNull::new(raw.cast::<u8>()).expect("global remap returned null");
 
-        let grown = unsafe { std::slice::from_raw_parts(mem.as_ptr(), new_len) };
+        let grown = unsafe { core::slice::from_raw_parts(mem.as_ptr(), new_len) };
         for (index, byte) in grown[..initial_len].iter().copied().enumerate() {
             assert_eq!(byte, index as u8);
         }
 
         unsafe {
             _global_free(
-                std::ptr::null_mut(),
+                core::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 new_len,
                 alignment_log2,

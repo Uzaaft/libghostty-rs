@@ -3,7 +3,7 @@
 //! These types represent the contents of a terminal screen.
 //! A [`Cell`] is a single grid cell and a [`Row`] is a single row.
 //! Both are opaque values whose fields are accessed via their methods.
-use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
+use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     error::{Error, Result, from_optional_result_uninit, from_result, from_result_with_len},
@@ -59,7 +59,7 @@ impl GridRef<'_> {
     pub fn row(&self) -> Result<Row> {
         let mut v = ffi::Row::default();
         let result =
-            unsafe { ffi::ghostty_grid_ref_row(std::ptr::from_ref(&self.inner), &raw mut v) };
+            unsafe { ffi::ghostty_grid_ref_row(core::ptr::from_ref(&self.inner), &raw mut v) };
         from_result(result)?;
         Ok(Row(v))
     }
@@ -67,7 +67,7 @@ impl GridRef<'_> {
     pub fn cell(&self) -> Result<Cell> {
         let mut v = ffi::Cell::default();
         let result =
-            unsafe { ffi::ghostty_grid_ref_cell(std::ptr::from_ref(&self.inner), &raw mut v) };
+            unsafe { ffi::ghostty_grid_ref_cell(core::ptr::from_ref(&self.inner), &raw mut v) };
         from_result(result)?;
         Ok(Cell(v))
     }
@@ -75,7 +75,7 @@ impl GridRef<'_> {
     pub fn style(&self) -> Result<Style> {
         let mut v = ffi::Style::default();
         let result =
-            unsafe { ffi::ghostty_grid_ref_style(std::ptr::from_ref(&self.inner), &raw mut v) };
+            unsafe { ffi::ghostty_grid_ref_style(core::ptr::from_ref(&self.inner), &raw mut v) };
         from_result(result)?;
         Style::try_from(v)
     }
@@ -95,8 +95,8 @@ impl GridRef<'_> {
         let mut len = 0;
         let result = unsafe {
             ffi::ghostty_grid_ref_graphemes(
-                std::ptr::from_ref(&self.inner),
-                std::ptr::from_mut(buf).cast(),
+                core::ptr::from_ref(&self.inner),
+                core::ptr::from_mut(buf).cast(),
                 buf.len(),
                 &raw mut len,
             )
@@ -117,8 +117,8 @@ impl GridRef<'_> {
         let mut len = 0;
         let result = unsafe {
             ffi::ghostty_grid_ref_hyperlink_uri(
-                std::ptr::from_ref(&self.inner),
-                std::ptr::from_mut(buf).cast(),
+                core::ptr::from_ref(&self.inner),
+                core::ptr::from_mut(buf).cast(),
                 buf.len(),
                 &raw mut len,
             )

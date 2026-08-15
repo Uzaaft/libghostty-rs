@@ -14,7 +14,7 @@
 //! For this use case, [selection gestures](self::gesture) serve as a convenient
 //! way of translating common UI actions (clicking, dragging, etc.) into selections,
 //! to be copied, formatted, or installed as the active selection.
-use std::{marker::PhantomData, ptr::NonNull};
+use core::{marker::PhantomData, ptr::NonNull};
 
 use crate::{
     alloc::{Allocator, Bytes},
@@ -383,9 +383,9 @@ impl Terminal<'_, '_> {
         alloc: Option<&'a Allocator<'ctx>>,
         options: FormatOptions,
     ) -> Result<Option<Bytes<'a>>> {
-        let mut out = std::ptr::null_mut();
+        let mut out = core::ptr::null_mut();
         let mut out_len = 0usize;
-        let alloc = alloc.map_or(std::ptr::null(), |v| v.to_raw());
+        let alloc = alloc.map_or(core::ptr::null(), |v| v.to_raw());
 
         let result = unsafe {
             ffi::ghostty_terminal_selection_format_alloc(
@@ -453,7 +453,7 @@ impl<'t, 'ws> SelectLineOptions<'t, 'ws> {
         Self {
             inner: ffi::TerminalSelectLineOptions {
                 ref_: grid_ref.inner,
-                whitespace: std::ptr::null(),
+                whitespace: core::ptr::null(),
                 whitespace_len: 0,
                 semantic_prompt_boundary: false,
                 ..ffi::sized!(ffi::TerminalSelectLineOptions)

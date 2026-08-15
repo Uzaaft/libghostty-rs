@@ -85,6 +85,10 @@
     mitigated situations, and it is not feasible to document them all"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![no_std]
+
+#[cfg(feature = "std")]
+extern crate std;
 
 pub use libghostty_vt_sys as ffi;
 
@@ -98,10 +102,8 @@ pub mod build_info;
 pub mod error;
 pub mod fmt;
 pub mod focus;
-pub(crate) mod io;
 pub mod key;
 pub mod kitty;
-pub mod log;
 pub mod mouse;
 pub mod osc;
 pub mod paste;
@@ -113,13 +115,22 @@ pub mod snapshot;
 pub mod style;
 pub mod unicode;
 
+#[cfg(feature = "std")]
+pub(crate) mod io;
+
+// TODO: Right now we limit logging functionality to when `std` is enabled,
+// as it requires a safe global state. To do this in a `no_std` friendly way
+// is to do what the `log` crate does and basically reimplement `RwLock` or
+// `OnceLock` ourselves, which is not really my cup of tea at the moment.
+#[cfg(feature = "std")]
+pub mod log;
+
+#[cfg(feature = "std")]
 #[doc(inline)]
-pub use crate::{
-    error::Error,
-    log::{Logger, set_logger},
-    render::RenderState,
-    terminal::Terminal,
-};
+pub use log::{Logger, set_logger};
+
+#[doc(inline)]
+pub use crate::{error::Error, render::RenderState, terminal::Terminal};
 
 pub(crate) fn sys_set<T>(opt: ffi::SysOption::Type, val: *const T) -> error::Result<()> {
     let result = unsafe { ffi::ghostty_sys_set(opt, val.cast()) };
