@@ -1,3 +1,4 @@
+#![no_std]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
@@ -6,7 +7,7 @@
 
 mod bindings;
 
-use std::ops::Deref;
+use core::ops::Deref;
 
 pub use bindings::*;
 
@@ -14,8 +15,8 @@ pub use bindings::*;
 #[macro_export]
 macro_rules! sized {
     ($ty:ty) => {{
-        let mut t = <$ty as ::std::default::Default>::default();
-        t.size = ::std::mem::size_of::<$ty>();
+        let mut t = <$ty as ::core::default::Default>::default();
+        t.size = ::core::mem::size_of::<$ty>();
         t
     }};
 }
@@ -40,8 +41,8 @@ impl bindings::String {
     /// valid UTF-8 data.
     pub unsafe fn to_str<'a>(self) -> &'a str {
         // SAFETY: To be upheld by caller
-        let slice = unsafe { std::slice::from_raw_parts(self.ptr, self.len) };
-        unsafe { std::str::from_utf8_unchecked(slice) }
+        let slice = unsafe { core::slice::from_raw_parts(self.ptr, self.len) };
+        unsafe { core::str::from_utf8_unchecked(slice) }
     }
 }
 
@@ -54,7 +55,7 @@ mod tests {
         let colors = crate::sized!(bindings::RenderStateColors);
         assert_eq!(
             colors.size,
-            std::mem::size_of::<bindings::RenderStateColors>()
+            core::mem::size_of::<bindings::RenderStateColors>()
         );
     }
 
@@ -64,13 +65,5 @@ mod tests {
         assert_eq!(raw.len, "ghostty".len());
         // SAFETY: The source string is `'static` and valid UTF-8.
         assert_eq!(unsafe { raw.to_str() }, "ghostty");
-    }
-
-    #[test]
-    fn ffi_string_round_trips_borrowed_string() {
-        let owned = String::from("terminal");
-        let raw = bindings::String::from(owned.as_str());
-        // SAFETY: `owned` outlives the conversion and contains valid UTF-8.
-        assert_eq!(unsafe { raw.to_str() }, "terminal");
     }
 }

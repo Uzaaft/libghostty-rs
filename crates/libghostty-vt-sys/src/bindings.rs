@@ -80,7 +80,7 @@ pub const KITTY_KEY_REPORT_ASSOCIATED: u8 = 16;
 pub const KITTY_KEY_ALL: u8 = 31;
 pub mod Result {
     #[doc = " Result codes for libghostty-vt operations."]
-    pub type Type = ::std::os::raw::c_int;
+    pub type Type = ::core::ffi::c_int;
     #[doc = " Operation completed successfully"]
     pub const SUCCESS: Type = 0;
     #[doc = " Operation failed due to failed allocation"]
@@ -191,7 +191,7 @@ pub struct OscCommandImpl {
 pub type OscCommand = *mut OscCommandImpl;
 pub mod FormatterFormat {
     #[doc = " Terminal content output format.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Plain text (no escape sequences)."]
     pub const PLAIN: Type = 0;
     #[doc = " VT sequences preserving colors, styles, URLs, etc."]
@@ -212,16 +212,16 @@ pub struct String {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of String"][::std::mem::size_of::<String>() - 16usize];
-    ["Alignment of String"][::std::mem::align_of::<String>() - 8usize];
-    ["Offset of field: String::ptr"][::std::mem::offset_of!(String, ptr) - 0usize];
-    ["Offset of field: String::len"][::std::mem::offset_of!(String, len) - 8usize];
+    ["Size of String"][::core::mem::size_of::<String>() - 16usize];
+    ["Alignment of String"][::core::mem::align_of::<String>() - 8usize];
+    ["Offset of field: String::ptr"][::core::mem::offset_of!(String, ptr) - 0usize];
+    ["Offset of field: String::len"][::core::mem::offset_of!(String, len) - 8usize];
 };
 impl Default for String {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -239,17 +239,17 @@ pub struct Buffer {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Buffer"][::std::mem::size_of::<Buffer>() - 24usize];
-    ["Alignment of Buffer"][::std::mem::align_of::<Buffer>() - 8usize];
-    ["Offset of field: Buffer::ptr"][::std::mem::offset_of!(Buffer, ptr) - 0usize];
-    ["Offset of field: Buffer::cap"][::std::mem::offset_of!(Buffer, cap) - 8usize];
-    ["Offset of field: Buffer::len"][::std::mem::offset_of!(Buffer, len) - 16usize];
+    ["Size of Buffer"][::core::mem::size_of::<Buffer>() - 24usize];
+    ["Alignment of Buffer"][::core::mem::align_of::<Buffer>() - 8usize];
+    ["Offset of field: Buffer::ptr"][::core::mem::offset_of!(Buffer, ptr) - 0usize];
+    ["Offset of field: Buffer::cap"][::core::mem::offset_of!(Buffer, cap) - 8usize];
+    ["Offset of field: Buffer::len"][::core::mem::offset_of!(Buffer, len) - 16usize];
 };
 impl Default for Buffer {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -265,10 +265,10 @@ pub struct SurfacePosition {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of SurfacePosition"][::std::mem::size_of::<SurfacePosition>() - 16usize];
-    ["Alignment of SurfacePosition"][::std::mem::align_of::<SurfacePosition>() - 8usize];
-    ["Offset of field: SurfacePosition::x"][::std::mem::offset_of!(SurfacePosition, x) - 0usize];
-    ["Offset of field: SurfacePosition::y"][::std::mem::offset_of!(SurfacePosition, y) - 8usize];
+    ["Size of SurfacePosition"][::core::mem::size_of::<SurfacePosition>() - 16usize];
+    ["Alignment of SurfacePosition"][::core::mem::align_of::<SurfacePosition>() - 8usize];
+    ["Offset of field: SurfacePosition::x"][::core::mem::offset_of!(SurfacePosition, x) - 0usize];
+    ["Offset of field: SurfacePosition::y"][::core::mem::offset_of!(SurfacePosition, y) - 8usize];
 };
 #[doc = " A borrowed list of Unicode scalar values.\n\n Values are encoded as uint32_t scalar values. The memory is not owned by this\n struct. The pointer is only valid for the lifetime documented by the API that\n consumes or produces it.\n\n APIs may document special handling for NULL + len 0, such as “use defaults”."]
 #[repr(C)]
@@ -281,42 +281,42 @@ pub struct Codepoints {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Codepoints"][::std::mem::size_of::<Codepoints>() - 16usize];
-    ["Alignment of Codepoints"][::std::mem::align_of::<Codepoints>() - 8usize];
-    ["Offset of field: Codepoints::ptr"][::std::mem::offset_of!(Codepoints, ptr) - 0usize];
-    ["Offset of field: Codepoints::len"][::std::mem::offset_of!(Codepoints, len) - 8usize];
+    ["Size of Codepoints"][::core::mem::size_of::<Codepoints>() - 16usize];
+    ["Alignment of Codepoints"][::core::mem::align_of::<Codepoints>() - 8usize];
+    ["Offset of field: Codepoints::ptr"][::core::mem::offset_of!(Codepoints, ptr) - 0usize];
+    ["Offset of field: Codepoints::len"][::core::mem::offset_of!(Codepoints, len) - 8usize];
 };
 impl Default for Codepoints {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
 }
 unsafe extern "C" {
     #[doc = " Return a pointer to a null-terminated JSON string describing the\n layout of every C API struct for the current target.\n\n This is primarily useful for language bindings that can't easily\n set C struct fields and need to do so via byte offsets. For example,\n WebAssembly modules can't share struct definitions with the host.\n\n Example (abbreviated):\n {\n   \"GhosttyMouseEncoderSize\": {\n     \"size\": 40,\n     \"align\": 8,\n     \"fields\": {\n       \"size\":           { \"offset\": 0,  \"size\": 8, \"type\": \"u64\" },\n       \"screen_width\":   { \"offset\": 8,  \"size\": 4, \"type\": \"u32\" },\n       \"screen_height\":  { \"offset\": 12, \"size\": 4, \"type\": \"u32\" },\n       \"cell_width\":     { \"offset\": 16, \"size\": 4, \"type\": \"u32\" },\n       \"cell_height\":    { \"offset\": 20, \"size\": 4, \"type\": \"u32\" },\n       \"padding_top\":    { \"offset\": 24, \"size\": 4, \"type\": \"u32\" },\n       \"padding_bottom\": { \"offset\": 28, \"size\": 4, \"type\": \"u32\" },\n       \"padding_right\":  { \"offset\": 32, \"size\": 4, \"type\": \"u32\" },\n       \"padding_left\":   { \"offset\": 36, \"size\": 4, \"type\": \"u32\" }\n     }\n   }\n }\n\n The returned pointer is valid for the lifetime of the process.\n"]
-    pub fn ghostty_type_json() -> *const ::std::os::raw::c_char;
+    pub fn ghostty_type_json() -> *const ::core::ffi::c_char;
 }
 #[doc = " Function table for custom memory allocator operations.\n\n This vtable defines the interface for a custom memory allocator. All\n function pointers must be valid and non-NULL.\n\n\n If you're not going to use a custom allocator, you can ignore all of\n this. All functions that take an allocator pointer allow NULL to use a\n default allocator.\n\n The interface is based on the Zig allocator interface. I'll say up front\n that it is easy to look at this interface and think \"wow, this is really\n overcomplicated\". The reason for this complexity is well thought out by\n the Zig folks, and it enables a diverse set of allocation strategies\n as shown by the Zig ecosystem. As a consolation, please note that many\n of the arguments are only needed for advanced use cases and can be\n safely ignored in simple implementations. For example, if you look at\n the Zig implementation of the libc allocator in `lib/std/heap.zig`\n (search for CAllocator), you'll see it is very simple.\n\n We chose to align with the Zig allocator interface because:\n\n   1. It is a proven interface that serves a wide variety of use cases\n      in the real world via the Zig ecosystem. It's shown to work.\n\n   2. Our core implementation itself is Zig, and this lets us very\n      cheaply and easily convert between C and Zig allocators.\n\n NOTE(mitchellh): In the future, we can have default implementations of\n resize/remap and allow those to be null."]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct AllocatorVtable {
     #[doc = " Return a pointer to `len` bytes with specified `alignment`, or return\n `NULL` indicating the allocation failed.\n\n   be a power of two between 1 and 16 inclusive."]
-    pub alloc: ::std::option::Option<
+    pub alloc: ::core::option::Option<
         unsafe extern "C" fn(
-            ctx: *mut ::std::os::raw::c_void,
+            ctx: *mut ::core::ffi::c_void,
             len: usize,
             alignment: u8,
             ret_addr: usize,
-        ) -> *mut ::std::os::raw::c_void,
+        ) -> *mut ::core::ffi::c_void,
     >,
     #[doc = " Attempt to expand or shrink memory in place.\n\n `memory_len` must equal the length requested from the most recent\n successful call to `alloc`, `resize`, or `remap`. `alignment` must\n equal the same value that was passed as the `alignment` parameter to\n the original `alloc` call.\n\n `new_len` must be greater than zero.\n"]
-    pub resize: ::std::option::Option<
+    pub resize: ::core::option::Option<
         unsafe extern "C" fn(
-            ctx: *mut ::std::os::raw::c_void,
-            memory: *mut ::std::os::raw::c_void,
+            ctx: *mut ::core::ffi::c_void,
+            memory: *mut ::core::ffi::c_void,
             memory_len: usize,
             alignment: u8,
             new_len: usize,
@@ -324,21 +324,21 @@ pub struct AllocatorVtable {
         ) -> bool,
     >,
     #[doc = " Attempt to expand or shrink memory, allowing relocation.\n\n `memory_len` must equal the length requested from the most recent\n successful call to `alloc`, `resize`, or `remap`. `alignment` must\n equal the same value that was passed as the `alignment` parameter to\n the original `alloc` call.\n\n A non-`NULL` return value indicates the resize was successful. The\n allocation may have same address, or may have been relocated. In either\n case, the allocation now has size of `new_len`. A `NULL` return value\n indicates that the resize would be equivalent to allocating new memory,\n copying the bytes from the old memory, and then freeing the old memory.\n In such case, it is more efficient for the caller to perform the copy.\n\n `new_len` must be greater than zero.\n"]
-    pub remap: ::std::option::Option<
+    pub remap: ::core::option::Option<
         unsafe extern "C" fn(
-            ctx: *mut ::std::os::raw::c_void,
-            memory: *mut ::std::os::raw::c_void,
+            ctx: *mut ::core::ffi::c_void,
+            memory: *mut ::core::ffi::c_void,
             memory_len: usize,
             alignment: u8,
             new_len: usize,
             ret_addr: usize,
-        ) -> *mut ::std::os::raw::c_void,
+        ) -> *mut ::core::ffi::c_void,
     >,
     #[doc = " Free and invalidate a region of memory.\n\n `memory_len` must equal the length requested from the most recent\n successful call to `alloc`, `resize`, or `remap`. `alignment` must\n equal the same value that was passed as the `alignment` parameter to\n the original `alloc` call.\n"]
-    pub free: ::std::option::Option<
+    pub free: ::core::option::Option<
         unsafe extern "C" fn(
-            ctx: *mut ::std::os::raw::c_void,
-            memory: *mut ::std::os::raw::c_void,
+            ctx: *mut ::core::ffi::c_void,
+            memory: *mut ::core::ffi::c_void,
             memory_len: usize,
             alignment: u8,
             ret_addr: usize,
@@ -347,38 +347,38 @@ pub struct AllocatorVtable {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of AllocatorVtable"][::std::mem::size_of::<AllocatorVtable>() - 32usize];
-    ["Alignment of AllocatorVtable"][::std::mem::align_of::<AllocatorVtable>() - 8usize];
+    ["Size of AllocatorVtable"][::core::mem::size_of::<AllocatorVtable>() - 32usize];
+    ["Alignment of AllocatorVtable"][::core::mem::align_of::<AllocatorVtable>() - 8usize];
     ["Offset of field: AllocatorVtable::alloc"]
-        [::std::mem::offset_of!(AllocatorVtable, alloc) - 0usize];
+        [::core::mem::offset_of!(AllocatorVtable, alloc) - 0usize];
     ["Offset of field: AllocatorVtable::resize"]
-        [::std::mem::offset_of!(AllocatorVtable, resize) - 8usize];
+        [::core::mem::offset_of!(AllocatorVtable, resize) - 8usize];
     ["Offset of field: AllocatorVtable::remap"]
-        [::std::mem::offset_of!(AllocatorVtable, remap) - 16usize];
+        [::core::mem::offset_of!(AllocatorVtable, remap) - 16usize];
     ["Offset of field: AllocatorVtable::free"]
-        [::std::mem::offset_of!(AllocatorVtable, free) - 24usize];
+        [::core::mem::offset_of!(AllocatorVtable, free) - 24usize];
 };
 #[doc = " Custom memory allocator.\n\n For functions that take an allocator pointer, a NULL pointer indicates\n that the default allocator should be used. The default allocator will\n be libc malloc/free if we're linking to libc. If libc isn't linked,\n a custom allocator is used (currently Zig's SMP allocator).\n\n\n Usage example:\n GhosttyAllocator allocator = {\n     .vtable = &my_allocator_vtable,\n     .ctx = my_allocator_state\n };"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Allocator {
     #[doc = " Opaque context pointer passed to all vtable functions.\n This allows the allocator implementation to maintain state\n or reference external resources needed for memory management."]
-    pub ctx: *mut ::std::os::raw::c_void,
+    pub ctx: *mut ::core::ffi::c_void,
     #[doc = " Pointer to the allocator's vtable containing function pointers\n for memory operations (alloc, resize, remap, free)."]
     pub vtable: *const AllocatorVtable,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Allocator"][::std::mem::size_of::<Allocator>() - 16usize];
-    ["Alignment of Allocator"][::std::mem::align_of::<Allocator>() - 8usize];
-    ["Offset of field: Allocator::ctx"][::std::mem::offset_of!(Allocator, ctx) - 0usize];
-    ["Offset of field: Allocator::vtable"][::std::mem::offset_of!(Allocator, vtable) - 8usize];
+    ["Size of Allocator"][::core::mem::size_of::<Allocator>() - 16usize];
+    ["Alignment of Allocator"][::core::mem::align_of::<Allocator>() - 8usize];
+    ["Offset of field: Allocator::ctx"][::core::mem::offset_of!(Allocator, ctx) - 0usize];
+    ["Offset of field: Allocator::vtable"][::core::mem::offset_of!(Allocator, vtable) - 8usize];
 };
 impl Default for Allocator {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -393,7 +393,7 @@ unsafe extern "C" {
 }
 pub mod OptimizeMode {
     #[doc = " Build optimization mode."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const DEBUG: Type = 0;
     pub const RELEASE_SAFE: Type = 1;
     pub const RELEASE_SMALL: Type = 2;
@@ -402,7 +402,7 @@ pub mod OptimizeMode {
 }
 pub mod BuildInfo {
     #[doc = " Build info data types that can be queried.\n\n Each variant documents the expected output pointer type."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid data type. Never results in any data extraction."]
     pub const INVALID: Type = 0;
     #[doc = " Whether SIMD-accelerated code paths are enabled.\n\n Output type: bool *"]
@@ -430,10 +430,8 @@ pub mod BuildInfo {
 }
 unsafe extern "C" {
     #[doc = " Query a compile-time build configuration value.\n\n The caller must pass a pointer to the correct output type for the\n requested data (see GhosttyBuildInfo variants for types).\n\n         data type is invalid\n"]
-    pub fn ghostty_build_info(
-        data: BuildInfo::Type,
-        out: *mut ::std::os::raw::c_void,
-    ) -> Result::Type;
+    pub fn ghostty_build_info(data: BuildInfo::Type, out: *mut ::core::ffi::c_void)
+        -> Result::Type;
 }
 #[doc = " RGB color value.\n"]
 #[repr(C)]
@@ -448,11 +446,11 @@ pub struct ColorRgb {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of ColorRgb"][::std::mem::size_of::<ColorRgb>() - 3usize];
-    ["Alignment of ColorRgb"][::std::mem::align_of::<ColorRgb>() - 1usize];
-    ["Offset of field: ColorRgb::r"][::std::mem::offset_of!(ColorRgb, r) - 0usize];
-    ["Offset of field: ColorRgb::g"][::std::mem::offset_of!(ColorRgb, g) - 1usize];
-    ["Offset of field: ColorRgb::b"][::std::mem::offset_of!(ColorRgb, b) - 2usize];
+    ["Size of ColorRgb"][::core::mem::size_of::<ColorRgb>() - 3usize];
+    ["Alignment of ColorRgb"][::core::mem::align_of::<ColorRgb>() - 1usize];
+    ["Offset of field: ColorRgb::r"][::core::mem::offset_of!(ColorRgb, r) - 0usize];
+    ["Offset of field: ColorRgb::g"][::core::mem::offset_of!(ColorRgb, g) - 1usize];
+    ["Offset of field: ColorRgb::b"][::core::mem::offset_of!(ColorRgb, b) - 2usize];
 };
 #[doc = " Palette color index (0-255).\n"]
 pub type ColorPaletteIndex = u8;
@@ -464,33 +462,33 @@ pub struct ColorPaletteMask {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of ColorPaletteMask"][::std::mem::size_of::<ColorPaletteMask>() - 32usize];
-    ["Alignment of ColorPaletteMask"][::std::mem::align_of::<ColorPaletteMask>() - 8usize];
+    ["Size of ColorPaletteMask"][::core::mem::size_of::<ColorPaletteMask>() - 32usize];
+    ["Alignment of ColorPaletteMask"][::core::mem::align_of::<ColorPaletteMask>() - 8usize];
     ["Offset of field: ColorPaletteMask::bits"]
-        [::std::mem::offset_of!(ColorPaletteMask, bits) - 0usize];
+        [::core::mem::offset_of!(ColorPaletteMask, bits) - 0usize];
 };
 #[doc = " An entry in Ghostty's X11 color name table.\n"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ColorX11Entry {
     #[doc = " Null-terminated color name. NULL marks the end of the table."]
-    pub name: *const ::std::os::raw::c_char,
+    pub name: *const ::core::ffi::c_char,
     #[doc = " The RGB value of the color."]
     pub color: ColorRgb,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of ColorX11Entry"][::std::mem::size_of::<ColorX11Entry>() - 16usize];
-    ["Alignment of ColorX11Entry"][::std::mem::align_of::<ColorX11Entry>() - 8usize];
-    ["Offset of field: ColorX11Entry::name"][::std::mem::offset_of!(ColorX11Entry, name) - 0usize];
+    ["Size of ColorX11Entry"][::core::mem::size_of::<ColorX11Entry>() - 16usize];
+    ["Alignment of ColorX11Entry"][::core::mem::align_of::<ColorX11Entry>() - 8usize];
+    ["Offset of field: ColorX11Entry::name"][::core::mem::offset_of!(ColorX11Entry, name) - 0usize];
     ["Offset of field: ColorX11Entry::color"]
-        [::std::mem::offset_of!(ColorX11Entry, color) - 8usize];
+        [::core::mem::offset_of!(ColorX11Entry, color) - 8usize];
 };
 impl Default for ColorX11Entry {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -502,7 +500,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Parse an X11 color name.\n\n The color name is resolved from Ghostty's embedded rgb.txt table.\n Leading and trailing spaces and tabs are trimmed, and matching is\n ASCII case-insensitive. Hex values are not accepted by this function.\n\n matches or @p name is NULL\n"]
     pub fn ghostty_color_parse_x11(
-        name: *const ::std::os::raw::c_char,
+        name: *const ::core::ffi::c_char,
         len: usize,
         out: *mut ColorRgb,
     ) -> Result::Type;
@@ -510,7 +508,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Parse a flexible Ghostty color value.\n\n Accepts Ghostty's terminal color syntax: X11 color names, hex colors\n in 3-, 6-, 9-, or 12-digit form (the leading # is optional for 3- and\n 6-digit values), and rgb:<red>/<green>/<blue> or\n rgbi:<red>/<green>/<blue> specifications. Leading and trailing spaces\n and tabs are trimmed.\n\n fails or @p value is NULL\n"]
     pub fn ghostty_color_parse(
-        value: *const ::std::os::raw::c_char,
+        value: *const ::core::ffi::c_char,
         len: usize,
         out: *mut ColorRgb,
     ) -> Result::Type;
@@ -518,7 +516,7 @@ unsafe extern "C" {
 unsafe extern "C" {
     #[doc = " Parse a Ghostty palette entry.\n\n Accepts Ghostty palette config syntax: N=COLOR. N is a palette index\n from 0 to 255 in decimal or in 0x, 0o, or 0b-prefixed form. Spaces and\n tabs around N and COLOR are ignored. COLOR accepts the same syntax as\n ghostty_color_parse().\n\n failure, including index overflow\n"]
     pub fn ghostty_color_parse_palette_entry(
-        value: *const ::std::os::raw::c_char,
+        value: *const ::core::ffi::c_char,
         len: usize,
         out_index: *mut u8,
         out_rgb: *mut ColorRgb,
@@ -561,7 +559,7 @@ unsafe extern "C" {
 }
 pub mod ColorScheme {
     #[doc = " Color scheme reported in response to a CSI ? 996 n query.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const LIGHT: Type = 0;
     pub const DARK: Type = 1;
     pub const MAX_VALUE: Type = 2147483647;
@@ -580,21 +578,21 @@ pub struct DeviceAttributesPrimary {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of DeviceAttributesPrimary"]
-        [::std::mem::size_of::<DeviceAttributesPrimary>() - 144usize];
+        [::core::mem::size_of::<DeviceAttributesPrimary>() - 144usize];
     ["Alignment of DeviceAttributesPrimary"]
-        [::std::mem::align_of::<DeviceAttributesPrimary>() - 8usize];
+        [::core::mem::align_of::<DeviceAttributesPrimary>() - 8usize];
     ["Offset of field: DeviceAttributesPrimary::conformance_level"]
-        [::std::mem::offset_of!(DeviceAttributesPrimary, conformance_level) - 0usize];
+        [::core::mem::offset_of!(DeviceAttributesPrimary, conformance_level) - 0usize];
     ["Offset of field: DeviceAttributesPrimary::features"]
-        [::std::mem::offset_of!(DeviceAttributesPrimary, features) - 2usize];
+        [::core::mem::offset_of!(DeviceAttributesPrimary, features) - 2usize];
     ["Offset of field: DeviceAttributesPrimary::num_features"]
-        [::std::mem::offset_of!(DeviceAttributesPrimary, num_features) - 136usize];
+        [::core::mem::offset_of!(DeviceAttributesPrimary, num_features) - 136usize];
 };
 impl Default for DeviceAttributesPrimary {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -613,15 +611,15 @@ pub struct DeviceAttributesSecondary {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of DeviceAttributesSecondary"]
-        [::std::mem::size_of::<DeviceAttributesSecondary>() - 6usize];
+        [::core::mem::size_of::<DeviceAttributesSecondary>() - 6usize];
     ["Alignment of DeviceAttributesSecondary"]
-        [::std::mem::align_of::<DeviceAttributesSecondary>() - 2usize];
+        [::core::mem::align_of::<DeviceAttributesSecondary>() - 2usize];
     ["Offset of field: DeviceAttributesSecondary::device_type"]
-        [::std::mem::offset_of!(DeviceAttributesSecondary, device_type) - 0usize];
+        [::core::mem::offset_of!(DeviceAttributesSecondary, device_type) - 0usize];
     ["Offset of field: DeviceAttributesSecondary::firmware_version"]
-        [::std::mem::offset_of!(DeviceAttributesSecondary, firmware_version) - 2usize];
+        [::core::mem::offset_of!(DeviceAttributesSecondary, firmware_version) - 2usize];
     ["Offset of field: DeviceAttributesSecondary::rom_cartridge"]
-        [::std::mem::offset_of!(DeviceAttributesSecondary, rom_cartridge) - 4usize];
+        [::core::mem::offset_of!(DeviceAttributesSecondary, rom_cartridge) - 4usize];
 };
 #[doc = " Tertiary device attributes (DA3) response data.\n\n Returned as part of GhosttyDeviceAttributes in response to a CSI = c query.\n Response format: DCS ! | D...D ST (DECRPTUI).\n"]
 #[repr(C)]
@@ -633,11 +631,11 @@ pub struct DeviceAttributesTertiary {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of DeviceAttributesTertiary"]
-        [::std::mem::size_of::<DeviceAttributesTertiary>() - 4usize];
+        [::core::mem::size_of::<DeviceAttributesTertiary>() - 4usize];
     ["Alignment of DeviceAttributesTertiary"]
-        [::std::mem::align_of::<DeviceAttributesTertiary>() - 4usize];
+        [::core::mem::align_of::<DeviceAttributesTertiary>() - 4usize];
     ["Offset of field: DeviceAttributesTertiary::unit_id"]
-        [::std::mem::offset_of!(DeviceAttributesTertiary, unit_id) - 0usize];
+        [::core::mem::offset_of!(DeviceAttributesTertiary, unit_id) - 0usize];
 };
 #[doc = " Device attributes response data for all three DA levels.\n\n Filled by the device_attributes callback in response to CSI c,\n CSI > c, or CSI = c queries. The terminal uses whichever sub-struct\n matches the request type.\n"]
 #[repr(C)]
@@ -649,20 +647,20 @@ pub struct DeviceAttributes {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of DeviceAttributes"][::std::mem::size_of::<DeviceAttributes>() - 160usize];
-    ["Alignment of DeviceAttributes"][::std::mem::align_of::<DeviceAttributes>() - 8usize];
+    ["Size of DeviceAttributes"][::core::mem::size_of::<DeviceAttributes>() - 160usize];
+    ["Alignment of DeviceAttributes"][::core::mem::align_of::<DeviceAttributes>() - 8usize];
     ["Offset of field: DeviceAttributes::primary"]
-        [::std::mem::offset_of!(DeviceAttributes, primary) - 0usize];
+        [::core::mem::offset_of!(DeviceAttributes, primary) - 0usize];
     ["Offset of field: DeviceAttributes::secondary"]
-        [::std::mem::offset_of!(DeviceAttributes, secondary) - 144usize];
+        [::core::mem::offset_of!(DeviceAttributes, secondary) - 144usize];
     ["Offset of field: DeviceAttributes::tertiary"]
-        [::std::mem::offset_of!(DeviceAttributes, tertiary) - 152usize];
+        [::core::mem::offset_of!(DeviceAttributes, tertiary) - 152usize];
 };
 impl Default for DeviceAttributes {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -671,14 +669,14 @@ unsafe extern "C" {
     #[doc = " Encode a color scheme report into an escape sequence.\n\n Encodes a color scheme report into the provided buffer. Dark color schemes\n emit ESC [ ? 997 ; 1 n, and light color schemes emit ESC [ ? 997 ; 2 n.\n The encoded bytes are identical to the terminal's internal CSI ? 996 n\n query response.\n\n Hosts should gate unsolicited sends on GHOSTTY_MODE_COLOR_SCHEME_REPORT\n (mode 2031) being set, which can be checked via the mode getters.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
     pub fn ghostty_color_scheme_report_encode(
         scheme: ColorScheme::Type,
-        buf: *mut ::std::os::raw::c_char,
+        buf: *mut ::core::ffi::c_char,
         buf_len: usize,
         out_written: *mut usize,
     ) -> Result::Type;
 }
 pub mod FocusEvent {
     #[doc = " Focus event types for focus reporting mode (mode 1004)."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Terminal window gained focus"]
     pub const GAINED: Type = 0;
     #[doc = " Terminal window lost focus"]
@@ -690,7 +688,7 @@ unsafe extern "C" {
     #[doc = " Encode a focus event into a terminal escape sequence.\n\n Encodes a focus gained (CSI I) or focus lost (CSI O) report into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
     pub fn ghostty_focus_encode(
         event: FocusEvent::Type,
-        buf: *mut ::std::os::raw::c_char,
+        buf: *mut ::core::ffi::c_char,
         buf_len: usize,
         out_written: *mut usize,
     ) -> Result::Type;
@@ -701,7 +699,7 @@ pub type Cell = u64;
 pub type Row = u64;
 pub mod CellContentTag {
     #[doc = " Cell content tag.\n\n Describes what kind of content a cell holds.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " A single codepoint (may be zero for empty)."]
     pub const CODEPOINT: Type = 0;
     #[doc = " A codepoint that is part of a multi-codepoint grapheme cluster."]
@@ -715,7 +713,7 @@ pub mod CellContentTag {
 }
 pub mod CellWide {
     #[doc = " Cell wide property.\n\n Describes the width behavior of a cell.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Not a wide character, cell width 1."]
     pub const NARROW: Type = 0;
     #[doc = " Wide character, cell width 2."]
@@ -729,7 +727,7 @@ pub mod CellWide {
 }
 pub mod CellSemanticContent {
     #[doc = " Semantic content type of a cell.\n\n Set by semantic prompt sequences (OSC 133) to distinguish between\n command output, user input, and shell prompt text.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Regular output content, such as command output."]
     pub const OUTPUT: Type = 0;
     #[doc = " Content that is part of user input."]
@@ -741,7 +739,7 @@ pub mod CellSemanticContent {
 }
 pub mod CellData {
     #[doc = " Cell data types.\n\n These values specify what type of data to extract from a cell\n using `ghostty_cell_get`.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid data type. Never results in any data extraction."]
     pub const INVALID: Type = 0;
     #[doc = " The codepoint of the cell (0 if empty or bg-color-only).\n\n Output type: uint32_t *"]
@@ -771,7 +769,7 @@ pub mod CellData {
 }
 pub mod RowSemanticPrompt {
     #[doc = " Row semantic prompt state.\n\n Indicates whether any cells in a row are part of a shell prompt,\n as reported by OSC 133 sequences.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " No prompt cells in this row."]
     pub const NONE: Type = 0;
     #[doc = " Prompt cells exist and this is a primary prompt line."]
@@ -783,7 +781,7 @@ pub mod RowSemanticPrompt {
 }
 pub mod RowData {
     #[doc = " Row data types.\n\n These values specify what type of data to extract from a row\n using `ghostty_row_get`.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid data type. Never results in any data extraction."]
     pub const INVALID: Type = 0;
     #[doc = " Whether this row is soft-wrapped.\n\n Output type: bool *"]
@@ -810,7 +808,7 @@ unsafe extern "C" {
     pub fn ghostty_cell_get(
         cell: Cell,
         data: CellData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -819,7 +817,7 @@ unsafe extern "C" {
         cell: Cell,
         count: usize,
         keys: *const CellData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -828,7 +826,7 @@ unsafe extern "C" {
     pub fn ghostty_row_get(
         row: Row,
         data: RowData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -837,7 +835,7 @@ unsafe extern "C" {
         row: Row,
         count: usize,
         keys: *const RowData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -845,7 +843,7 @@ unsafe extern "C" {
 pub type StyleId = u16;
 pub mod StyleColorTag {
     #[doc = " Style color tags.\n\n These values identify the type of color in a style color.\n Use the tag to determine which field in the color value union to access.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const NONE: Type = 0;
     pub const PALETTE: Type = 1;
     pub const RGB: Type = 2;
@@ -861,20 +859,20 @@ pub union StyleColorValue {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of StyleColorValue"][::std::mem::size_of::<StyleColorValue>() - 8usize];
-    ["Alignment of StyleColorValue"][::std::mem::align_of::<StyleColorValue>() - 8usize];
+    ["Size of StyleColorValue"][::core::mem::size_of::<StyleColorValue>() - 8usize];
+    ["Alignment of StyleColorValue"][::core::mem::align_of::<StyleColorValue>() - 8usize];
     ["Offset of field: StyleColorValue::palette"]
-        [::std::mem::offset_of!(StyleColorValue, palette) - 0usize];
+        [::core::mem::offset_of!(StyleColorValue, palette) - 0usize];
     ["Offset of field: StyleColorValue::rgb"]
-        [::std::mem::offset_of!(StyleColorValue, rgb) - 0usize];
+        [::core::mem::offset_of!(StyleColorValue, rgb) - 0usize];
     ["Offset of field: StyleColorValue::_padding"]
-        [::std::mem::offset_of!(StyleColorValue, _padding) - 0usize];
+        [::core::mem::offset_of!(StyleColorValue, _padding) - 0usize];
 };
 impl Default for StyleColorValue {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -888,16 +886,16 @@ pub struct StyleColor {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of StyleColor"][::std::mem::size_of::<StyleColor>() - 16usize];
-    ["Alignment of StyleColor"][::std::mem::align_of::<StyleColor>() - 8usize];
-    ["Offset of field: StyleColor::tag"][::std::mem::offset_of!(StyleColor, tag) - 0usize];
-    ["Offset of field: StyleColor::value"][::std::mem::offset_of!(StyleColor, value) - 8usize];
+    ["Size of StyleColor"][::core::mem::size_of::<StyleColor>() - 16usize];
+    ["Alignment of StyleColor"][::core::mem::align_of::<StyleColor>() - 8usize];
+    ["Offset of field: StyleColor::tag"][::core::mem::offset_of!(StyleColor, tag) - 0usize];
+    ["Offset of field: StyleColor::value"][::core::mem::offset_of!(StyleColor, value) - 8usize];
 };
 impl Default for StyleColor {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -919,33 +917,33 @@ pub struct Style {
     pub strikethrough: bool,
     pub overline: bool,
     #[doc = "< One of GHOSTTY_SGR_UNDERLINE_* values"]
-    pub underline: ::std::os::raw::c_int,
+    pub underline: ::core::ffi::c_int,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Style"][::std::mem::size_of::<Style>() - 72usize];
-    ["Alignment of Style"][::std::mem::align_of::<Style>() - 8usize];
-    ["Offset of field: Style::size"][::std::mem::offset_of!(Style, size) - 0usize];
-    ["Offset of field: Style::fg_color"][::std::mem::offset_of!(Style, fg_color) - 8usize];
-    ["Offset of field: Style::bg_color"][::std::mem::offset_of!(Style, bg_color) - 24usize];
+    ["Size of Style"][::core::mem::size_of::<Style>() - 72usize];
+    ["Alignment of Style"][::core::mem::align_of::<Style>() - 8usize];
+    ["Offset of field: Style::size"][::core::mem::offset_of!(Style, size) - 0usize];
+    ["Offset of field: Style::fg_color"][::core::mem::offset_of!(Style, fg_color) - 8usize];
+    ["Offset of field: Style::bg_color"][::core::mem::offset_of!(Style, bg_color) - 24usize];
     ["Offset of field: Style::underline_color"]
-        [::std::mem::offset_of!(Style, underline_color) - 40usize];
-    ["Offset of field: Style::bold"][::std::mem::offset_of!(Style, bold) - 56usize];
-    ["Offset of field: Style::italic"][::std::mem::offset_of!(Style, italic) - 57usize];
-    ["Offset of field: Style::faint"][::std::mem::offset_of!(Style, faint) - 58usize];
-    ["Offset of field: Style::blink"][::std::mem::offset_of!(Style, blink) - 59usize];
-    ["Offset of field: Style::inverse"][::std::mem::offset_of!(Style, inverse) - 60usize];
-    ["Offset of field: Style::invisible"][::std::mem::offset_of!(Style, invisible) - 61usize];
+        [::core::mem::offset_of!(Style, underline_color) - 40usize];
+    ["Offset of field: Style::bold"][::core::mem::offset_of!(Style, bold) - 56usize];
+    ["Offset of field: Style::italic"][::core::mem::offset_of!(Style, italic) - 57usize];
+    ["Offset of field: Style::faint"][::core::mem::offset_of!(Style, faint) - 58usize];
+    ["Offset of field: Style::blink"][::core::mem::offset_of!(Style, blink) - 59usize];
+    ["Offset of field: Style::inverse"][::core::mem::offset_of!(Style, inverse) - 60usize];
+    ["Offset of field: Style::invisible"][::core::mem::offset_of!(Style, invisible) - 61usize];
     ["Offset of field: Style::strikethrough"]
-        [::std::mem::offset_of!(Style, strikethrough) - 62usize];
-    ["Offset of field: Style::overline"][::std::mem::offset_of!(Style, overline) - 63usize];
-    ["Offset of field: Style::underline"][::std::mem::offset_of!(Style, underline) - 64usize];
+        [::core::mem::offset_of!(Style, strikethrough) - 62usize];
+    ["Offset of field: Style::overline"][::core::mem::offset_of!(Style, overline) - 63usize];
+    ["Offset of field: Style::underline"][::core::mem::offset_of!(Style, underline) - 64usize];
 };
 impl Default for Style {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -963,24 +961,24 @@ unsafe extern "C" {
 #[derive(Debug, Copy, Clone)]
 pub struct GridRef {
     pub size: usize,
-    pub node: *mut ::std::os::raw::c_void,
+    pub node: *mut ::core::ffi::c_void,
     pub x: u16,
     pub y: u16,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of GridRef"][::std::mem::size_of::<GridRef>() - 24usize];
-    ["Alignment of GridRef"][::std::mem::align_of::<GridRef>() - 8usize];
-    ["Offset of field: GridRef::size"][::std::mem::offset_of!(GridRef, size) - 0usize];
-    ["Offset of field: GridRef::node"][::std::mem::offset_of!(GridRef, node) - 8usize];
-    ["Offset of field: GridRef::x"][::std::mem::offset_of!(GridRef, x) - 16usize];
-    ["Offset of field: GridRef::y"][::std::mem::offset_of!(GridRef, y) - 18usize];
+    ["Size of GridRef"][::core::mem::size_of::<GridRef>() - 24usize];
+    ["Alignment of GridRef"][::core::mem::align_of::<GridRef>() - 8usize];
+    ["Offset of field: GridRef::size"][::core::mem::offset_of!(GridRef, size) - 0usize];
+    ["Offset of field: GridRef::node"][::core::mem::offset_of!(GridRef, node) - 8usize];
+    ["Offset of field: GridRef::x"][::core::mem::offset_of!(GridRef, x) - 16usize];
+    ["Offset of field: GridRef::y"][::core::mem::offset_of!(GridRef, y) - 18usize];
 };
 impl Default for GridRef {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1026,14 +1024,14 @@ pub struct PointCoordinate {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of PointCoordinate"][::std::mem::size_of::<PointCoordinate>() - 8usize];
-    ["Alignment of PointCoordinate"][::std::mem::align_of::<PointCoordinate>() - 4usize];
-    ["Offset of field: PointCoordinate::x"][::std::mem::offset_of!(PointCoordinate, x) - 0usize];
-    ["Offset of field: PointCoordinate::y"][::std::mem::offset_of!(PointCoordinate, y) - 4usize];
+    ["Size of PointCoordinate"][::core::mem::size_of::<PointCoordinate>() - 8usize];
+    ["Alignment of PointCoordinate"][::core::mem::align_of::<PointCoordinate>() - 4usize];
+    ["Offset of field: PointCoordinate::x"][::core::mem::offset_of!(PointCoordinate, x) - 0usize];
+    ["Offset of field: PointCoordinate::y"][::core::mem::offset_of!(PointCoordinate, y) - 4usize];
 };
 pub mod PointTag {
     #[doc = " Point reference tag.\n\n Determines which coordinate system a point uses.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Active area where the cursor can move."]
     pub const ACTIVE: Type = 0;
     #[doc = " Visible viewport (changes when scrolled)."]
@@ -1056,18 +1054,18 @@ pub union PointValue {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of PointValue"][::std::mem::size_of::<PointValue>() - 16usize];
-    ["Alignment of PointValue"][::std::mem::align_of::<PointValue>() - 8usize];
+    ["Size of PointValue"][::core::mem::size_of::<PointValue>() - 16usize];
+    ["Alignment of PointValue"][::core::mem::align_of::<PointValue>() - 8usize];
     ["Offset of field: PointValue::coordinate"]
-        [::std::mem::offset_of!(PointValue, coordinate) - 0usize];
+        [::core::mem::offset_of!(PointValue, coordinate) - 0usize];
     ["Offset of field: PointValue::_padding"]
-        [::std::mem::offset_of!(PointValue, _padding) - 0usize];
+        [::core::mem::offset_of!(PointValue, _padding) - 0usize];
 };
 impl Default for PointValue {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1081,16 +1079,16 @@ pub struct Point {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Point"][::std::mem::size_of::<Point>() - 24usize];
-    ["Alignment of Point"][::std::mem::align_of::<Point>() - 8usize];
-    ["Offset of field: Point::tag"][::std::mem::offset_of!(Point, tag) - 0usize];
-    ["Offset of field: Point::value"][::std::mem::offset_of!(Point, value) - 8usize];
+    ["Size of Point"][::core::mem::size_of::<Point>() - 24usize];
+    ["Alignment of Point"][::core::mem::align_of::<Point>() - 8usize];
+    ["Offset of field: Point::tag"][::core::mem::offset_of!(Point, tag) - 0usize];
+    ["Offset of field: Point::value"][::core::mem::offset_of!(Point, value) - 8usize];
 };
 impl Default for Point {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1124,19 +1122,19 @@ pub struct Selection {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Selection"][::std::mem::size_of::<Selection>() - 64usize];
-    ["Alignment of Selection"][::std::mem::align_of::<Selection>() - 8usize];
-    ["Offset of field: Selection::size"][::std::mem::offset_of!(Selection, size) - 0usize];
-    ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 8usize];
-    ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 32usize];
+    ["Size of Selection"][::core::mem::size_of::<Selection>() - 64usize];
+    ["Alignment of Selection"][::core::mem::align_of::<Selection>() - 8usize];
+    ["Offset of field: Selection::size"][::core::mem::offset_of!(Selection, size) - 0usize];
+    ["Offset of field: Selection::start"][::core::mem::offset_of!(Selection, start) - 8usize];
+    ["Offset of field: Selection::end"][::core::mem::offset_of!(Selection, end) - 32usize];
     ["Offset of field: Selection::rectangle"]
-        [::std::mem::offset_of!(Selection, rectangle) - 56usize];
+        [::core::mem::offset_of!(Selection, rectangle) - 56usize];
 };
 impl Default for Selection {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1157,23 +1155,23 @@ pub struct TerminalSelectWordOptions {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalSelectWordOptions"]
-        [::std::mem::size_of::<TerminalSelectWordOptions>() - 48usize];
+        [::core::mem::size_of::<TerminalSelectWordOptions>() - 48usize];
     ["Alignment of TerminalSelectWordOptions"]
-        [::std::mem::align_of::<TerminalSelectWordOptions>() - 8usize];
+        [::core::mem::align_of::<TerminalSelectWordOptions>() - 8usize];
     ["Offset of field: TerminalSelectWordOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, size) - 0usize];
+        [::core::mem::offset_of!(TerminalSelectWordOptions, size) - 0usize];
     ["Offset of field: TerminalSelectWordOptions::ref_"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, ref_) - 8usize];
+        [::core::mem::offset_of!(TerminalSelectWordOptions, ref_) - 8usize];
     ["Offset of field: TerminalSelectWordOptions::boundary_codepoints"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 32usize];
+        [::core::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 32usize];
     ["Offset of field: TerminalSelectWordOptions::boundary_codepoints_len"]
-        [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 40usize];
+        [::core::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 40usize];
 };
 impl Default for TerminalSelectWordOptions {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1196,27 +1194,27 @@ pub struct TerminalSelectWordBetweenOptions {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalSelectWordBetweenOptions"]
-        [::std::mem::size_of::<TerminalSelectWordBetweenOptions>() - 72usize];
+        [::core::mem::size_of::<TerminalSelectWordBetweenOptions>() - 72usize];
     ["Alignment of TerminalSelectWordBetweenOptions"]
-        [::std::mem::align_of::<TerminalSelectWordBetweenOptions>() - 8usize];
+        [::core::mem::align_of::<TerminalSelectWordBetweenOptions>() - 8usize];
     ["Offset of field: TerminalSelectWordBetweenOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, size) - 0usize];
+        [::core::mem::offset_of!(TerminalSelectWordBetweenOptions, size) - 0usize];
     ["Offset of field: TerminalSelectWordBetweenOptions::start"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, start) - 8usize];
+        [::core::mem::offset_of!(TerminalSelectWordBetweenOptions, start) - 8usize];
     ["Offset of field: TerminalSelectWordBetweenOptions::end"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 32usize];
+        [::core::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 32usize];
     ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints"]
-        [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, boundary_codepoints) - 56usize];
-    ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints_len"][::std::mem::offset_of!(
+        [::core::mem::offset_of!(TerminalSelectWordBetweenOptions, boundary_codepoints) - 56usize];
+    ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints_len"][::core::mem::offset_of!(
         TerminalSelectWordBetweenOptions,
         boundary_codepoints_len
     ) - 64usize];
 };
 impl Default for TerminalSelectWordBetweenOptions {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1239,25 +1237,25 @@ pub struct TerminalSelectLineOptions {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalSelectLineOptions"]
-        [::std::mem::size_of::<TerminalSelectLineOptions>() - 56usize];
+        [::core::mem::size_of::<TerminalSelectLineOptions>() - 56usize];
     ["Alignment of TerminalSelectLineOptions"]
-        [::std::mem::align_of::<TerminalSelectLineOptions>() - 8usize];
+        [::core::mem::align_of::<TerminalSelectLineOptions>() - 8usize];
     ["Offset of field: TerminalSelectLineOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, size) - 0usize];
+        [::core::mem::offset_of!(TerminalSelectLineOptions, size) - 0usize];
     ["Offset of field: TerminalSelectLineOptions::ref_"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, ref_) - 8usize];
+        [::core::mem::offset_of!(TerminalSelectLineOptions, ref_) - 8usize];
     ["Offset of field: TerminalSelectLineOptions::whitespace"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 32usize];
+        [::core::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 32usize];
     ["Offset of field: TerminalSelectLineOptions::whitespace_len"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 40usize];
+        [::core::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 40usize];
     ["Offset of field: TerminalSelectLineOptions::semantic_prompt_boundary"]
-        [::std::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 48usize];
+        [::core::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 48usize];
 };
 impl Default for TerminalSelectLineOptions {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1280,32 +1278,32 @@ pub struct TerminalSelectionFormatOptions {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalSelectionFormatOptions"]
-        [::std::mem::size_of::<TerminalSelectionFormatOptions>() - 24usize];
+        [::core::mem::size_of::<TerminalSelectionFormatOptions>() - 24usize];
     ["Alignment of TerminalSelectionFormatOptions"]
-        [::std::mem::align_of::<TerminalSelectionFormatOptions>() - 8usize];
+        [::core::mem::align_of::<TerminalSelectionFormatOptions>() - 8usize];
     ["Offset of field: TerminalSelectionFormatOptions::size"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, size) - 0usize];
+        [::core::mem::offset_of!(TerminalSelectionFormatOptions, size) - 0usize];
     ["Offset of field: TerminalSelectionFormatOptions::emit"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, emit) - 8usize];
+        [::core::mem::offset_of!(TerminalSelectionFormatOptions, emit) - 8usize];
     ["Offset of field: TerminalSelectionFormatOptions::unwrap"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, unwrap) - 12usize];
+        [::core::mem::offset_of!(TerminalSelectionFormatOptions, unwrap) - 12usize];
     ["Offset of field: TerminalSelectionFormatOptions::trim"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, trim) - 13usize];
+        [::core::mem::offset_of!(TerminalSelectionFormatOptions, trim) - 13usize];
     ["Offset of field: TerminalSelectionFormatOptions::selection"]
-        [::std::mem::offset_of!(TerminalSelectionFormatOptions, selection) - 16usize];
+        [::core::mem::offset_of!(TerminalSelectionFormatOptions, selection) - 16usize];
 };
 impl Default for TerminalSelectionFormatOptions {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
 }
 pub mod SelectionOrder {
     #[doc = " Ordering of a selection's endpoints in terminal coordinates.\n\n Mirrored orders are only produced by rectangular selections whose start\n and end endpoints are on opposite diagonal corners that are not simple\n top-left-to-bottom-right or bottom-right-to-top-left orderings.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Start is before end in top-left to bottom-right order."]
     pub const FORWARD: Type = 0;
     #[doc = " End is before start in top-left to bottom-right order."]
@@ -1319,7 +1317,7 @@ pub mod SelectionOrder {
 }
 pub mod SelectionAdjust {
     #[doc = " Operation used to adjust a selection endpoint.\n\n Adjustment mutates the selection's logical end endpoint, not whichever\n endpoint is visually bottom/right. This preserves keyboard and drag\n behavior for both forward and reversed selections.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Move left to the previous non-empty cell, wrapping upward."]
     pub const LEFT: Type = 0;
     #[doc = " Move right to the next non-empty cell, wrapping downward."]
@@ -1345,7 +1343,7 @@ pub mod SelectionAdjust {
 }
 pub mod SelectionGestureBehavior {
     #[doc = " Selection behavior chosen for a gesture's click sequence.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Cell-granular drag selection."]
     pub const CELL: Type = 0;
     #[doc = " Word selection on press and word-granular drag selection."]
@@ -1371,21 +1369,21 @@ pub struct SelectionGestureBehaviors {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of SelectionGestureBehaviors"]
-        [::std::mem::size_of::<SelectionGestureBehaviors>() - 12usize];
+        [::core::mem::size_of::<SelectionGestureBehaviors>() - 12usize];
     ["Alignment of SelectionGestureBehaviors"]
-        [::std::mem::align_of::<SelectionGestureBehaviors>() - 4usize];
+        [::core::mem::align_of::<SelectionGestureBehaviors>() - 4usize];
     ["Offset of field: SelectionGestureBehaviors::single_click"]
-        [::std::mem::offset_of!(SelectionGestureBehaviors, single_click) - 0usize];
+        [::core::mem::offset_of!(SelectionGestureBehaviors, single_click) - 0usize];
     ["Offset of field: SelectionGestureBehaviors::double_click"]
-        [::std::mem::offset_of!(SelectionGestureBehaviors, double_click) - 4usize];
+        [::core::mem::offset_of!(SelectionGestureBehaviors, double_click) - 4usize];
     ["Offset of field: SelectionGestureBehaviors::triple_click"]
-        [::std::mem::offset_of!(SelectionGestureBehaviors, triple_click) - 8usize];
+        [::core::mem::offset_of!(SelectionGestureBehaviors, triple_click) - 8usize];
 };
 impl Default for SelectionGestureBehaviors {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1406,21 +1404,21 @@ pub struct SelectionGestureGeometry {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of SelectionGestureGeometry"]
-        [::std::mem::size_of::<SelectionGestureGeometry>() - 16usize];
+        [::core::mem::size_of::<SelectionGestureGeometry>() - 16usize];
     ["Alignment of SelectionGestureGeometry"]
-        [::std::mem::align_of::<SelectionGestureGeometry>() - 4usize];
+        [::core::mem::align_of::<SelectionGestureGeometry>() - 4usize];
     ["Offset of field: SelectionGestureGeometry::columns"]
-        [::std::mem::offset_of!(SelectionGestureGeometry, columns) - 0usize];
+        [::core::mem::offset_of!(SelectionGestureGeometry, columns) - 0usize];
     ["Offset of field: SelectionGestureGeometry::cell_width"]
-        [::std::mem::offset_of!(SelectionGestureGeometry, cell_width) - 4usize];
+        [::core::mem::offset_of!(SelectionGestureGeometry, cell_width) - 4usize];
     ["Offset of field: SelectionGestureGeometry::padding_left"]
-        [::std::mem::offset_of!(SelectionGestureGeometry, padding_left) - 8usize];
+        [::core::mem::offset_of!(SelectionGestureGeometry, padding_left) - 8usize];
     ["Offset of field: SelectionGestureGeometry::screen_height"]
-        [::std::mem::offset_of!(SelectionGestureGeometry, screen_height) - 12usize];
+        [::core::mem::offset_of!(SelectionGestureGeometry, screen_height) - 12usize];
 };
 pub mod SelectionGestureAutoscroll {
     #[doc = " Current autoscroll direction for an active selection drag gesture.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " No selection autoscroll is requested."]
     pub const NONE: Type = 0;
     #[doc = " Selection dragging should autoscroll the viewport upward."]
@@ -1432,7 +1430,7 @@ pub mod SelectionGestureAutoscroll {
 }
 pub mod SelectionGestureData {
     #[doc = " Data fields readable from a selection gesture with\n ghostty_selection_gesture_get().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Current click count: uint8_t*. 0 means inactive."]
     pub const CLICK_COUNT: Type = 0;
     #[doc = " Whether the current/last left-click gesture has dragged: bool*."]
@@ -1448,7 +1446,7 @@ pub mod SelectionGestureData {
 }
 pub mod SelectionGestureEventType {
     #[doc = " Selection gesture event type.\n\n The event type is fixed when the event is created. Each event type documents\n which options are valid and which options are required by gesture operations.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Press event for ghostty_selection_gesture_event()."]
     pub const PRESS: Type = 0;
     #[doc = " Release event for ghostty_selection_gesture_event()."]
@@ -1464,7 +1462,7 @@ pub mod SelectionGestureEventType {
 }
 pub mod SelectionGestureEventOption {
     #[doc = " Options stored on a reusable selection gesture event.\n\n Passing NULL as the value to ghostty_selection_gesture_event_set() clears the\n corresponding option.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Grid reference under the pointer: GhosttyGridRef*.\n\n Required for PRESS and DRAG events. Optional for RELEASE events; when unset\n or cleared, release records that the pointer did not map to a valid cell."]
     pub const REF: Type = 0;
     #[doc = " Surface-space pointer position: GhosttySurfacePosition*.\n\n Valid for PRESS, DRAG, and AUTOSCROLL_TICK."]
@@ -1505,7 +1503,7 @@ unsafe extern "C" {
     pub fn ghostty_selection_gesture_event_set(
         event: SelectionGestureEvent,
         option: SelectionGestureEventOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -1538,7 +1536,7 @@ unsafe extern "C" {
         gesture: SelectionGesture,
         terminal: Terminal,
         data: SelectionGestureData::Type,
-        value: *mut ::std::os::raw::c_void,
+        value: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -1548,7 +1546,7 @@ unsafe extern "C" {
         terminal: Terminal,
         count: usize,
         keys: *const SelectionGestureData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -1658,7 +1656,7 @@ unsafe extern "C" {
 pub type Mode = u16;
 pub mod ModeReportState {
     #[doc = " DECRPM report state values.\n\n These correspond to the Ps2 parameter in a DECRPM response\n sequence (CSI ? Ps1 ; Ps2 $ y)."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Mode is not recognized"]
     pub const NOT_RECOGNIZED: Type = 0;
     #[doc = " Mode is set (enabled)"]
@@ -1677,14 +1675,14 @@ unsafe extern "C" {
     pub fn ghostty_mode_report_encode(
         mode: Mode,
         state: ModeReportState::Type,
-        buf: *mut ::std::os::raw::c_char,
+        buf: *mut ::core::ffi::c_char,
         buf_len: usize,
         out_written: *mut usize,
     ) -> Result::Type;
 }
 pub mod SizeReportStyle {
     #[doc = " Size report style.\n\n Determines the output format for the terminal size report."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " In-band size report (mode 2048): ESC [ 48 ; rows ; cols ; height ; width t"]
     pub const MODE_2048: Type = 0;
     #[doc = " XTWINOPS text area size in pixels: ESC [ 4 ; height ; width t"]
@@ -1711,63 +1709,59 @@ pub struct SizeReportSize {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of SizeReportSize"][::std::mem::size_of::<SizeReportSize>() - 12usize];
-    ["Alignment of SizeReportSize"][::std::mem::align_of::<SizeReportSize>() - 4usize];
+    ["Size of SizeReportSize"][::core::mem::size_of::<SizeReportSize>() - 12usize];
+    ["Alignment of SizeReportSize"][::core::mem::align_of::<SizeReportSize>() - 4usize];
     ["Offset of field: SizeReportSize::rows"]
-        [::std::mem::offset_of!(SizeReportSize, rows) - 0usize];
+        [::core::mem::offset_of!(SizeReportSize, rows) - 0usize];
     ["Offset of field: SizeReportSize::columns"]
-        [::std::mem::offset_of!(SizeReportSize, columns) - 2usize];
+        [::core::mem::offset_of!(SizeReportSize, columns) - 2usize];
     ["Offset of field: SizeReportSize::cell_width"]
-        [::std::mem::offset_of!(SizeReportSize, cell_width) - 4usize];
+        [::core::mem::offset_of!(SizeReportSize, cell_width) - 4usize];
     ["Offset of field: SizeReportSize::cell_height"]
-        [::std::mem::offset_of!(SizeReportSize, cell_height) - 8usize];
+        [::core::mem::offset_of!(SizeReportSize, cell_height) - 8usize];
 };
 unsafe extern "C" {
     #[doc = " Encode a terminal size report into an escape sequence.\n\n Encodes a size report in the format specified by @p style into the\n provided buffer.\n\n If the buffer is too small, the function returns GHOSTTY_OUT_OF_SPACE\n and writes the required buffer size to @p out_written. The caller can\n then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
     pub fn ghostty_size_report_encode(
         style: SizeReportStyle::Type,
         size: SizeReportSize,
-        buf: *mut ::std::os::raw::c_char,
+        buf: *mut ::core::ffi::c_char,
         buf_len: usize,
         out_written: *mut usize,
     ) -> Result::Type;
 }
 #[doc = " Read bytes from a source.\n\n The callback must set @p out_read to a value no greater than @p capacity\n when returning true. A positive value reports progress; it may be less than\n capacity and does not indicate end-of-file. A zero value is definitive\n end-of-file. It must not be used to report temporary input starvation or a\n would-block condition.\n\n Returning false reports a fatal read error and the value of @p out_read is\n ignored. The library does not inspect or modify errno.\n\n All pointer arguments are borrowed and valid only for the duration of the\n callback. The callback is invoked synchronously on the calling thread.\n"]
-pub type ReaderFn = ::std::option::Option<
+pub type ReaderFn = ::core::option::Option<
     unsafe extern "C" fn(
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         buffer: *mut u8,
         capacity: usize,
         out_read: *mut usize,
     ) -> bool,
 >;
 #[doc = " Write bytes to a destination.\n\n Returning true means all @p len bytes were accepted. Returning false\n reports a fatal write error. A callback wrapping an interface that permits\n partial writes must retry internally until the full slice is accepted or\n an error occurs.\n\n On failure, the destination may already contain a prefix of the bytes. The\n calling operation fails and must not be resumed from that partial output.\n The library does not inspect or modify errno.\n\n callback is invoked synchronously on the calling thread. Successful return\n means the bytes were handed to the destination; it does not imply that the\n destination was flushed or made durable.\n"]
-pub type WriterFn = ::std::option::Option<
-    unsafe extern "C" fn(
-        userdata: *mut ::std::os::raw::c_void,
-        data: *const u8,
-        len: usize,
-    ) -> bool,
+pub type WriterFn = ::core::option::Option<
+    unsafe extern "C" fn(userdata: *mut ::core::ffi::c_void, data: *const u8, len: usize) -> bool,
 >;
 #[doc = " A byte source callback and its opaque context.\n\n The struct is passed by value. @p read must be non-NULL."]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Reader {
     pub read: ReaderFn,
-    pub userdata: *mut ::std::os::raw::c_void,
+    pub userdata: *mut ::core::ffi::c_void,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Reader"][::std::mem::size_of::<Reader>() - 16usize];
-    ["Alignment of Reader"][::std::mem::align_of::<Reader>() - 8usize];
-    ["Offset of field: Reader::read"][::std::mem::offset_of!(Reader, read) - 0usize];
-    ["Offset of field: Reader::userdata"][::std::mem::offset_of!(Reader, userdata) - 8usize];
+    ["Size of Reader"][::core::mem::size_of::<Reader>() - 16usize];
+    ["Alignment of Reader"][::core::mem::align_of::<Reader>() - 8usize];
+    ["Offset of field: Reader::read"][::core::mem::offset_of!(Reader, read) - 0usize];
+    ["Offset of field: Reader::userdata"][::core::mem::offset_of!(Reader, userdata) - 8usize];
 };
 impl Default for Reader {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -1777,27 +1771,27 @@ impl Default for Reader {
 #[derive(Debug, Copy, Clone)]
 pub struct Writer {
     pub write: WriterFn,
-    pub userdata: *mut ::std::os::raw::c_void,
+    pub userdata: *mut ::core::ffi::c_void,
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of Writer"][::std::mem::size_of::<Writer>() - 16usize];
-    ["Alignment of Writer"][::std::mem::align_of::<Writer>() - 8usize];
-    ["Offset of field: Writer::write"][::std::mem::offset_of!(Writer, write) - 0usize];
-    ["Offset of field: Writer::userdata"][::std::mem::offset_of!(Writer, userdata) - 8usize];
+    ["Size of Writer"][::core::mem::size_of::<Writer>() - 16usize];
+    ["Alignment of Writer"][::core::mem::align_of::<Writer>() - 8usize];
+    ["Offset of field: Writer::write"][::core::mem::offset_of!(Writer, write) - 0usize];
+    ["Offset of field: Writer::userdata"][::core::mem::offset_of!(Writer, userdata) - 8usize];
 };
 impl Default for Writer {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
 }
 pub mod KittyGraphicsData {
     #[doc = " Queryable data kinds for ghostty_kitty_graphics_get().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid / sentinel value."]
     pub const INVALID: Type = 0;
     #[doc = " Populate a pre-allocated placement iterator with placement data from\n the storage. Iterator data is only valid as long as the underlying\n terminal is not mutated.\n\n Output type: GhosttyKittyGraphicsPlacementIterator *"]
@@ -1809,7 +1803,7 @@ pub mod KittyGraphicsData {
 }
 pub mod KittyGraphicsPlacementData {
     #[doc = " Queryable data kinds for ghostty_kitty_graphics_placement_get().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid / sentinel value."]
     pub const INVALID: Type = 0;
     #[doc = " The image ID this placement belongs to.\n\n Output type: uint32_t *"]
@@ -1841,7 +1835,7 @@ pub mod KittyGraphicsPlacementData {
 }
 pub mod KittyPlacementLayer {
     #[doc = " Z-layer classification for kitty graphics placements.\n\n Based on the kitty protocol z-index conventions:\n - BELOW_BG:   z < INT32_MIN/2  (drawn below cell background)\n - BELOW_TEXT:  INT32_MIN/2 <= z < 0  (above background, below text)\n - ABOVE_TEXT:  z >= 0  (above text)\n - ALL:         no filtering (current behavior)\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const ALL: Type = 0;
     pub const BELOW_BG: Type = 1;
     pub const BELOW_TEXT: Type = 2;
@@ -1850,7 +1844,7 @@ pub mod KittyPlacementLayer {
 }
 pub mod KittyGraphicsPlacementIteratorOption {
     #[doc = " Settable options for ghostty_kitty_graphics_placement_iterator_set().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Set the z-layer filter for the iterator.\n\n Input type: GhosttyKittyPlacementLayer *"]
     pub const LAYER: Type = 0;
     #[doc = " Set the z-layer filter for the iterator.\n\n Input type: GhosttyKittyPlacementLayer *"]
@@ -1858,7 +1852,7 @@ pub mod KittyGraphicsPlacementIteratorOption {
 }
 pub mod KittyImageFormat {
     #[doc = " Pixel format of a Kitty graphics image.\n\n Note that stored images are always fully decoded:\n GHOSTTY_KITTY_IMAGE_FORMAT_PNG is never returned by\n ghostty_kitty_graphics_image_get() because PNG payloads are decoded\n to GHOSTTY_KITTY_IMAGE_FORMAT_RGBA before storage. The PNG value\n exists only for protocol-level completeness.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const RGB: Type = 0;
     pub const RGBA: Type = 1;
     pub const PNG: Type = 2;
@@ -1868,14 +1862,14 @@ pub mod KittyImageFormat {
 }
 pub mod KittyImageCompression {
     #[doc = " Compression of a Kitty graphics image.\n\n Note that stored images are always decompressed:\n GHOSTTY_KITTY_IMAGE_COMPRESSION_ZLIB_DEFLATE payloads are inflated\n before storage, so ghostty_kitty_graphics_image_get() always reports\n GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE. Consumers never need to\n inflate image data themselves.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const NONE: Type = 0;
     pub const ZLIB_DEFLATE: Type = 1;
     pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod KittyGraphicsImageData {
     #[doc = " Queryable data kinds for ghostty_kitty_graphics_image_get().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid / sentinel value."]
     pub const INVALID: Type = 0;
     #[doc = " The image ID.\n\n Output type: uint32_t *"]
@@ -1931,40 +1925,40 @@ pub struct KittyGraphicsPlacementRenderInfo {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of KittyGraphicsPlacementRenderInfo"]
-        [::std::mem::size_of::<KittyGraphicsPlacementRenderInfo>() - 56usize];
+        [::core::mem::size_of::<KittyGraphicsPlacementRenderInfo>() - 56usize];
     ["Alignment of KittyGraphicsPlacementRenderInfo"]
-        [::std::mem::align_of::<KittyGraphicsPlacementRenderInfo>() - 8usize];
+        [::core::mem::align_of::<KittyGraphicsPlacementRenderInfo>() - 8usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::size"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, size) - 0usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, size) - 0usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::pixel_width"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, pixel_width) - 8usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, pixel_width) - 8usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::pixel_height"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, pixel_height) - 12usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, pixel_height) - 12usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::grid_cols"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, grid_cols) - 16usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, grid_cols) - 16usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::grid_rows"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, grid_rows) - 20usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, grid_rows) - 20usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_col"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_col) - 24usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_col) - 24usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_row"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_row) - 28usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_row) - 28usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::viewport_visible"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_visible) - 32usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, viewport_visible) - 32usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::source_x"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_x) - 36usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_x) - 36usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::source_y"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_y) - 40usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_y) - 40usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::source_width"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_width) - 44usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_width) - 44usize];
     ["Offset of field: KittyGraphicsPlacementRenderInfo::source_height"]
-        [::std::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_height) - 48usize];
+        [::core::mem::offset_of!(KittyGraphicsPlacementRenderInfo, source_height) - 48usize];
 };
 unsafe extern "C" {
     #[doc = " Get data from a kitty graphics storage instance.\n\n The output pointer must be of the appropriate type for the requested\n data kind.\n\n Returns GHOSTTY_NO_VALUE when Kitty graphics are disabled at build time.\n\n"]
     pub fn ghostty_kitty_graphics_get(
         graphics: KittyGraphics,
         data: KittyGraphicsData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -1979,7 +1973,7 @@ unsafe extern "C" {
     pub fn ghostty_kitty_graphics_image_get(
         image: KittyGraphicsImage,
         data: KittyGraphicsImageData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -1988,7 +1982,7 @@ unsafe extern "C" {
         image: KittyGraphicsImage,
         count: usize,
         keys: *const KittyGraphicsImageData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -2008,7 +2002,7 @@ unsafe extern "C" {
     pub fn ghostty_kitty_graphics_placement_iterator_set(
         iterator: KittyGraphicsPlacementIterator,
         option: KittyGraphicsPlacementIteratorOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -2020,7 +2014,7 @@ unsafe extern "C" {
     pub fn ghostty_kitty_graphics_placement_get(
         iterator: KittyGraphicsPlacementIterator,
         data: KittyGraphicsPlacementData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -2029,7 +2023,7 @@ unsafe extern "C" {
         iterator: KittyGraphicsPlacementIterator,
         count: usize,
         keys: *const KittyGraphicsPlacementData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -2094,7 +2088,7 @@ unsafe extern "C" {
 }
 pub mod TerminalCompressionMode {
     #[doc = " Amount of compression work to perform before returning.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Perform one bounded compression step suitable for idle scheduling."]
     pub const INCREMENTAL: Type = 0;
     #[doc = " Synchronously inspect every currently eligible page."]
@@ -2104,7 +2098,7 @@ pub mod TerminalCompressionMode {
 }
 pub mod TerminalCompressionResult {
     #[doc = " Scheduling result from terminal compression.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Retained-mapping reclamation is unavailable on this target."]
     pub const UNSUPPORTED: Type = 0;
     #[doc = " More incremental compression work remains."]
@@ -2116,7 +2110,7 @@ pub mod TerminalCompressionResult {
 }
 pub mod TerminalScrollViewportTag {
     #[doc = " Scroll viewport behavior tag.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Scroll to the top of the scrollback."]
     pub const TOP: Type = 0;
     #[doc = " Scroll to the bottom (active area)."]
@@ -2142,21 +2136,21 @@ pub union TerminalScrollViewportValue {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalScrollViewportValue"]
-        [::std::mem::size_of::<TerminalScrollViewportValue>() - 16usize];
+        [::core::mem::size_of::<TerminalScrollViewportValue>() - 16usize];
     ["Alignment of TerminalScrollViewportValue"]
-        [::std::mem::align_of::<TerminalScrollViewportValue>() - 8usize];
+        [::core::mem::align_of::<TerminalScrollViewportValue>() - 8usize];
     ["Offset of field: TerminalScrollViewportValue::delta"]
-        [::std::mem::offset_of!(TerminalScrollViewportValue, delta) - 0usize];
+        [::core::mem::offset_of!(TerminalScrollViewportValue, delta) - 0usize];
     ["Offset of field: TerminalScrollViewportValue::row"]
-        [::std::mem::offset_of!(TerminalScrollViewportValue, row) - 0usize];
+        [::core::mem::offset_of!(TerminalScrollViewportValue, row) - 0usize];
     ["Offset of field: TerminalScrollViewportValue::_padding"]
-        [::std::mem::offset_of!(TerminalScrollViewportValue, _padding) - 0usize];
+        [::core::mem::offset_of!(TerminalScrollViewportValue, _padding) - 0usize];
 };
 impl Default for TerminalScrollViewportValue {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -2170,26 +2164,26 @@ pub struct TerminalScrollViewport {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of TerminalScrollViewport"][::std::mem::size_of::<TerminalScrollViewport>() - 24usize];
+    ["Size of TerminalScrollViewport"][::core::mem::size_of::<TerminalScrollViewport>() - 24usize];
     ["Alignment of TerminalScrollViewport"]
-        [::std::mem::align_of::<TerminalScrollViewport>() - 8usize];
+        [::core::mem::align_of::<TerminalScrollViewport>() - 8usize];
     ["Offset of field: TerminalScrollViewport::tag"]
-        [::std::mem::offset_of!(TerminalScrollViewport, tag) - 0usize];
+        [::core::mem::offset_of!(TerminalScrollViewport, tag) - 0usize];
     ["Offset of field: TerminalScrollViewport::value"]
-        [::std::mem::offset_of!(TerminalScrollViewport, value) - 8usize];
+        [::core::mem::offset_of!(TerminalScrollViewport, value) - 8usize];
 };
 impl Default for TerminalScrollViewport {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
 }
 pub mod TerminalScreen {
     #[doc = " Terminal screen identifier.\n\n Identifies which screen buffer is active in the terminal.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " The primary (normal) screen."]
     pub const PRIMARY: Type = 0;
     #[doc = " The alternate screen."]
@@ -2199,7 +2193,7 @@ pub mod TerminalScreen {
 }
 pub mod TerminalCursorStyle {
     #[doc = " Visual style of the terminal cursor.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Bar cursor (DECSCUSR 5, 6)."]
     pub const BAR: Type = 0;
     #[doc = " Block cursor (DECSCUSR 1, 2)."]
@@ -2224,22 +2218,22 @@ pub struct TerminalScrollbar {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of TerminalScrollbar"][::std::mem::size_of::<TerminalScrollbar>() - 24usize];
-    ["Alignment of TerminalScrollbar"][::std::mem::align_of::<TerminalScrollbar>() - 8usize];
+    ["Size of TerminalScrollbar"][::core::mem::size_of::<TerminalScrollbar>() - 24usize];
+    ["Alignment of TerminalScrollbar"][::core::mem::align_of::<TerminalScrollbar>() - 8usize];
     ["Offset of field: TerminalScrollbar::total"]
-        [::std::mem::offset_of!(TerminalScrollbar, total) - 0usize];
+        [::core::mem::offset_of!(TerminalScrollbar, total) - 0usize];
     ["Offset of field: TerminalScrollbar::offset"]
-        [::std::mem::offset_of!(TerminalScrollbar, offset) - 8usize];
+        [::core::mem::offset_of!(TerminalScrollbar, offset) - 8usize];
     ["Offset of field: TerminalScrollbar::len"]
-        [::std::mem::offset_of!(TerminalScrollbar, len) - 16usize];
+        [::core::mem::offset_of!(TerminalScrollbar, len) - 16usize];
 };
 #[doc = " Callback function type for bell.\n\n Called when the terminal receives a BEL character (0x07).\n\n"]
-pub type TerminalBellFn = ::std::option::Option<
-    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void),
+pub type TerminalBellFn = ::core::option::Option<
+    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::core::ffi::c_void),
 >;
 pub mod ClipboardLocation {
     #[doc = " Clipboard destination for a clipboard write.\n\n Protocol-specific destination identifiers are normalized to these values\n before the clipboard write callback is invoked.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " The standard system clipboard."]
     pub const STANDARD: Type = 0;
     #[doc = " The selection clipboard."]
@@ -2260,18 +2254,18 @@ pub struct ClipboardContent {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of ClipboardContent"][::std::mem::size_of::<ClipboardContent>() - 32usize];
-    ["Alignment of ClipboardContent"][::std::mem::align_of::<ClipboardContent>() - 8usize];
+    ["Size of ClipboardContent"][::core::mem::size_of::<ClipboardContent>() - 32usize];
+    ["Alignment of ClipboardContent"][::core::mem::align_of::<ClipboardContent>() - 8usize];
     ["Offset of field: ClipboardContent::mime"]
-        [::std::mem::offset_of!(ClipboardContent, mime) - 0usize];
+        [::core::mem::offset_of!(ClipboardContent, mime) - 0usize];
     ["Offset of field: ClipboardContent::data"]
-        [::std::mem::offset_of!(ClipboardContent, data) - 16usize];
+        [::core::mem::offset_of!(ClipboardContent, data) - 16usize];
 };
 impl Default for ClipboardContent {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -2291,29 +2285,29 @@ pub struct ClipboardWrite {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 32usize];
-    ["Alignment of ClipboardWrite"][::std::mem::align_of::<ClipboardWrite>() - 8usize];
+    ["Size of ClipboardWrite"][::core::mem::size_of::<ClipboardWrite>() - 32usize];
+    ["Alignment of ClipboardWrite"][::core::mem::align_of::<ClipboardWrite>() - 8usize];
     ["Offset of field: ClipboardWrite::size"]
-        [::std::mem::offset_of!(ClipboardWrite, size) - 0usize];
+        [::core::mem::offset_of!(ClipboardWrite, size) - 0usize];
     ["Offset of field: ClipboardWrite::location"]
-        [::std::mem::offset_of!(ClipboardWrite, location) - 8usize];
+        [::core::mem::offset_of!(ClipboardWrite, location) - 8usize];
     ["Offset of field: ClipboardWrite::contents"]
-        [::std::mem::offset_of!(ClipboardWrite, contents) - 16usize];
+        [::core::mem::offset_of!(ClipboardWrite, contents) - 16usize];
     ["Offset of field: ClipboardWrite::contents_len"]
-        [::std::mem::offset_of!(ClipboardWrite, contents_len) - 24usize];
+        [::core::mem::offset_of!(ClipboardWrite, contents_len) - 24usize];
 };
 impl Default for ClipboardWrite {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
 }
 pub mod ClipboardWriteResult {
     #[doc = " Result of a clipboard write callback.\n\n Protocols without write acknowledgements, including OSC 52 and iTerm2\n OSC 1337 Copy, ignore this result.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " The clipboard write completed successfully."]
     pub const SUCCESS: Type = 0;
     #[doc = " The clipboard write was denied by policy or the user."]
@@ -2330,10 +2324,10 @@ pub mod ClipboardWriteResult {
     pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Callback function type for clipboard_write.\n\n Called synchronously for a complete logical clipboard write. Protocol\n details such as OSC 52 selectors, base64 encoding, multipart chunks,\n aliases, and terminators are normalized before this callback is invoked.\n OSC 52 and iTerm2 OSC 1337 Copy writes therefore use the same callback\n shape. OSC 52 clipboard read requests (\"?\") are always ignored and never\n forwarded to this callback.\n\n"]
-pub type TerminalClipboardWriteFn = ::std::option::Option<
+pub type TerminalClipboardWriteFn = ::core::option::Option<
     unsafe extern "C" fn(
         terminal: Terminal,
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         write: *const ClipboardWrite,
     ) -> ClipboardWriteResult::Type,
 >;
@@ -2351,36 +2345,36 @@ pub struct TerminalDesktopNotification {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of TerminalDesktopNotification"]
-        [::std::mem::size_of::<TerminalDesktopNotification>() - 40usize];
+        [::core::mem::size_of::<TerminalDesktopNotification>() - 40usize];
     ["Alignment of TerminalDesktopNotification"]
-        [::std::mem::align_of::<TerminalDesktopNotification>() - 8usize];
+        [::core::mem::align_of::<TerminalDesktopNotification>() - 8usize];
     ["Offset of field: TerminalDesktopNotification::size"]
-        [::std::mem::offset_of!(TerminalDesktopNotification, size) - 0usize];
+        [::core::mem::offset_of!(TerminalDesktopNotification, size) - 0usize];
     ["Offset of field: TerminalDesktopNotification::title"]
-        [::std::mem::offset_of!(TerminalDesktopNotification, title) - 8usize];
+        [::core::mem::offset_of!(TerminalDesktopNotification, title) - 8usize];
     ["Offset of field: TerminalDesktopNotification::body"]
-        [::std::mem::offset_of!(TerminalDesktopNotification, body) - 24usize];
+        [::core::mem::offset_of!(TerminalDesktopNotification, body) - 24usize];
 };
 impl Default for TerminalDesktopNotification {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
 }
 #[doc = " Callback function type for desktop notifications.\n\n Called synchronously when the terminal receives OSC 9 or OSC 777.\n\n"]
-pub type TerminalDesktopNotificationFn = ::std::option::Option<
+pub type TerminalDesktopNotificationFn = ::core::option::Option<
     unsafe extern "C" fn(
         terminal: Terminal,
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         notification: *const TerminalDesktopNotification,
     ),
 >;
 pub mod TerminalProgressState {
     #[doc = " State of a terminal progress report.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Remove any visible progress indication."]
     pub const REMOVE: Type = 0;
     #[doc = " Show determinate progress."]
@@ -2407,81 +2401,81 @@ pub struct TerminalProgressReport {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of TerminalProgressReport"][::std::mem::size_of::<TerminalProgressReport>() - 16usize];
+    ["Size of TerminalProgressReport"][::core::mem::size_of::<TerminalProgressReport>() - 16usize];
     ["Alignment of TerminalProgressReport"]
-        [::std::mem::align_of::<TerminalProgressReport>() - 8usize];
+        [::core::mem::align_of::<TerminalProgressReport>() - 8usize];
     ["Offset of field: TerminalProgressReport::size"]
-        [::std::mem::offset_of!(TerminalProgressReport, size) - 0usize];
+        [::core::mem::offset_of!(TerminalProgressReport, size) - 0usize];
     ["Offset of field: TerminalProgressReport::state"]
-        [::std::mem::offset_of!(TerminalProgressReport, state) - 8usize];
+        [::core::mem::offset_of!(TerminalProgressReport, state) - 8usize];
     ["Offset of field: TerminalProgressReport::progress"]
-        [::std::mem::offset_of!(TerminalProgressReport, progress) - 12usize];
+        [::core::mem::offset_of!(TerminalProgressReport, progress) - 12usize];
 };
 impl Default for TerminalProgressReport {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
 }
 #[doc = " Callback function type for progress reports.\n\n Called synchronously when the terminal receives OSC 9;4.\n\n"]
-pub type TerminalProgressReportFn = ::std::option::Option<
+pub type TerminalProgressReportFn = ::core::option::Option<
     unsafe extern "C" fn(
         terminal: Terminal,
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         report: *const TerminalProgressReport,
     ),
 >;
 #[doc = " Callback function type for color scheme queries (CSI ? 996 n).\n\n Called when the terminal receives a color scheme device status report\n query. Return true and fill *out_scheme with the current color scheme,\n or return false to silently ignore the query.\n\n"]
-pub type TerminalColorSchemeFn = ::std::option::Option<
+pub type TerminalColorSchemeFn = ::core::option::Option<
     unsafe extern "C" fn(
         terminal: Terminal,
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         out_scheme: *mut ColorScheme::Type,
     ) -> bool,
 >;
 #[doc = " Callback function type for device attributes queries (DA1/DA2/DA3).\n\n Called when the terminal receives a device attributes query (CSI c,\n CSI > c, or CSI = c). Return true and fill *out_attrs with the\n response data, or return false to silently ignore the query.\n\n The terminal uses whichever sub-struct (primary, secondary, tertiary)\n matches the request type, but all three should be filled for simplicity.\n\n"]
-pub type TerminalDeviceAttributesFn = ::std::option::Option<
+pub type TerminalDeviceAttributesFn = ::core::option::Option<
     unsafe extern "C" fn(
         terminal: Terminal,
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         out_attrs: *mut DeviceAttributes,
     ) -> bool,
 >;
 #[doc = " Callback function type for enquiry (ENQ, 0x05).\n\n Called when the terminal receives an ENQ character. Return the\n response bytes as a GhosttyString. The memory must remain valid\n until the callback returns. Return a zero-length string to send\n no response.\n\n"]
-pub type TerminalEnquiryFn = ::std::option::Option<
-    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void) -> String,
+pub type TerminalEnquiryFn = ::core::option::Option<
+    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::core::ffi::c_void) -> String,
 >;
 #[doc = " Callback function type for size queries (XTWINOPS).\n\n Called in response to XTWINOPS size queries (CSI 14/16/18 t).\n Return true and fill *out_size with the current terminal geometry,\n or return false to silently ignore the query.\n\n"]
-pub type TerminalSizeFn = ::std::option::Option<
+pub type TerminalSizeFn = ::core::option::Option<
     unsafe extern "C" fn(
         terminal: Terminal,
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         out_size: *mut SizeReportSize,
     ) -> bool,
 >;
 #[doc = " Callback function type for title_changed.\n\n Called when the terminal title changes via escape sequences\n (e.g. OSC 0 or OSC 2). The new title can be queried from the\n terminal after the callback returns.\n\n"]
-pub type TerminalTitleChangedFn = ::std::option::Option<
-    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void),
+pub type TerminalTitleChangedFn = ::core::option::Option<
+    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::core::ffi::c_void),
 >;
 #[doc = " Callback function type for pwd_changed.\n\n Called when the terminal pwd (current working directory) changes via\n escape sequences: OSC 7 (file:// URI), OSC 9 (ConEmu CurrentDir), or\n OSC 1337 CurrentDir (iTerm2). Use ghostty_terminal_get() with\n GHOSTTY_TERMINAL_DATA_PWD inside the callback to read the new value.\n\n The terminal stores whatever bytes the shell emitted, without parsing.\n That means for OSC 7 the value is the raw URI (typically file://...);\n for OSC 9/OSC 1337 it is typically a bare path. The embedder is\n responsible for decoding any URI scheme or host if it cares about them.\n\n The callback also fires when the shell clears the pwd (e.g. an empty\n OSC 7). In that case GHOSTTY_TERMINAL_DATA_PWD returns a zero-length\n string.\n\n"]
-pub type TerminalPwdChangedFn = ::std::option::Option<
-    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void),
+pub type TerminalPwdChangedFn = ::core::option::Option<
+    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::core::ffi::c_void),
 >;
 #[doc = " Callback function type for write_pty.\n\n Called when the terminal needs to write data back to the pty, for\n example in response to a device status report or mode query. The\n data is only valid for the duration of the call; callers must copy\n it if it needs to persist.\n\n"]
-pub type TerminalWritePtyFn = ::std::option::Option<
+pub type TerminalWritePtyFn = ::core::option::Option<
     unsafe extern "C" fn(
         terminal: Terminal,
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         data: *const u8,
         len: usize,
     ),
 >;
 #[doc = " Callback function type for XTVERSION.\n\n Called when the terminal receives an XTVERSION query (CSI > q).\n Return the version string (e.g. \"myterm 1.0\") as a GhosttyString.\n The memory must remain valid until the callback returns. Return a\n zero-length string to report the default \"libghostty\" version.\n\n"]
-pub type TerminalXtversionFn = ::std::option::Option<
-    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::std::os::raw::c_void) -> String,
+pub type TerminalXtversionFn = ::core::option::Option<
+    unsafe extern "C" fn(terminal: Terminal, userdata: *mut ::core::ffi::c_void) -> String,
 >;
 #[doc = " A terminal mode and boolean value used for mode configuration and queries.\n\n For GHOSTTY_TERMINAL_DATA_MODE, initialize `mode` before calling\n ghostty_terminal_get(). On success, `value` contains the current mode value.\n\n This struct has a frozen layout and will not gain fields in future versions.\n"]
 #[repr(C)]
@@ -2494,16 +2488,16 @@ pub struct TerminalModeConfig {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of TerminalModeConfig"][::std::mem::size_of::<TerminalModeConfig>() - 4usize];
-    ["Alignment of TerminalModeConfig"][::std::mem::align_of::<TerminalModeConfig>() - 2usize];
+    ["Size of TerminalModeConfig"][::core::mem::size_of::<TerminalModeConfig>() - 4usize];
+    ["Alignment of TerminalModeConfig"][::core::mem::align_of::<TerminalModeConfig>() - 2usize];
     ["Offset of field: TerminalModeConfig::mode"]
-        [::std::mem::offset_of!(TerminalModeConfig, mode) - 0usize];
+        [::core::mem::offset_of!(TerminalModeConfig, mode) - 0usize];
     ["Offset of field: TerminalModeConfig::value"]
-        [::std::mem::offset_of!(TerminalModeConfig, value) - 2usize];
+        [::core::mem::offset_of!(TerminalModeConfig, value) - 2usize];
 };
 pub mod TerminalOption {
     #[doc = " Terminal option identifiers.\n\n These values are used with ghostty_terminal_set() to configure\n terminal callbacks and associated state.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Opaque userdata pointer passed to all callbacks.\n\n Input type: void*"]
     pub const USERDATA: Type = 0;
     #[doc = " Callback invoked when the terminal needs to write data back\n to the pty (e.g. in response to a DECRQM query or device\n status report). Set to NULL to ignore such sequences.\n\n Input type: GhosttyTerminalWritePtyFn"]
@@ -2579,7 +2573,7 @@ pub mod TerminalOption {
 }
 pub mod TerminalData {
     #[doc = " Terminal data types.\n\n These values specify what type of data to extract from a terminal\n using `ghostty_terminal_get`.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid data type. Never results in any data extraction."]
     pub const INVALID: Type = 0;
     #[doc = " Terminal width in cells.\n\n Output type: uint16_t *"]
@@ -2691,7 +2685,7 @@ unsafe extern "C" {
     pub fn ghostty_terminal_set(
         terminal: Terminal,
         option: TerminalOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -2744,7 +2738,7 @@ unsafe extern "C" {
     pub fn ghostty_terminal_get(
         terminal: Terminal,
         data: TerminalData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -2753,7 +2747,7 @@ unsafe extern "C" {
         terminal: Terminal,
         count: usize,
         keys: *const TerminalData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -2803,22 +2797,22 @@ pub struct FormatterScreenExtra {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of FormatterScreenExtra"][::std::mem::size_of::<FormatterScreenExtra>() - 16usize];
-    ["Alignment of FormatterScreenExtra"][::std::mem::align_of::<FormatterScreenExtra>() - 8usize];
+    ["Size of FormatterScreenExtra"][::core::mem::size_of::<FormatterScreenExtra>() - 16usize];
+    ["Alignment of FormatterScreenExtra"][::core::mem::align_of::<FormatterScreenExtra>() - 8usize];
     ["Offset of field: FormatterScreenExtra::size"]
-        [::std::mem::offset_of!(FormatterScreenExtra, size) - 0usize];
+        [::core::mem::offset_of!(FormatterScreenExtra, size) - 0usize];
     ["Offset of field: FormatterScreenExtra::cursor"]
-        [::std::mem::offset_of!(FormatterScreenExtra, cursor) - 8usize];
+        [::core::mem::offset_of!(FormatterScreenExtra, cursor) - 8usize];
     ["Offset of field: FormatterScreenExtra::style"]
-        [::std::mem::offset_of!(FormatterScreenExtra, style) - 9usize];
+        [::core::mem::offset_of!(FormatterScreenExtra, style) - 9usize];
     ["Offset of field: FormatterScreenExtra::hyperlink"]
-        [::std::mem::offset_of!(FormatterScreenExtra, hyperlink) - 10usize];
+        [::core::mem::offset_of!(FormatterScreenExtra, hyperlink) - 10usize];
     ["Offset of field: FormatterScreenExtra::protection"]
-        [::std::mem::offset_of!(FormatterScreenExtra, protection) - 11usize];
+        [::core::mem::offset_of!(FormatterScreenExtra, protection) - 11usize];
     ["Offset of field: FormatterScreenExtra::kitty_keyboard"]
-        [::std::mem::offset_of!(FormatterScreenExtra, kitty_keyboard) - 12usize];
+        [::core::mem::offset_of!(FormatterScreenExtra, kitty_keyboard) - 12usize];
     ["Offset of field: FormatterScreenExtra::charsets"]
-        [::std::mem::offset_of!(FormatterScreenExtra, charsets) - 13usize];
+        [::core::mem::offset_of!(FormatterScreenExtra, charsets) - 13usize];
 };
 #[doc = " Extra terminal state to include in styled output.\n"]
 #[repr(C)]
@@ -2843,25 +2837,25 @@ pub struct FormatterTerminalExtra {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of FormatterTerminalExtra"][::std::mem::size_of::<FormatterTerminalExtra>() - 32usize];
+    ["Size of FormatterTerminalExtra"][::core::mem::size_of::<FormatterTerminalExtra>() - 32usize];
     ["Alignment of FormatterTerminalExtra"]
-        [::std::mem::align_of::<FormatterTerminalExtra>() - 8usize];
+        [::core::mem::align_of::<FormatterTerminalExtra>() - 8usize];
     ["Offset of field: FormatterTerminalExtra::size"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, size) - 0usize];
+        [::core::mem::offset_of!(FormatterTerminalExtra, size) - 0usize];
     ["Offset of field: FormatterTerminalExtra::palette"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, palette) - 8usize];
+        [::core::mem::offset_of!(FormatterTerminalExtra, palette) - 8usize];
     ["Offset of field: FormatterTerminalExtra::modes"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, modes) - 9usize];
+        [::core::mem::offset_of!(FormatterTerminalExtra, modes) - 9usize];
     ["Offset of field: FormatterTerminalExtra::scrolling_region"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, scrolling_region) - 10usize];
+        [::core::mem::offset_of!(FormatterTerminalExtra, scrolling_region) - 10usize];
     ["Offset of field: FormatterTerminalExtra::tabstops"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, tabstops) - 11usize];
+        [::core::mem::offset_of!(FormatterTerminalExtra, tabstops) - 11usize];
     ["Offset of field: FormatterTerminalExtra::pwd"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, pwd) - 12usize];
+        [::core::mem::offset_of!(FormatterTerminalExtra, pwd) - 12usize];
     ["Offset of field: FormatterTerminalExtra::keyboard"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, keyboard) - 13usize];
+        [::core::mem::offset_of!(FormatterTerminalExtra, keyboard) - 13usize];
     ["Offset of field: FormatterTerminalExtra::screen"]
-        [::std::mem::offset_of!(FormatterTerminalExtra, screen) - 16usize];
+        [::core::mem::offset_of!(FormatterTerminalExtra, screen) - 16usize];
 };
 #[doc = " Options for creating a terminal formatter.\n"]
 #[repr(C)]
@@ -2883,27 +2877,27 @@ pub struct FormatterTerminalOptions {
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
     ["Size of FormatterTerminalOptions"]
-        [::std::mem::size_of::<FormatterTerminalOptions>() - 56usize];
+        [::core::mem::size_of::<FormatterTerminalOptions>() - 56usize];
     ["Alignment of FormatterTerminalOptions"]
-        [::std::mem::align_of::<FormatterTerminalOptions>() - 8usize];
+        [::core::mem::align_of::<FormatterTerminalOptions>() - 8usize];
     ["Offset of field: FormatterTerminalOptions::size"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, size) - 0usize];
+        [::core::mem::offset_of!(FormatterTerminalOptions, size) - 0usize];
     ["Offset of field: FormatterTerminalOptions::emit"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, emit) - 8usize];
+        [::core::mem::offset_of!(FormatterTerminalOptions, emit) - 8usize];
     ["Offset of field: FormatterTerminalOptions::unwrap"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, unwrap) - 12usize];
+        [::core::mem::offset_of!(FormatterTerminalOptions, unwrap) - 12usize];
     ["Offset of field: FormatterTerminalOptions::trim"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, trim) - 13usize];
+        [::core::mem::offset_of!(FormatterTerminalOptions, trim) - 13usize];
     ["Offset of field: FormatterTerminalOptions::extra"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, extra) - 16usize];
+        [::core::mem::offset_of!(FormatterTerminalOptions, extra) - 16usize];
     ["Offset of field: FormatterTerminalOptions::selection"]
-        [::std::mem::offset_of!(FormatterTerminalOptions, selection) - 48usize];
+        [::core::mem::offset_of!(FormatterTerminalOptions, selection) - 48usize];
 };
 impl Default for FormatterTerminalOptions {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -2941,7 +2935,7 @@ unsafe extern "C" {
 }
 pub mod RenderStateDirty {
     #[doc = " Dirty state of a render state after update.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Not dirty at all; rendering can be skipped."]
     pub const FALSE: Type = 0;
     #[doc = " Some rows changed; renderer can redraw incrementally."]
@@ -2953,7 +2947,7 @@ pub mod RenderStateDirty {
 }
 pub mod RenderStateCursorVisualStyle {
     #[doc = " Visual style of the cursor.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Bar cursor (DECSCUSR 5, 6)."]
     pub const BAR: Type = 0;
     #[doc = " Block cursor (DECSCUSR 1, 2)."]
@@ -2967,7 +2961,7 @@ pub mod RenderStateCursorVisualStyle {
 }
 pub mod RenderStateData {
     #[doc = " Queryable data kinds for ghostty_render_state_get().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid / sentinel value."]
     pub const INVALID: Type = 0;
     #[doc = " Viewport width in cells (uint16_t)."]
@@ -3009,7 +3003,7 @@ pub mod RenderStateData {
 }
 pub mod RenderStateOption {
     #[doc = " Settable options for ghostty_render_state_set().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Set dirty state (GhosttyRenderStateDirty)."]
     pub const DIRTY: Type = 0;
     #[doc = " Set dirty state (GhosttyRenderStateDirty)."]
@@ -3017,7 +3011,7 @@ pub mod RenderStateOption {
 }
 pub mod RenderStateRowData {
     #[doc = " Queryable data kinds for ghostty_render_state_row_get().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid / sentinel value."]
     pub const INVALID: Type = 0;
     #[doc = " Whether the current row is dirty (bool)."]
@@ -3033,7 +3027,7 @@ pub mod RenderStateRowData {
 }
 pub mod RenderStateRowOption {
     #[doc = " Settable options for ghostty_render_state_row_set().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Set dirty state for the current row (bool)."]
     pub const DIRTY: Type = 0;
     #[doc = " Set dirty state for the current row (bool)."]
@@ -3052,15 +3046,16 @@ pub struct RenderStateRowSelection {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of RenderStateRowSelection"][::std::mem::size_of::<RenderStateRowSelection>() - 16usize];
+    ["Size of RenderStateRowSelection"]
+        [::core::mem::size_of::<RenderStateRowSelection>() - 16usize];
     ["Alignment of RenderStateRowSelection"]
-        [::std::mem::align_of::<RenderStateRowSelection>() - 8usize];
+        [::core::mem::align_of::<RenderStateRowSelection>() - 8usize];
     ["Offset of field: RenderStateRowSelection::size"]
-        [::std::mem::offset_of!(RenderStateRowSelection, size) - 0usize];
+        [::core::mem::offset_of!(RenderStateRowSelection, size) - 0usize];
     ["Offset of field: RenderStateRowSelection::start_x"]
-        [::std::mem::offset_of!(RenderStateRowSelection, start_x) - 8usize];
+        [::core::mem::offset_of!(RenderStateRowSelection, start_x) - 8usize];
     ["Offset of field: RenderStateRowSelection::end_x"]
-        [::std::mem::offset_of!(RenderStateRowSelection, end_x) - 10usize];
+        [::core::mem::offset_of!(RenderStateRowSelection, end_x) - 10usize];
 };
 #[doc = " Render-state color information.\n\n This struct uses the sized-struct ABI pattern. Initialize with\n GHOSTTY_INIT_SIZED(GhosttyRenderStateColors) before calling\n ghostty_render_state_colors_get().\n\n Example:\n GhosttyRenderStateColors colors = GHOSTTY_INIT_SIZED(GhosttyRenderStateColors);\n GhosttyResult result = ghostty_render_state_colors_get(state, &colors);\n"]
 #[repr(C)]
@@ -3081,26 +3076,26 @@ pub struct RenderStateColors {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of RenderStateColors"][::std::mem::size_of::<RenderStateColors>() - 792usize];
-    ["Alignment of RenderStateColors"][::std::mem::align_of::<RenderStateColors>() - 8usize];
+    ["Size of RenderStateColors"][::core::mem::size_of::<RenderStateColors>() - 792usize];
+    ["Alignment of RenderStateColors"][::core::mem::align_of::<RenderStateColors>() - 8usize];
     ["Offset of field: RenderStateColors::size"]
-        [::std::mem::offset_of!(RenderStateColors, size) - 0usize];
+        [::core::mem::offset_of!(RenderStateColors, size) - 0usize];
     ["Offset of field: RenderStateColors::background"]
-        [::std::mem::offset_of!(RenderStateColors, background) - 8usize];
+        [::core::mem::offset_of!(RenderStateColors, background) - 8usize];
     ["Offset of field: RenderStateColors::foreground"]
-        [::std::mem::offset_of!(RenderStateColors, foreground) - 11usize];
+        [::core::mem::offset_of!(RenderStateColors, foreground) - 11usize];
     ["Offset of field: RenderStateColors::cursor"]
-        [::std::mem::offset_of!(RenderStateColors, cursor) - 14usize];
+        [::core::mem::offset_of!(RenderStateColors, cursor) - 14usize];
     ["Offset of field: RenderStateColors::cursor_has_value"]
-        [::std::mem::offset_of!(RenderStateColors, cursor_has_value) - 17usize];
+        [::core::mem::offset_of!(RenderStateColors, cursor_has_value) - 17usize];
     ["Offset of field: RenderStateColors::palette"]
-        [::std::mem::offset_of!(RenderStateColors, palette) - 18usize];
+        [::core::mem::offset_of!(RenderStateColors, palette) - 18usize];
 };
 impl Default for RenderStateColors {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -3136,7 +3131,7 @@ unsafe extern "C" {
     pub fn ghostty_render_state_get(
         state: RenderState,
         data: RenderStateData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -3145,7 +3140,7 @@ unsafe extern "C" {
         state: RenderState,
         count: usize,
         keys: *const RenderStateData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -3154,7 +3149,7 @@ unsafe extern "C" {
     pub fn ghostty_render_state_set(
         state: RenderState,
         option: RenderStateOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -3184,7 +3179,7 @@ unsafe extern "C" {
     pub fn ghostty_render_state_row_get(
         iterator: RenderStateRowIterator,
         data: RenderStateRowData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -3193,7 +3188,7 @@ unsafe extern "C" {
         iterator: RenderStateRowIterator,
         count: usize,
         keys: *const RenderStateRowData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -3202,7 +3197,7 @@ unsafe extern "C" {
     pub fn ghostty_render_state_row_set(
         iterator: RenderStateRowIterator,
         option: RenderStateRowOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -3214,7 +3209,7 @@ unsafe extern "C" {
 }
 pub mod RenderStateRowCellsData {
     #[doc = " Queryable data kinds for ghostty_render_state_row_cells_get().\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid / sentinel value."]
     pub const INVALID: Type = 0;
     #[doc = " The raw cell value (GhosttyCell)."]
@@ -3254,7 +3249,7 @@ unsafe extern "C" {
     pub fn ghostty_render_state_row_cells_get(
         cells: RenderStateRowCells,
         data: RenderStateRowCellsData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -3263,7 +3258,7 @@ unsafe extern "C" {
         cells: RenderStateRowCells,
         count: usize,
         keys: *const RenderStateRowCellsData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
@@ -3304,7 +3299,7 @@ unsafe extern "C" {
 }
 pub mod OscCommandType {
     #[doc = " OSC command types.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const INVALID: Type = 0;
     pub const CHANGE_WINDOW_TITLE: Type = 1;
     pub const CHANGE_WINDOW_ICON: Type = 2;
@@ -3332,7 +3327,7 @@ pub mod OscCommandType {
 }
 pub mod OscCommandData {
     #[doc = " OSC command data types.\n\n These values specify what type of data to extract from an OSC command\n using `ghostty_osc_command_data`.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid data type. Never results in any data extraction."]
     pub const INVALID: Type = 0;
     #[doc = " Window title string data.\n\n Valid for: GHOSTTY_OSC_COMMAND_CHANGE_WINDOW_TITLE\n\n Output type: const char ** (pointer to null-terminated string)\n\n Lifetime: Valid until the next call to any ghostty_osc_* function with\n the same parser instance. Memory is owned by the parser."]
@@ -3369,12 +3364,12 @@ unsafe extern "C" {
     pub fn ghostty_osc_command_data(
         command: OscCommand,
         data: OscCommandData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> bool;
 }
 pub mod SgrAttributeTag {
     #[doc = " SGR attribute tags.\n\n These values identify the type of an SGR attribute in a tagged union.\n Use the tag to determine which field in the attribute value union to access.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const UNSET: Type = 0;
     pub const UNKNOWN: Type = 1;
     pub const BOLD: Type = 2;
@@ -3410,7 +3405,7 @@ pub mod SgrAttributeTag {
 }
 pub mod SgrUnderline {
     #[doc = " Underline style types.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const NONE: Type = 0;
     pub const SINGLE: Type = 1;
     pub const DOUBLE: Type = 2;
@@ -3430,22 +3425,22 @@ pub struct SgrUnknown {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of SgrUnknown"][::std::mem::size_of::<SgrUnknown>() - 32usize];
-    ["Alignment of SgrUnknown"][::std::mem::align_of::<SgrUnknown>() - 8usize];
+    ["Size of SgrUnknown"][::core::mem::size_of::<SgrUnknown>() - 32usize];
+    ["Alignment of SgrUnknown"][::core::mem::align_of::<SgrUnknown>() - 8usize];
     ["Offset of field: SgrUnknown::full_ptr"]
-        [::std::mem::offset_of!(SgrUnknown, full_ptr) - 0usize];
+        [::core::mem::offset_of!(SgrUnknown, full_ptr) - 0usize];
     ["Offset of field: SgrUnknown::full_len"]
-        [::std::mem::offset_of!(SgrUnknown, full_len) - 8usize];
+        [::core::mem::offset_of!(SgrUnknown, full_len) - 8usize];
     ["Offset of field: SgrUnknown::partial_ptr"]
-        [::std::mem::offset_of!(SgrUnknown, partial_ptr) - 16usize];
+        [::core::mem::offset_of!(SgrUnknown, partial_ptr) - 16usize];
     ["Offset of field: SgrUnknown::partial_len"]
-        [::std::mem::offset_of!(SgrUnknown, partial_len) - 24usize];
+        [::core::mem::offset_of!(SgrUnknown, partial_len) - 24usize];
 };
 impl Default for SgrUnknown {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -3470,40 +3465,40 @@ pub union SgrAttributeValue {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of SgrAttributeValue"][::std::mem::size_of::<SgrAttributeValue>() - 64usize];
-    ["Alignment of SgrAttributeValue"][::std::mem::align_of::<SgrAttributeValue>() - 8usize];
+    ["Size of SgrAttributeValue"][::core::mem::size_of::<SgrAttributeValue>() - 64usize];
+    ["Alignment of SgrAttributeValue"][::core::mem::align_of::<SgrAttributeValue>() - 8usize];
     ["Offset of field: SgrAttributeValue::unknown"]
-        [::std::mem::offset_of!(SgrAttributeValue, unknown) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, unknown) - 0usize];
     ["Offset of field: SgrAttributeValue::underline"]
-        [::std::mem::offset_of!(SgrAttributeValue, underline) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, underline) - 0usize];
     ["Offset of field: SgrAttributeValue::underline_color"]
-        [::std::mem::offset_of!(SgrAttributeValue, underline_color) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, underline_color) - 0usize];
     ["Offset of field: SgrAttributeValue::underline_color_256"]
-        [::std::mem::offset_of!(SgrAttributeValue, underline_color_256) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, underline_color_256) - 0usize];
     ["Offset of field: SgrAttributeValue::direct_color_fg"]
-        [::std::mem::offset_of!(SgrAttributeValue, direct_color_fg) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, direct_color_fg) - 0usize];
     ["Offset of field: SgrAttributeValue::direct_color_bg"]
-        [::std::mem::offset_of!(SgrAttributeValue, direct_color_bg) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, direct_color_bg) - 0usize];
     ["Offset of field: SgrAttributeValue::bg_8"]
-        [::std::mem::offset_of!(SgrAttributeValue, bg_8) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, bg_8) - 0usize];
     ["Offset of field: SgrAttributeValue::fg_8"]
-        [::std::mem::offset_of!(SgrAttributeValue, fg_8) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, fg_8) - 0usize];
     ["Offset of field: SgrAttributeValue::bright_bg_8"]
-        [::std::mem::offset_of!(SgrAttributeValue, bright_bg_8) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, bright_bg_8) - 0usize];
     ["Offset of field: SgrAttributeValue::bright_fg_8"]
-        [::std::mem::offset_of!(SgrAttributeValue, bright_fg_8) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, bright_fg_8) - 0usize];
     ["Offset of field: SgrAttributeValue::bg_256"]
-        [::std::mem::offset_of!(SgrAttributeValue, bg_256) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, bg_256) - 0usize];
     ["Offset of field: SgrAttributeValue::fg_256"]
-        [::std::mem::offset_of!(SgrAttributeValue, fg_256) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, fg_256) - 0usize];
     ["Offset of field: SgrAttributeValue::_padding"]
-        [::std::mem::offset_of!(SgrAttributeValue, _padding) - 0usize];
+        [::core::mem::offset_of!(SgrAttributeValue, _padding) - 0usize];
 };
 impl Default for SgrAttributeValue {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -3517,16 +3512,16 @@ pub struct SgrAttribute {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of SgrAttribute"][::std::mem::size_of::<SgrAttribute>() - 72usize];
-    ["Alignment of SgrAttribute"][::std::mem::align_of::<SgrAttribute>() - 8usize];
-    ["Offset of field: SgrAttribute::tag"][::std::mem::offset_of!(SgrAttribute, tag) - 0usize];
-    ["Offset of field: SgrAttribute::value"][::std::mem::offset_of!(SgrAttribute, value) - 8usize];
+    ["Size of SgrAttribute"][::core::mem::size_of::<SgrAttribute>() - 72usize];
+    ["Alignment of SgrAttribute"][::core::mem::align_of::<SgrAttribute>() - 8usize];
+    ["Offset of field: SgrAttribute::tag"][::core::mem::offset_of!(SgrAttribute, tag) - 0usize];
+    ["Offset of field: SgrAttribute::value"][::core::mem::offset_of!(SgrAttribute, value) - 8usize];
 };
 impl Default for SgrAttribute {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
@@ -3548,7 +3543,7 @@ unsafe extern "C" {
     pub fn ghostty_sgr_set_params(
         parser: SgrParser,
         params: *const u16,
-        separators: *const ::std::os::raw::c_char,
+        separators: *const ::core::ffi::c_char,
         len: usize,
     ) -> Result::Type;
 }
@@ -3587,25 +3582,25 @@ pub struct SysImage {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of SysImage"][::std::mem::size_of::<SysImage>() - 24usize];
-    ["Alignment of SysImage"][::std::mem::align_of::<SysImage>() - 8usize];
-    ["Offset of field: SysImage::width"][::std::mem::offset_of!(SysImage, width) - 0usize];
-    ["Offset of field: SysImage::height"][::std::mem::offset_of!(SysImage, height) - 4usize];
-    ["Offset of field: SysImage::data"][::std::mem::offset_of!(SysImage, data) - 8usize];
-    ["Offset of field: SysImage::data_len"][::std::mem::offset_of!(SysImage, data_len) - 16usize];
+    ["Size of SysImage"][::core::mem::size_of::<SysImage>() - 24usize];
+    ["Alignment of SysImage"][::core::mem::align_of::<SysImage>() - 8usize];
+    ["Offset of field: SysImage::width"][::core::mem::offset_of!(SysImage, width) - 0usize];
+    ["Offset of field: SysImage::height"][::core::mem::offset_of!(SysImage, height) - 4usize];
+    ["Offset of field: SysImage::data"][::core::mem::offset_of!(SysImage, data) - 8usize];
+    ["Offset of field: SysImage::data_len"][::core::mem::offset_of!(SysImage, data_len) - 16usize];
 };
 impl Default for SysImage {
     fn default() -> Self {
-        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        let mut s = ::core::mem::MaybeUninit::<Self>::uninit();
         unsafe {
-            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
             s.assume_init()
         }
     }
 }
 pub mod SysLogLevel {
     #[doc = " Log severity levels for the log callback."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const ERROR: Type = 0;
     pub const WARNING: Type = 1;
     pub const INFO: Type = 2;
@@ -3613,9 +3608,9 @@ pub mod SysLogLevel {
     pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " Callback type for logging.\n\n When installed, internal library log messages are delivered through\n this callback instead of being discarded. The embedder is responsible\n for formatting and routing log output.\n\n When the log is unscoped (default scope), @p scope_len is 0.\n\n All pointer arguments are only valid for the duration of the callback.\n The callback must be safe to call from any thread.\n"]
-pub type SysLogFn = ::std::option::Option<
+pub type SysLogFn = ::core::option::Option<
     unsafe extern "C" fn(
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         level: SysLogLevel::Type,
         scope: *const u8,
         scope_len: usize,
@@ -3624,9 +3619,9 @@ pub type SysLogFn = ::std::option::Option<
     ),
 >;
 #[doc = " Callback type for PNG decoding.\n\n Decodes raw PNG data into RGBA pixels. The output pixel data must be\n allocated through the provided allocator. The library takes ownership\n of the buffer and will free it with the same allocator.\n"]
-pub type SysDecodePngFn = ::std::option::Option<
+pub type SysDecodePngFn = ::core::option::Option<
     unsafe extern "C" fn(
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         allocator: *const Allocator,
         data: *const u8,
         data_len: usize,
@@ -3635,7 +3630,7 @@ pub type SysDecodePngFn = ::std::option::Option<
 >;
 pub mod SysOption {
     #[doc = " System option identifiers for ghostty_sys_set()."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Set the userdata pointer passed to all sys callbacks.\n\n Input type: void* (or NULL)"]
     pub const GHOSTTY_SYS_OPT_USERDATA: Type = 0;
     #[doc = " Set the PNG decode function.\n\n When set, the terminal can accept PNG images via the Kitty\n Graphics Protocol. When cleared (NULL value), PNG decoding is\n unsupported and PNG image data will be rejected.\n\n Input type: GhosttySysDecodePngFn (function pointer, or NULL)"]
@@ -3649,13 +3644,13 @@ unsafe extern "C" {
     #[doc = " Set a system-level option.\n\n Configures a process-global implementation function. These should be\n set once at startup before using any terminal functionality that\n depends on them.\n\n               or NULL to clear it\n         option is not recognized"]
     pub fn ghostty_sys_set(
         option: SysOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Built-in log callback that writes to stderr.\n\n Formats each message as \"[level](scope): message\\n\".\n Can be passed directly to ghostty_sys_set():\n\n ghostty_sys_set(GHOSTTY_SYS_OPT_LOG, &ghostty_sys_log_stderr);"]
     pub fn ghostty_sys_log_stderr(
-        userdata: *mut ::std::os::raw::c_void,
+        userdata: *mut ::core::ffi::c_void,
         level: SysLogLevel::Type,
         scope: *const u8,
         scope_len: usize,
@@ -3672,7 +3667,7 @@ pub struct KeyEventImpl {
 pub type KeyEvent = *mut KeyEventImpl;
 pub mod KeyAction {
     #[doc = " Keyboard input event types.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Key was released"]
     pub const RELEASE: Type = 0;
     #[doc = " Key was pressed"]
@@ -3686,7 +3681,7 @@ pub mod KeyAction {
 pub type Mods = u16;
 pub mod Key {
     #[doc = " Physical key codes.\n\n The set of key codes that Ghostty is aware of. These represent physical keys\n on the keyboard and are layout-independent. For example, the \"a\" key on a US\n keyboard is the same as the \"ф\" key on a Russian keyboard, but both will\n report the same key_a value.\n\n Layout-dependent strings are provided separately as UTF-8 text and are produced\n by the platform. These values are based on the W3C UI Events KeyboardEvent code\n standard. See: https://www.w3.org/TR/uievents-code\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const UNIDENTIFIED: Type = 0;
     pub const BACKQUOTE: Type = 1;
     pub const BACKSLASH: Type = 2;
@@ -3868,7 +3863,7 @@ pub mod Key {
 unsafe extern "C" {
     #[doc = " Create a new key event instance.\n\n Creates a new key event with default values. The event must be freed using\n ghostty_key_event_free() when no longer needed.\n\n"]
     pub fn ghostty_key_event_new(allocator: *const Allocator, event: *mut KeyEvent)
-    -> Result::Type;
+        -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Free a key event instance.\n\n Releases all resources associated with the key event. After this call,\n the event handle becomes invalid and must not be used.\n\n"]
@@ -3918,7 +3913,7 @@ unsafe extern "C" {
     #[doc = " Set the UTF-8 text generated by the key for the current keyboard layout.\n\n Must contain the unmodified character before any Ctrl/Meta transformations.\n The encoder derives modifier sequences from the logical key and mods\n bitmask, not from this text. Do not pass C0 control characters\n (U+0000-U+001F, U+007F) or platform function key codes (e.g. macOS PUA\n U+F700-U+F8FF); pass NULL instead and let the encoder use the logical key.\n\n The key event does NOT take ownership of the text pointer. The caller\n must ensure the string remains valid for the lifetime needed by the event.\n\n"]
     pub fn ghostty_key_event_set_utf8(
         event: KeyEvent,
-        utf8: *const ::std::os::raw::c_char,
+        utf8: *const ::core::ffi::c_char,
         len: usize,
     );
 }
@@ -3927,7 +3922,7 @@ unsafe extern "C" {
     pub fn ghostty_key_event_get_utf8(
         event: KeyEvent,
         len: *mut usize,
-    ) -> *const ::std::os::raw::c_char;
+    ) -> *const ::core::ffi::c_char;
 }
 unsafe extern "C" {
     #[doc = " Set the unshifted Unicode codepoint.\n\n"]
@@ -3948,7 +3943,7 @@ pub type KeyEncoder = *mut KeyEncoderImpl;
 pub type KittyKeyFlags = u8;
 pub mod OptionAsAlt {
     #[doc = " macOS option key behavior.\n\n Determines whether the \"option\" key on macOS is treated as \"alt\" or not.\n See the Ghostty `macos-option-as-alt` configuration option for more details.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Option key is not treated as alt"]
     pub const FALSE: Type = 0;
     #[doc = " Option key is treated as alt"]
@@ -3962,7 +3957,7 @@ pub mod OptionAsAlt {
 }
 pub mod KeyEncoderOption {
     #[doc = " Key encoder option identifiers.\n\n These values are used with ghostty_key_encoder_setopt() to configure\n the behavior of the key encoder.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Terminal DEC mode 1: cursor key application mode (value: bool)"]
     pub const CURSOR_KEY_APPLICATION: Type = 0;
     #[doc = " Terminal DEC mode 66: keypad key application mode (value: bool)"]
@@ -3998,7 +3993,7 @@ unsafe extern "C" {
     pub fn ghostty_key_encoder_setopt(
         encoder: KeyEncoder,
         option: KeyEncoderOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     );
 }
 unsafe extern "C" {
@@ -4010,7 +4005,7 @@ unsafe extern "C" {
     pub fn ghostty_key_encoder_encode(
         encoder: KeyEncoder,
         event: KeyEvent,
-        out_buf: *mut ::std::os::raw::c_char,
+        out_buf: *mut ::core::ffi::c_char,
         out_buf_size: usize,
         out_len: *mut usize,
     ) -> Result::Type;
@@ -4024,7 +4019,7 @@ pub struct MouseEventImpl {
 pub type MouseEvent = *mut MouseEventImpl;
 pub mod MouseAction {
     #[doc = " Mouse event action type.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Mouse button was pressed."]
     pub const PRESS: Type = 0;
     #[doc = " Mouse button was released."]
@@ -4036,7 +4031,7 @@ pub mod MouseAction {
 }
 pub mod MouseButton {
     #[doc = " Mouse button identity.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const UNKNOWN: Type = 0;
     pub const LEFT: Type = 1;
     pub const RIGHT: Type = 2;
@@ -4060,10 +4055,10 @@ pub struct MousePosition {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of MousePosition"][::std::mem::size_of::<MousePosition>() - 8usize];
-    ["Alignment of MousePosition"][::std::mem::align_of::<MousePosition>() - 4usize];
-    ["Offset of field: MousePosition::x"][::std::mem::offset_of!(MousePosition, x) - 0usize];
-    ["Offset of field: MousePosition::y"][::std::mem::offset_of!(MousePosition, y) - 4usize];
+    ["Size of MousePosition"][::core::mem::size_of::<MousePosition>() - 8usize];
+    ["Alignment of MousePosition"][::core::mem::align_of::<MousePosition>() - 4usize];
+    ["Offset of field: MousePosition::x"][::core::mem::offset_of!(MousePosition, x) - 0usize];
+    ["Offset of field: MousePosition::y"][::core::mem::offset_of!(MousePosition, y) - 4usize];
 };
 unsafe extern "C" {
     #[doc = " Create a new mouse event instance.\n\n"]
@@ -4124,7 +4119,7 @@ pub struct MouseEncoderImpl {
 pub type MouseEncoder = *mut MouseEncoderImpl;
 pub mod MouseTrackingMode {
     #[doc = " Mouse tracking mode.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Mouse reporting disabled."]
     pub const NONE: Type = 0;
     #[doc = " X10 mouse mode."]
@@ -4140,7 +4135,7 @@ pub mod MouseTrackingMode {
 }
 pub mod MouseFormat {
     #[doc = " Mouse output format.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     pub const X10: Type = 0;
     pub const UTF8: Type = 1;
     pub const SGR: Type = 2;
@@ -4173,30 +4168,30 @@ pub struct MouseEncoderSize {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of MouseEncoderSize"][::std::mem::size_of::<MouseEncoderSize>() - 40usize];
-    ["Alignment of MouseEncoderSize"][::std::mem::align_of::<MouseEncoderSize>() - 8usize];
+    ["Size of MouseEncoderSize"][::core::mem::size_of::<MouseEncoderSize>() - 40usize];
+    ["Alignment of MouseEncoderSize"][::core::mem::align_of::<MouseEncoderSize>() - 8usize];
     ["Offset of field: MouseEncoderSize::size"]
-        [::std::mem::offset_of!(MouseEncoderSize, size) - 0usize];
+        [::core::mem::offset_of!(MouseEncoderSize, size) - 0usize];
     ["Offset of field: MouseEncoderSize::screen_width"]
-        [::std::mem::offset_of!(MouseEncoderSize, screen_width) - 8usize];
+        [::core::mem::offset_of!(MouseEncoderSize, screen_width) - 8usize];
     ["Offset of field: MouseEncoderSize::screen_height"]
-        [::std::mem::offset_of!(MouseEncoderSize, screen_height) - 12usize];
+        [::core::mem::offset_of!(MouseEncoderSize, screen_height) - 12usize];
     ["Offset of field: MouseEncoderSize::cell_width"]
-        [::std::mem::offset_of!(MouseEncoderSize, cell_width) - 16usize];
+        [::core::mem::offset_of!(MouseEncoderSize, cell_width) - 16usize];
     ["Offset of field: MouseEncoderSize::cell_height"]
-        [::std::mem::offset_of!(MouseEncoderSize, cell_height) - 20usize];
+        [::core::mem::offset_of!(MouseEncoderSize, cell_height) - 20usize];
     ["Offset of field: MouseEncoderSize::padding_top"]
-        [::std::mem::offset_of!(MouseEncoderSize, padding_top) - 24usize];
+        [::core::mem::offset_of!(MouseEncoderSize, padding_top) - 24usize];
     ["Offset of field: MouseEncoderSize::padding_bottom"]
-        [::std::mem::offset_of!(MouseEncoderSize, padding_bottom) - 28usize];
+        [::core::mem::offset_of!(MouseEncoderSize, padding_bottom) - 28usize];
     ["Offset of field: MouseEncoderSize::padding_right"]
-        [::std::mem::offset_of!(MouseEncoderSize, padding_right) - 32usize];
+        [::core::mem::offset_of!(MouseEncoderSize, padding_right) - 32usize];
     ["Offset of field: MouseEncoderSize::padding_left"]
-        [::std::mem::offset_of!(MouseEncoderSize, padding_left) - 36usize];
+        [::core::mem::offset_of!(MouseEncoderSize, padding_left) - 36usize];
 };
 pub mod MouseEncoderOption {
     #[doc = " Mouse encoder option identifiers.\n\n These values are used with ghostty_mouse_encoder_setopt() to configure\n the behavior of the mouse encoder.\n"]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Mouse tracking mode (value: GhosttyMouseTrackingMode)."]
     pub const EVENT: Type = 0;
     #[doc = " Mouse output format (value: GhosttyMouseFormat)."]
@@ -4226,7 +4221,7 @@ unsafe extern "C" {
     pub fn ghostty_mouse_encoder_setopt(
         encoder: MouseEncoder,
         option: MouseEncoderOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     );
 }
 unsafe extern "C" {
@@ -4242,29 +4237,29 @@ unsafe extern "C" {
     pub fn ghostty_mouse_encoder_encode(
         encoder: MouseEncoder,
         event: MouseEvent,
-        out_buf: *mut ::std::os::raw::c_char,
+        out_buf: *mut ::core::ffi::c_char,
         out_buf_size: usize,
         out_len: *mut usize,
     ) -> Result::Type;
 }
 unsafe extern "C" {
     #[doc = " Check if paste data is safe to paste into the terminal.\n\n Data is considered unsafe if it contains:\n - Newlines (`\\n`) which can inject commands\n - The bracketed paste end sequence (`\\x1b[201~`) which can be used\n   to exit bracketed paste mode and inject commands\n\n This check is conservative and considers data unsafe regardless of\n current terminal state.\n"]
-    pub fn ghostty_paste_is_safe(data: *const ::std::os::raw::c_char, len: usize) -> bool;
+    pub fn ghostty_paste_is_safe(data: *const ::core::ffi::c_char, len: usize) -> bool;
 }
 unsafe extern "C" {
     #[doc = " Encode paste data for writing to the terminal pty.\n\n This function prepares paste data for terminal input by:\n - Stripping unsafe control bytes (NUL, ESC, DEL, etc.) by replacing\n   them with spaces\n - Wrapping the data in bracketed paste sequences if @p bracketed is true\n - Replacing newlines with carriage returns if @p bracketed is false\n\n The input @p data buffer is modified in place during encoding. The\n encoded result (potentially with bracketed paste prefix/suffix) is\n written to the output buffer.\n\n If the output buffer is too small, the function returns\n GHOSTTY_OUT_OF_SPACE and sets the required size in @p out_written.\n The caller can then retry with a sufficiently sized buffer.\n\n             GHOSTTY_OUT_OF_SPACE, the required buffer size.\n         is too small"]
     pub fn ghostty_paste_encode(
-        data: *mut ::std::os::raw::c_char,
+        data: *mut ::core::ffi::c_char,
         data_len: usize,
         bracketed: bool,
-        buf: *mut ::std::os::raw::c_char,
+        buf: *mut ::core::ffi::c_char,
         buf_len: usize,
         out_written: *mut usize,
     ) -> Result::Type;
 }
 pub mod SnapshotDecoderOption {
     #[doc = " Configurable snapshot decoder options.\n\n Options may only be changed before decoding starts. Calling\n ghostty_snapshot_decoder_set() after ghostty_snapshot_decoder_ready() or\n ghostty_snapshot_decoder_decode() returns GHOSTTY_INVALID_VALUE."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Largest non-ground continuation the decoder will accept.\n\n A value of zero accepts only snapshots whose VT parser is in the ground\n state. The decoder default matches the largest built-in APC protocol\n buffer limit, currently 65 MiB.\n\n This is an input validation limit only. It does not configure continuation\n tracking on a terminal returned by the decoder.\n\n Input type: size_t *"]
     pub const MAX_CONTINUATION_BYTES: Type = 0;
     #[doc = " Largest non-ground continuation the decoder will accept.\n\n A value of zero accepts only snapshots whose VT parser is in the ground\n state. The decoder default matches the largest built-in APC protocol\n buffer limit, currently 65 MiB.\n\n This is an input validation limit only. It does not configure continuation\n tracking on a terminal returned by the decoder.\n\n Input type: size_t *"]
@@ -4272,7 +4267,7 @@ pub mod SnapshotDecoderOption {
 }
 pub mod SnapshotDecoderData {
     #[doc = " Queryable snapshot decoder data.\n\n Each variant documents the output pointer type expected by\n ghostty_snapshot_decoder_get()."]
-    pub type Type = ::std::os::raw::c_uint;
+    pub type Type = ::core::ffi::c_uint;
     #[doc = " Invalid data type. Never results in data extraction."]
     pub const INVALID: Type = 0;
     #[doc = " Current maximum accepted continuation size.\n\n This value is available in every non-failed decoder state.\n\n Output type: size_t *"]
@@ -4340,7 +4335,7 @@ unsafe extern "C" {
     pub fn ghostty_snapshot_decoder_set(
         decoder: SnapshotDecoder,
         option: SnapshotDecoderOption::Type,
-        value: *const ::std::os::raw::c_void,
+        value: *const ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -4366,7 +4361,7 @@ unsafe extern "C" {
     pub fn ghostty_snapshot_decoder_get(
         decoder: SnapshotDecoder,
         data: SnapshotDecoderData::Type,
-        out: *mut ::std::os::raw::c_void,
+        out: *mut ::core::ffi::c_void,
     ) -> Result::Type;
 }
 unsafe extern "C" {
@@ -4375,7 +4370,7 @@ unsafe extern "C" {
         decoder: SnapshotDecoder,
         count: usize,
         keys: *const SnapshotDecoderData::Type,
-        values: *mut *mut ::std::os::raw::c_void,
+        values: *mut *mut ::core::ffi::c_void,
         out_written: *mut usize,
     ) -> Result::Type;
 }
