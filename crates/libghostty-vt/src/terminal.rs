@@ -2398,3 +2398,73 @@ mod tests {
         );
     }
 }
+
+/// Soundness reproducers for <https://github.com/Uzaaft/libghostty-rs/issues/74>.
+///
+/// These tests are gated on `cfg(miri)` because they construct the exact shapes
+/// the C API produces and feed them into the safe wrappers, which is UB today.
+/// Run with:
+///
+/// ```sh
+/// cargo +nightly miri test -p libghostty-vt miri_soundness
+/// ```
+///
+/// Both tests currently fail under Miri, demonstrating the UB; they must pass
+/// once the wrappers stop constructing slices and `&str` from unvalidated FFI
+/// input, so they double as regression tests for the fix. Miri's validity
+/// checks do not cover the UTF-8 invariant of `str` itself (verified
+/// empirically against its `char`/`bool` checks), so the second test instead
+/// decodes the invalid `&str`, which drives std's UTF-8 decoder into
+/// `unreachable_unchecked` — a construct Miri does flag.
+#[cfg(all(test, miri))]
+mod miri_soundness {
+    use super::*;
+
+    /// The C trampoline declares `contents: ?[*]const ClipboardContent` and
+    /// sends `contents = NULL, contents_len = 0` for a write carrying no
+    /// representations (e.g. OSC 52 with an empty payload, the documented
+    /// "clear the clipboard" shape). `slice::from_raw_parts` requires a
+    /// non-null pointer even at length zero, so `contents()` is UB here.
+    #[test]
+    fn clipboard_write_with_no_representations() {
+        let raw = ffi::ClipboardWrite {
+            size: std::mem::size_of::<ffi::ClipboardWrite>(),
+            location: ffi::ClipboardLocation::STANDARD,
+            contents: std::ptr::null(),
+            contents_len: 0,
+        };
+        // SAFETY: `raw` outlives the borrow, matching the callback contract.
+        let write = unsafe { ClipboardWrite::from_raw(&raw) };
+        // UB today: from_raw_parts(null, 0), which Miri flags. After the fix
+        // this must yield an empty iterator so hosts can observe "clear".
+        assert_eq!(write.contents().count(), 0);
+    }
+
+    /// OSC 52 payloads are base64-decoded arbitrary bytes ("binary-safe" per
+    /// the C header), but `ClipboardContent` exposes them as `&str` built with
+    /// `str::from_utf8_unchecked` in the sys crate. Miri does not flag the
+    /// invalid `&str` itself (its validity checks skip the UTF-8 invariant of
+    /// `str`), but decoding it relies on that invariant: std's decoder assumes
+    /// valid UTF-8 around its `unwrap_unchecked`/`char::from_u32_unchecked`
+    /// calls, and Miri flags those when the assumption is false.
+    #[test]
+    fn clipboard_content_with_non_utf8_data() {
+        // OSC 52 payload "//4=" base64-decodes to FF FE, which is not UTF-8.
+        let data = [0xFF_u8, 0xFE];
+        let raw = ffi::ClipboardContent {
+            mime: ffi::String::from("text/plain"),
+            data: ffi::String {
+                ptr: data.as_ptr(),
+                len: data.len(),
+            },
+        };
+        // SAFETY: `data` outlives the borrow, matching the callback contract.
+        let content = unsafe { ClipboardContent::from_raw(&raw) };
+        // UB today: decoding the invalid `&str` enters unreachable code in
+        // core::str::validations::next_code_point. After the fix this must
+        // either validate or expose `&[u8]` instead of `&str`. Note: `next()`
+        // is deliberate — `Chars::count()` is specialized to count byte
+        // patterns and never decodes, so it would not observe the violation.
+        let _ = content.data.chars().next();
+    }
+}
