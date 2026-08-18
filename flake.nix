@@ -88,6 +88,11 @@
           text = ''
             cargo miri test --locked -p libghostty-vt-sys --lib
             cargo miri test --locked -p libghostty-vt --lib alloc::tests::
+            # Issue #74 soundness reproducers (both clipboard findings live in
+            # this module). Fails while the callback path is unsound; must pass
+            # after the fix. Miri aborts the test process at the first UB it
+            # finds, so a broken tree reports only the first failing test.
+            cargo miri test --locked -p libghostty-vt --lib miri_soundness
           '';
         };
 
