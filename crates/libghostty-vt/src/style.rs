@@ -3,7 +3,7 @@
 //! A style describes the visual attributes of a terminal cell, including
 //! foreground, background, and underline colors, as well as flags for bold,
 //! italic, underline, and other text decorations.
-use std::{ffi::CStr, mem::MaybeUninit, slice};
+use core::{ffi::CStr, mem::MaybeUninit, slice};
 
 use crate::{
     error::{Error, Result},
@@ -157,7 +157,7 @@ impl TryFrom<ffi::Style> for Style {
 impl From<Style> for ffi::Style {
     fn from(value: Style) -> Self {
         Self {
-            size: std::mem::size_of::<Self>(),
+            size: core::mem::size_of::<Self>(),
             fg_color: value.fg_color.into(),
             bg_color: value.bg_color.into(),
             underline_color: value.underline_color.into(),
@@ -310,10 +310,10 @@ impl Palette {
         let raw_base = base.map(|palette| palette.0.map(ffi::ColorRgb::from));
         let base_ptr = raw_base
             .as_ref()
-            .map_or(std::ptr::null(), |palette| palette.as_ptr());
+            .map_or(core::ptr::null(), |palette| palette.as_ptr());
         let skip_ptr = skip
             .as_ref()
-            .map_or(std::ptr::null(), |mask| &raw const mask.0);
+            .map_or(core::ptr::null(), |mask| &raw const mask.0);
         let mut raw_out = [ffi::ColorRgb::default(); 256];
         let bg: ffi::ColorRgb = background.into();
         let fg: ffi::ColorRgb = foreground.into();
@@ -529,7 +529,7 @@ impl DoubleEndedIterator for X11ColorNamesIter {
     }
 }
 impl ExactSizeIterator for X11ColorNamesIter {}
-impl std::iter::FusedIterator for X11ColorNamesIter {}
+impl core::iter::FusedIterator for X11ColorNamesIter {}
 
 fn x11_color_name_from_entry(entry: &ffi::ColorX11Entry) -> X11ColorName {
     let name = unsafe { CStr::from_ptr(entry.name) };

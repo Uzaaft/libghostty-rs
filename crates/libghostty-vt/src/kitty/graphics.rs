@@ -181,10 +181,7 @@
 //! ```
 //!
 
-#![cfg(feature = "kitty-graphics")]
-
 use std::{
-    cell::RefCell,
     ffi::OsStr,
     mem::{ManuallyDrop, MaybeUninit},
     path::Path,

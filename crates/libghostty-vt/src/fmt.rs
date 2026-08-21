@@ -3,7 +3,7 @@
 //! A formatter captures a reference to a terminal and formatting options.
 //! It can be used repeatedly to produce output that reflects the current
 //! terminal state at the time of each format call.
-use std::{marker::PhantomData, ptr::NonNull};
+use core::{marker::PhantomData, ptr::NonNull};
 
 use crate::{
     alloc::{Allocator, Bytes, Object},
@@ -140,7 +140,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         opts: FormatterOptions<'t, '_>,
     ) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null(), terminal, opts) }
+        unsafe { Self::new_inner(core::ptr::null(), terminal, opts) }
     }
 
     /// Create a formatter for a terminal's active screen.
@@ -161,7 +161,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         terminal: &'t Terminal<'alloc, 'cb>,
         opts: FormatterOptions,
     ) -> Result<Self> {
-        let mut raw: ffi::Formatter = std::ptr::null_mut();
+        let mut raw: ffi::Formatter = core::ptr::null_mut();
 
         let result = unsafe {
             ffi::ghostty_formatter_terminal_new(
@@ -190,17 +190,17 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         let alloc = if let Some(alloc) = alloc {
             alloc.to_raw()
         } else {
-            std::ptr::null()
+            core::ptr::null()
         };
 
-        let mut bytes = std::ptr::null_mut();
+        let mut bytes = core::ptr::null_mut();
         let mut len = 0usize;
         let result = unsafe {
             ffi::ghostty_formatter_format_alloc(
                 self.inner.as_raw(),
                 alloc,
-                std::ptr::from_mut(&mut bytes),
-                std::ptr::from_mut(&mut len),
+                core::ptr::from_mut(&mut bytes),
+                core::ptr::from_mut(&mut len),
             )
         };
         from_result(result)?;
@@ -219,9 +219,9 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         let result = unsafe {
             ffi::ghostty_formatter_format_buf(
                 self.inner.as_raw(),
-                std::ptr::from_mut(buf).cast(),
+                core::ptr::from_mut(buf).cast(),
                 buf.len(),
-                std::ptr::from_mut(&mut len),
+                core::ptr::from_mut(&mut len),
             )
         };
         from_result(result)?;
@@ -237,9 +237,9 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         let result = unsafe {
             ffi::ghostty_formatter_format_buf(
                 self.inner.as_raw(),
-                std::ptr::null_mut(),
+                core::ptr::null_mut(),
                 0,
-                std::ptr::from_mut(&mut len),
+                core::ptr::from_mut(&mut len),
             )
         };
         // This should always fail with OutOfSpace.

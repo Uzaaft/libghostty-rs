@@ -9,7 +9,7 @@
 //! [`Selection`] is a snapshot; the embedder decides whether to render it,
 //! format/copy it, or install it as the terminal's active selection.
 
-use std::{mem::MaybeUninit, time::Duration};
+use core::{mem::MaybeUninit, time::Duration};
 
 use crate::{
     alloc::{Allocator, Object},
@@ -44,7 +44,7 @@ impl<'alloc> Gesture<'alloc> {
     /// Create a new selection gesture instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new selection gesture instance with a custom allocator.
@@ -57,7 +57,7 @@ impl<'alloc> Gesture<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
-        let mut raw: ffi::SelectionGesture = std::ptr::null_mut();
+        let mut raw: ffi::SelectionGesture = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_selection_gesture_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self {
@@ -149,7 +149,7 @@ impl Drop for Gesture<'_> {
         // the selection gesture), and memory-conscious embedders can simply
         // call `reset` to manually reclaim memory if needed.
         unsafe {
-            ffi::ghostty_selection_gesture_free(self.inner.as_raw(), std::ptr::null_mut());
+            ffi::ghostty_selection_gesture_free(self.inner.as_raw(), core::ptr::null_mut());
         }
     }
 }
@@ -163,7 +163,7 @@ impl<'alloc> Event<'alloc> {
         alloc: *const ffi::Allocator,
         ty: ffi::SelectionGestureEventType::Type,
     ) -> Result<Self> {
-        let mut raw: ffi::SelectionGestureEvent = std::ptr::null_mut();
+        let mut raw: ffi::SelectionGestureEvent = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_selection_gesture_event_new(alloc, &raw mut raw, ty) };
         from_result(result)?;
         Ok(Self {
@@ -176,7 +176,7 @@ impl<'alloc> Event<'alloc> {
             ffi::ghostty_selection_gesture_event_set(
                 self.inner.as_raw(),
                 field,
-                std::ptr::from_ref(v).cast(),
+                core::ptr::from_ref(v).cast(),
             )
         };
         from_result(result)?;
@@ -185,7 +185,7 @@ impl<'alloc> Event<'alloc> {
 
     fn unset(&mut self, field: ffi::SelectionGestureEventOption::Type) -> Result<()> {
         let result = unsafe {
-            ffi::ghostty_selection_gesture_event_set(self.inner.as_raw(), field, std::ptr::null())
+            ffi::ghostty_selection_gesture_event_set(self.inner.as_raw(), field, core::ptr::null())
         };
         from_result(result)?;
         Ok(())
@@ -230,7 +230,7 @@ impl<'alloc> PressEvent<'alloc> {
     /// Create a new selection gesture press event instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new selection gesture press event instance with a custom allocator.
@@ -344,7 +344,7 @@ impl<'alloc> ReleaseEvent<'alloc> {
     /// Create a new selection gesture release event instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new selection gesture release event instance with a custom allocator.
@@ -392,7 +392,7 @@ impl<'alloc> DragEvent<'alloc> {
     /// Create a new selection gesture drag event instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new selection gesture drag event instance with a custom allocator.
@@ -472,7 +472,7 @@ impl<'alloc> AutoscrollTickEvent<'alloc> {
     /// Create a new selection gesture autoscroll tick event instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new selection gesture autoscroll tick event instance with a custom allocator.
@@ -555,7 +555,7 @@ impl<'alloc> DeepPressEvent<'alloc> {
     /// Create a new selection gesture deep press event instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new selection gesture deep press event instance with a custom allocator.

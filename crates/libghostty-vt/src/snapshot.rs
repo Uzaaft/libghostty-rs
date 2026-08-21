@@ -79,12 +79,10 @@
 //! ## See also
 //!
 //! [Snapshot format and Zig codec documentation](https://github.com/ghostty-org/ghostty/blob/main/src/terminal/snapshot/main.zig)
-use std::{
-    io::{Read, Write},
-    marker::PhantomData,
-    mem::MaybeUninit,
-    ptr::NonNull,
-};
+use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
+
+#[cfg(feature = "std")]
+use std::io::{Read, Write};
 
 use crate::{
     alloc::{Allocator, Bytes, Object},
@@ -121,6 +119,7 @@ impl Terminal<'_, '_> {
     /// This function returns [`Error::IoError`] if the writer rejects output,
     /// [`Error::LimitExceeded`] if output accounting overflows, or another
     /// error code on failure.
+    #[cfg(feature = "std")]
     pub fn encode_snapshot<W: Write>(&mut self, writer: &mut W) -> Result<()> {
         let writer = crate::io::to_writer(writer);
         let result = unsafe { ffi::ghostty_snapshot_encode(self.inner.as_raw(), writer) };
@@ -140,9 +139,9 @@ impl Terminal<'_, '_> {
         &self,
         alloc: Option<&'a Allocator<'ctx>>,
     ) -> Result<Option<Bytes<'a>>> {
-        let mut out = std::ptr::null_mut();
+        let mut out = core::ptr::null_mut();
         let mut out_len = 0usize;
-        let alloc = alloc.map_or(std::ptr::null(), |v| v.to_raw());
+        let alloc = alloc.map_or(core::ptr::null(), |v| v.to_raw());
 
         let result = unsafe {
             ffi::ghostty_snapshot_encode_alloc(
@@ -190,6 +189,7 @@ impl Terminal<'_, '_> {
 #[derive(Debug)]
 pub struct Decoder<'alloc, 'r> {
     inner: Object<'alloc, ffi::SnapshotDecoderImpl>,
+    alloc: *const ffi::Allocator,
     _phan: PhantomData<&'r mut ffi::Reader>,
 }
 
@@ -201,9 +201,10 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// starvation; nonblocking sources must wait outside the decoder or block
     /// in their callback. Reading zero bytes before a required checkpoint
     /// reports truncated snapshot data as [`Error::InvalidValue`].
+    #[cfg(feature = "std")]
     pub fn new<R: Read>(r: &'r mut R) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null(), r) }
+        unsafe { Self::new_inner(core::ptr::null(), r) }
     }
 
     /// Create a new snapshot decoder that reads from a caller-provided reader
@@ -218,6 +219,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
+    #[cfg(feature = "std")]
     pub fn new_with_alloc<'ctx: 'alloc, R: Read>(
         alloc: &'alloc Allocator<'ctx>,
         r: &'r mut R,
@@ -226,13 +228,15 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
         unsafe { Self::new_inner(alloc.to_raw(), r) }
     }
 
+    #[cfg(feature = "std")]
     unsafe fn new_inner<R: Read>(alloc: *const ffi::Allocator, r: &'r mut R) -> Result<Self> {
         let reader = crate::io::to_reader(r);
-        let mut raw: ffi::SnapshotDecoder = std::ptr::null_mut();
+        let mut raw: ffi::SnapshotDecoder = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_snapshot_decoder_new(alloc, &raw mut raw, reader) };
         from_result(result)?;
         Ok(Self {
             inner: Object::new(raw)?,
+            alloc,
             _phan: PhantomData,
         })
     }
@@ -243,7 +247,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// query [`Decoder::source_offset`] to locate them.
     pub fn new_buf(buf: &'r [u8]) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_buf_inner(std::ptr::null(), buf) }
+        unsafe { Self::new_buf_inner(core::ptr::null(), buf) }
     }
 
     /// Create a new snapshot decoder over a borrowed byte buffer
@@ -263,13 +267,14 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     }
 
     unsafe fn new_buf_inner(alloc: *const ffi::Allocator, buf: &[u8]) -> Result<Self> {
-        let mut raw: ffi::SnapshotDecoder = std::ptr::null_mut();
+        let mut raw: ffi::SnapshotDecoder = core::ptr::null_mut();
         let result = unsafe {
             ffi::ghostty_snapshot_decoder_new_buf(alloc, &raw mut raw, buf.as_ptr(), buf.len())
         };
         from_result(result)?;
         Ok(Self {
             inner: Object::new(raw)?,
+            alloc,
             _phan: PhantomData,
         })
     }
@@ -288,10 +293,10 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// argument or lifecycle error detected before the operation consumes
     /// input does not poison it.    
     pub fn decode<'cb>(self) -> Result<Terminal<'alloc, 'cb>> {
-        let mut raw: ffi::Terminal = std::ptr::null_mut();
+        let mut raw: ffi::Terminal = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_snapshot_decoder_decode(self.inner.as_raw(), &mut raw) };
         from_result(result)?;
-        unsafe { Terminal::from_raw(raw) }
+        unsafe { Terminal::from_raw(self.alloc, raw) }
     }
 
     /// Decode and authenticate the renderable snapshot prefix through READY.
@@ -311,12 +316,12 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// argument or lifecycle error detected before the operation consumes
     /// input does not poison it.    
     pub fn ready<'cb>(self) -> Result<IncrementalDecoder<'alloc, 'r, 'cb>> {
-        let mut raw: ffi::Terminal = std::ptr::null_mut();
+        let mut raw: ffi::Terminal = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_snapshot_decoder_ready(self.inner.as_raw(), &mut raw) };
         from_result(result)?;
         Ok(IncrementalDecoder {
+            terminal: unsafe { Terminal::from_raw(self.alloc, raw)? },
             decoder: self,
-            terminal: unsafe { Terminal::from_raw(raw)? },
         })
     }
 
@@ -341,7 +346,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
             ffi::ghostty_snapshot_decoder_set(
                 self.inner.as_raw(),
                 tag,
-                std::ptr::from_ref(v).cast(),
+                core::ptr::from_ref(v).cast(),
             )
         };
         from_result(result)

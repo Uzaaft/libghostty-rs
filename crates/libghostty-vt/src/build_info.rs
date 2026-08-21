@@ -23,7 +23,7 @@
 //! }
 //! ```
 
-use std::mem::MaybeUninit;
+use core::mem::MaybeUninit;
 
 use crate::{
     error::{Error, Result, from_result},
@@ -88,7 +88,7 @@ pub fn build_version() -> Result<&'static str> {
 
 fn build_info<T>(tag: ffi::BuildInfo::Type) -> Result<T> {
     let mut value = MaybeUninit::zeroed();
-    let result = unsafe { ffi::ghostty_build_info(tag, std::ptr::from_mut(&mut value).cast()) };
+    let result = unsafe { ffi::ghostty_build_info(tag, core::ptr::from_mut(&mut value).cast()) };
     from_result(result)?;
     // SAFETY: Value should be initialized after successful call.
     Ok(unsafe { value.assume_init() })
