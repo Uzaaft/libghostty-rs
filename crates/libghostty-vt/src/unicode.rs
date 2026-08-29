@@ -45,10 +45,13 @@ pub fn codepoint_width(codepoint: char) -> u8 {
 /// each character instead.
 #[must_use]
 pub fn grapheme_width(chars: &[char]) -> (usize, u8) {
-    let codepoints = chars.iter().copied().map(u32::from).collect::<Vec<_>>();
+    // SAFETY: Reinterpreting a slice of `char`s as `u32`s should always be safe,
+    // as `char` has the same underlying layout and alignment as `u32` (with some
+    // bit patterns being illegal), so all valid `char`s are valid `u32`s.
+    // Since we don't allow mutation here, that fact cannot change.
+    let chars_ptr = chars.as_ptr().cast::<u32>();
     let mut width = 0;
-    let consumed = unsafe {
-        ffi::ghostty_unicode_grapheme_width(codepoints.as_ptr(), codepoints.len(), &raw mut width)
-    };
+    let consumed =
+        unsafe { ffi::ghostty_unicode_grapheme_width(chars_ptr, chars.len(), &raw mut width) };
     (consumed, width)
 }

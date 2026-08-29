@@ -1,10 +1,10 @@
 //! Error handling.
-use std::mem::MaybeUninit;
+use core::mem::MaybeUninit;
 
 use crate::ffi;
 
 /// Convenient alias for fallible return values from libghostty-vt.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
 
 /// Possible errors libghostty-vt may return.
 #[derive(Debug, Clone, Copy)]
@@ -24,8 +24,8 @@ pub enum Error {
     LimitExceeded,
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::OutOfMemory => write!(f, "out of memory"),
             Self::InvalidValue => write!(f, "invalid value"),
@@ -38,7 +38,7 @@ impl std::fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl core::error::Error for Error {}
 
 pub(crate) fn from_result(code: ffi::Result::Type) -> Result<()> {
     match code {

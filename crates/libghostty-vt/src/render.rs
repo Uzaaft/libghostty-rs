@@ -1,6 +1,9 @@
 //! Managing [render states](RenderState) of the terminal.
 
-use std::{convert::Into, marker::PhantomData, mem::MaybeUninit};
+use core::{convert::Into, marker::PhantomData, mem::MaybeUninit};
+
+#[cfg(feature = "std")]
+use std::string::String;
 
 use crate::{
     alloc::{Allocator, Object},
@@ -76,7 +79,7 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// ```rust
 /// use libghostty_vt::{RenderState, Terminal};
 ///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # fn main() -> Result<(), Box<dyn core::error::Error>> {
 /// let terminal = Terminal::new(80, 25)?;
 /// let mut render_state = RenderState::new()?;
 ///
@@ -158,7 +161,7 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// use libghostty_vt::{Terminal, RenderState};
 /// use libghostty_vt::style::Underline;
 ///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # fn main() -> Result<(), Box<dyn core::error::Error>> {
 /// # let terminal = Terminal::new(80, 25).unwrap();
 /// # let mut render_state = RenderState::new()?;
 /// use libghostty_vt::render::{RowIterator, CellIterator};
@@ -295,7 +298,7 @@ impl<'alloc> RenderState<'alloc> {
     /// Create a new render state instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new render state instance with a custom allocator.
@@ -308,7 +311,7 @@ impl<'alloc> RenderState<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
-        let mut raw: ffi::RenderState = std::ptr::null_mut();
+        let mut raw: ffi::RenderState = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_render_state_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -409,7 +412,7 @@ impl Snapshot<'_, '_> {
 
     fn set<T>(&self, tag: ffi::RenderStateOption::Type, value: &T) -> Result<()> {
         let result = unsafe {
-            ffi::ghostty_render_state_set(self.0.0.as_raw(), tag, std::ptr::from_ref(value).cast())
+            ffi::ghostty_render_state_set(self.0.0.as_raw(), tag, core::ptr::from_ref(value).cast())
         };
         // Since we manually model every possible query, this should never fail.
         from_result(result)
@@ -511,7 +514,7 @@ impl<'alloc> RowIterator<'alloc> {
     /// Create a new row iterator instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new cell iterator instance with a custom allocator.
@@ -524,7 +527,7 @@ impl<'alloc> RowIterator<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
-        let mut raw: ffi::RenderStateRowIterator = std::ptr::null_mut();
+        let mut raw: ffi::RenderStateRowIterator = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_render_state_row_iterator_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -540,7 +543,7 @@ impl<'alloc> RowIterator<'alloc> {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
                 ffi::RenderStateData::ROW_ITERATOR,
-                std::ptr::from_mut(&mut self.0.ptr).cast(),
+                core::ptr::from_mut(&mut self.0.ptr).cast(),
             )
         };
         from_result(result)?;
@@ -591,7 +594,7 @@ impl RowIteration<'_, '_> {
             ffi::ghostty_render_state_row_set(
                 self.iter.0.as_raw(),
                 tag,
-                std::ptr::from_ref(value).cast(),
+                core::ptr::from_ref(value).cast(),
             )
         };
         from_result(result)
@@ -619,7 +622,7 @@ impl RowIteration<'_, '_> {
             ffi::ghostty_render_state_row_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowData::SELECTION,
-                std::ptr::from_mut(&mut value).cast(),
+                core::ptr::from_mut(&mut value).cast(),
             )
         };
         // Since we manually model every possible query, this should never fail.
@@ -632,7 +635,7 @@ impl<'alloc> CellIterator<'alloc> {
     /// Create a new cell iterator instance.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new cell iterator instance with a custom allocator.
@@ -645,7 +648,7 @@ impl<'alloc> CellIterator<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
-        let mut raw: ffi::RenderStateRowCells = std::ptr::null_mut();
+        let mut raw: ffi::RenderStateRowCells = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_render_state_row_cells_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -661,7 +664,7 @@ impl<'alloc> CellIterator<'alloc> {
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
                 ffi::RenderStateRowData::CELLS,
-                std::ptr::from_mut(&mut self.0.ptr).cast(),
+                core::ptr::from_mut(&mut self.0.ptr).cast(),
             )
         };
         from_result(result)?;
@@ -731,7 +734,7 @@ impl CellIteration<'_, '_> {
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowCellsData::STYLE,
-                std::ptr::from_mut(&mut value).cast(),
+                core::ptr::from_mut(&mut value).cast(),
             )
         };
         from_result(result)?;
@@ -776,6 +779,7 @@ impl CellIteration<'_, '_> {
     /// Get the grapheme codepoints.
     ///
     /// The base codepoint is placed first, followed by any extra codepoints.
+    #[cfg(feature = "std")]
     pub fn graphemes(&self) -> Result<Vec<char>> {
         let len = self.graphemes_len()?;
         let mut graphemes = vec!['\0'; len];
@@ -812,6 +816,7 @@ impl CellIteration<'_, '_> {
     /// codepoints.
     ///
     /// May grow the buffer if more space is required.
+    #[cfg(feature = "std")]
     pub fn graphemes_utf8(&self, buf: &mut String) -> Result<()> {
         // SAFETY: String comes with some very stringent safety requirements,
         // so we'll detail them here. The safety protocol for the C API is
@@ -846,7 +851,7 @@ impl CellIteration<'_, '_> {
                 ffi::ghostty_render_state_row_cells_get(
                     self.iter.0.as_raw(),
                     ffi::RenderStateRowCellsData::GRAPHEMES_UTF8,
-                    std::ptr::from_mut(&mut cbuf).cast(),
+                    core::ptr::from_mut(&mut cbuf).cast(),
                 )
             };
             match result {
@@ -868,7 +873,7 @@ impl CellIteration<'_, '_> {
         // WITHOUT DROPPING THE EXISTING STRING OBJECT (!!)
         // Otherwise, memory corruption, double frees, etc. WILL happen.
         unsafe {
-            std::ptr::write(buf, String::from_raw_parts(cbuf.ptr, cbuf.len, cbuf.cap));
+            core::ptr::write(buf, String::from_raw_parts(cbuf.ptr, cbuf.len, cbuf.cap));
         }
         Ok(())
     }

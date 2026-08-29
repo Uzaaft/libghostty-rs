@@ -42,7 +42,7 @@ impl<'alloc> Parser<'alloc> {
     /// Create a new SGR parser.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new SGR parser with a custom allocator.
@@ -55,7 +55,7 @@ impl<'alloc> Parser<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
-        let mut raw: ffi::SgrParser = std::ptr::null_mut();
+        let mut raw: ffi::SgrParser = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_sgr_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -88,7 +88,7 @@ impl<'alloc> Parser<'alloc> {
                 );
                 seps.as_ptr().cast()
             }
-            None => std::ptr::null(),
+            None => core::ptr::null(),
         };
         let result = unsafe {
             ffi::ghostty_sgr_set_params(self.0.as_raw(), params.as_ptr(), sep, params.len())
@@ -233,8 +233,8 @@ impl From<ffi::SgrUnknown> for Unknown<'_> {
         // which is guaranteed by Rust's mutation XOR sharability property
         // (e.g. one cannot reset the parser when this object still
         // borrows the parser mutably).
-        let full = unsafe { std::slice::from_raw_parts(value.full_ptr, value.full_len) };
-        let partial = unsafe { std::slice::from_raw_parts(value.partial_ptr, value.partial_len) };
+        let full = unsafe { core::slice::from_raw_parts(value.full_ptr, value.full_len) };
+        let partial = unsafe { core::slice::from_raw_parts(value.partial_ptr, value.partial_len) };
         Self { full, partial }
     }
 }

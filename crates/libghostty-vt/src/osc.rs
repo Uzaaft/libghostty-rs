@@ -1,6 +1,6 @@
 //! Handling OSC (Operating System Command) escape sequences.
 
-use std::{marker::PhantomData, mem::MaybeUninit};
+use core::{marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
@@ -21,7 +21,7 @@ impl<'alloc> Parser<'alloc> {
     /// Create a new OSC parser.
     pub fn new() -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(core::ptr::null()) }
     }
 
     /// Create a new OSC parser with a custom allocator.
@@ -34,7 +34,7 @@ impl<'alloc> Parser<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
-        let mut raw: ffi::OscParser = std::ptr::null_mut();
+        let mut raw: ffi::OscParser = core::ptr::null_mut();
         let result = unsafe { ffi::ghostty_osc_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
