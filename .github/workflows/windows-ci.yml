@@ -21,6 +21,14 @@ jobs:
           - name: Windows x86_64 MSVC
             runner: windows-latest
             target: x86_64-pc-windows-msvc
+          # Zig installs the static archive as ghostty-vt-static.lib for every
+          # Windows ABI, so the GNU targets need their own coverage: rustc
+          # resolves static native libraries by a different file name there.
+          # Upstream only builds lib-vt for the GNU ABI; running the tests here
+          # is the first place the GNU static link is actually exercised.
+          - name: Windows x86_64 GNU
+            runner: windows-latest
+            target: x86_64-pc-windows-gnu
     steps:
       - uses: actions/checkout@v4
 

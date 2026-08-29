@@ -6,6 +6,12 @@ use std::process::Command;
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
 const GHOSTTY_COMMIT: &str = "22d13172cde98a0a4dda05d3d6a3fcb0dd8ed018";
 
+/// File name of the static archive on Windows. Ghostty installs it under this
+/// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
+/// the import library for `ghostty-vt.dll`. Validation and link emission must
+/// agree on it, or the build silently links the import library instead.
+const WINDOWS_STATIC_LIB_FILE: &str = "ghostty-vt-static.lib";
+
 #[derive(Clone, Copy)]
 enum LinkMode {
     Dynamic,
@@ -44,7 +50,7 @@ impl LinkMode {
             }
             Self::Static => {
                 if target.contains("windows") {
-                    file_name == "ghostty-vt-static.lib"
+                    file_name == WINDOWS_STATIC_LIB_FILE
                 } else {
                     file_name == "libghostty-vt.a"
                 }
@@ -76,6 +82,9 @@ fn main() {
     }
 
     let link_mode = LinkMode::current();
+    // Cargo always sets TARGET for build scripts, so read it once here and
+    // hand it to whichever path runs rather than re-reading it per call site.
+    let target = env::var("TARGET").expect("TARGET must be set");
 
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_CPU");
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
@@ -91,7 +100,7 @@ fn main() {
     // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
     // test against.
     if env::var_os("GHOSTTY_SOURCE_DIR").is_some() {
-        build_vendored(link_mode);
+        build_vendored(link_mode, &target);
         return;
     }
 
@@ -99,18 +108,17 @@ fn main() {
     // fetching Ghostty. libghostty is pre-1.0, so this crate intentionally does
     // not promise compatibility with every installed C API revision.
     #[cfg(feature = "pkg-config")]
-    if try_pkg_config(link_mode) {
+    if try_pkg_config(link_mode, &target) {
         return;
     }
 
-    build_vendored(link_mode);
+    build_vendored(link_mode, &target);
 }
 
 /// Build libghostty-vt from source via zig. The zig build itself generates
 /// shared and static artifacts plus pkg-config files in `share/pkgconfig/`.
-fn build_vendored(link_mode: LinkMode) {
+fn build_vendored(link_mode: LinkMode, target: &str) {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
-    let target = env::var("TARGET").expect("TARGET must be set");
     let host = env::var("HOST").expect("HOST must be set");
 
     // Locate ghostty source: env override > fetch into OUT_DIR.
@@ -146,7 +154,7 @@ fn build_vendored(link_mode: LinkMode) {
     // native codegen tools ghostty runs mid-build. The xcframework path runs
     // host-native and configures each Apple platform itself, so we build that
     // and pull out the library we need afterwards.
-    let ios_platform = ios_xcframework_platform(&target);
+    let ios_platform = ios_xcframework_platform(target);
     if ios_platform.is_some() {
         // Ghostty only emits the xcframework when zig itself runs on macOS
         // (it shells out to xcodebuild). Without this check a Linux cross
@@ -219,7 +227,7 @@ fn build_vendored(link_mode: LinkMode) {
     // auto-detect the host. iOS builds run host-native inside the xcframework
     // emit, so they must not pass -Dtarget or a global --sysroot.
     if target != host && ios_platform.is_none() {
-        let zig_target = zig_target(&target);
+        let zig_target = zig_target(target);
         build.arg(format!("-Dtarget={zig_target}"));
     }
 
@@ -233,7 +241,7 @@ fn build_vendored(link_mode: LinkMode) {
 
     let lib_dir = install_prefix.join("lib");
     let include_dir = install_prefix.join("include");
-    let search_dirs = library_search_dirs(&target, &install_prefix);
+    let search_dirs = library_search_dirs(target, &install_prefix);
     if ios_platform.is_none() {
         warn_unused_xcframework(&lib_dir);
     }
@@ -250,7 +258,7 @@ fn build_vendored(link_mode: LinkMode) {
                     return false;
                 };
 
-                link_mode.matches_library(&target, file_name)
+                link_mode.matches_library(target, file_name)
             })
     });
     assert!(
@@ -270,18 +278,26 @@ fn build_vendored(link_mode: LinkMode) {
     }
     match link_mode {
         LinkMode::Dynamic => println!("cargo:rustc-link-lib=dylib=ghostty-vt"),
-        LinkMode::Static => {
-            // MSVC resolves `ghostty-vt` to `ghostty-vt.lib`, which is the DLL
-            // import library. Ghostty names the actual static archive
-            // `ghostty-vt-static.lib` to avoid that collision.
-            if target.contains("windows") && target.contains("msvc") {
-                println!("cargo:rustc-link-lib=static=ghostty-vt-static");
-            } else {
-                println!("cargo:rustc-link-lib=static=ghostty-vt");
-            }
-        }
+        LinkMode::Static => emit_static_link_lib(target),
     }
     emit_include_metadata(&[include_dir]);
+}
+
+/// Emit the link directive for the static archive.
+///
+/// Zig names static archives `<name>.lib` on every Windows ABI, so neither
+/// name rustc derives from a plain `static=ghostty-vt` finds the archive
+/// there: MSVC resolves it to `ghostty-vt.lib`, the DLL import library, which
+/// links but leaves a load-time dependency on `ghostty-vt.dll`; the GNU
+/// targets look for `libghostty-vt.a`, which no Windows build produces, and
+/// fail outright. Link the exact file name Ghostty installs instead, which
+/// `+verbatim` passes through to rustc's archive lookup untouched.
+fn emit_static_link_lib(target: &str) {
+    if target.contains("windows") {
+        println!("cargo:rustc-link-lib=static:+verbatim={WINDOWS_STATIC_LIB_FILE}");
+    } else {
+        println!("cargo:rustc-link-lib=static=ghostty-vt");
+    }
 }
 
 fn warn_unused_xcframework(lib_dir: &Path) {
@@ -295,7 +311,7 @@ fn warn_unused_xcframework(lib_dir: &Path) {
 }
 
 #[cfg(feature = "pkg-config")]
-fn try_pkg_config(link_mode: LinkMode) -> bool {
+fn try_pkg_config(link_mode: LinkMode, target: &str) -> bool {
     let mut config = pkg_config::Config::new();
     let lib = match link_mode {
         LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
@@ -310,14 +326,14 @@ fn try_pkg_config(link_mode: LinkMode) -> bool {
     };
 
     if let LinkMode::Static = link_mode {
-        emit_static_pkg_config_metadata(&lib);
+        emit_static_pkg_config_metadata(&lib, target);
     }
     emit_include_metadata(&lib.include_paths);
     true
 }
 
 #[cfg(feature = "pkg-config")]
-fn emit_static_pkg_config_metadata(lib: &pkg_config::Library) {
+fn emit_static_pkg_config_metadata(lib: &pkg_config::Library, target: &str) {
     for path in &lib.link_paths {
         println!("cargo:rustc-link-search=native={}", path.display());
     }
@@ -333,7 +349,7 @@ fn emit_static_pkg_config_metadata(lib: &pkg_config::Library) {
         println!("cargo:rustc-link-lib=framework={framework}");
     }
 
-    println!("cargo:rustc-link-lib=static=ghostty-vt");
+    emit_static_link_lib(target);
     for library in &lib.libs {
         if library != "ghostty-vt" {
             println!("cargo:rustc-link-lib={library}");
