@@ -54,3 +54,10 @@ jobs:
 
       - name: Test libghostty-vt
         run: cargo test -p libghostty-vt --lib --target ${{ matrix.target }}
+
+      # Upstream exercises both link modes (c-vt-static links the archive,
+      # c-vt and most other examples link the shared library), so cover the
+      # dynamic path too. Cargo puts the build script's link-search dirs on
+      # PATH, so the test binaries find ghostty-vt.dll at runtime.
+      - name: Test libghostty-vt (link-dynamic)
+        run: cargo test -p libghostty-vt --lib --features link-dynamic --target ${{ matrix.target }}
