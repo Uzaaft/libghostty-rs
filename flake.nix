@@ -191,6 +191,19 @@
               cargoTestExtraArgs = "--workspace --all-targets";
             }
           );
+
+          # Upstream ghostty exercises both link modes in CI, so run the test
+          # suite against the shared library as well. Cargo adds the emitted
+          # link-search paths to the test binaries' library path, so the
+          # ghostty .so is found at runtime.
+          cargo-test-dynamic = craneLib.cargoTest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoExtraArgs = "${commonArgs.cargoExtraArgs} --features libghostty-vt-sys/link-dynamic";
+              cargoTestExtraArgs = "--workspace --all-targets";
+            }
+          );
         };
 
         apps.miri = flake-utils.lib.mkApp {
