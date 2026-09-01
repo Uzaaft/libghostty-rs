@@ -33,6 +33,22 @@ where
 }
 
 impl bindings::String {
+    /// Borrow the string as raw bytes. A null pointer is treated as an empty
+    /// string; the C API does not promise a non-null pointer for zero-length
+    /// strings, and `slice::from_raw_parts` requires one even at length zero.
+    ///
+    /// # Safety
+    ///
+    /// The caller must uphold that the associated lifetime is valid
+    /// with the given context behind the FFI string.
+    pub unsafe fn to_bytes<'a>(self) -> &'a [u8] {
+        if self.ptr.is_null() {
+            return &[];
+        }
+        // SAFETY: To be upheld by caller
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+
     /// # Safety
     ///
     /// The caller must uphold that the associated lifetime is valid
@@ -40,8 +56,7 @@ impl bindings::String {
     /// valid UTF-8 data.
     pub unsafe fn to_str<'a>(self) -> &'a str {
         // SAFETY: To be upheld by caller
-        let slice = unsafe { std::slice::from_raw_parts(self.ptr, self.len) };
-        unsafe { std::str::from_utf8_unchecked(slice) }
+        unsafe { std::str::from_utf8_unchecked(self.to_bytes()) }
     }
 }
 
