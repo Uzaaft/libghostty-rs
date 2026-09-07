@@ -1232,6 +1232,8 @@ impl Mode {
     pub const SAVE_CURSOR: Self = Self::new(1048, ModeKind::Dec);
     pub const ALT_SCREEN_SAVE: Self = Self::new(1049, ModeKind::Dec);
     pub const BRACKETED_PASTE: Self = Self::new(2004, ModeKind::Dec);
+    /// Kitty clipboard protocol paste events.
+    pub const PASTE_EVENTS: Self = Self::new(5522, ModeKind::Dec);
     pub const SYNC_OUTPUT: Self = Self::new(2026, ModeKind::Dec);
     pub const GRAPHEME_CLUSTER: Self = Self::new(2027, ModeKind::Dec);
     pub const COLOR_SCHEME_REPORT: Self = Self::new(2031, ModeKind::Dec);
