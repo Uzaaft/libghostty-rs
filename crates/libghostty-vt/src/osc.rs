@@ -143,6 +143,10 @@ impl<'p> Command<'p, '_> {
             Type::CONEMU_XTERM_EMULATION => CommandType::ConemuXtermEmulation,
             Type::CONEMU_COMMENT => CommandType::ConemuComment,
             Type::KITTY_TEXT_SIZING => CommandType::KittyTextSizing,
+            Type::KITTY_CLIPBOARD_PROTOCOL => CommandType::KittyClipboardProtocol,
+            Type::KITTY_DND_PROTOCOL => CommandType::KittyDndProtocol,
+            Type::CONTEXT_SIGNAL => CommandType::ContextSignal,
+            Type::KITTY_DESKTOP_NOTIFICATION => CommandType::KittyDesktopNotification,
 
             _ => return None,
         })
@@ -195,4 +199,8 @@ pub enum CommandType<'p> {
     ConemuXtermEmulation,
     ConemuComment,
     KittyTextSizing,
+    KittyClipboardProtocol,
+    KittyDndProtocol,
+    ContextSignal,
+    KittyDesktopNotification,
 }
