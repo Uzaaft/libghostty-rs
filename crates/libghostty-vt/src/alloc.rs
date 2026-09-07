@@ -405,9 +405,11 @@ unsafe fn get_allocator<'a, A: alloc::Allocator>(ptr: *mut c_void) -> Option<&'a
 
 /// Custom allocators for tests that need to observe or constrain what
 /// libghostty allocates.
-#[cfg(all(test, not(miri), feature = "kitty-graphics", feature = "png"))]
+#[cfg(all(test, not(miri)))]
 pub(crate) mod testing {
-    use std::{cell::Cell, ffi::c_void};
+    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
+    use std::cell::Cell;
+    use std::ffi::c_void;
 
     use super::Allocator;
     use crate::ffi;
@@ -425,6 +427,7 @@ pub(crate) mod testing {
         unsafe { Allocator::from_raw(&raw const raw) }
     }
 
+    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     fn layout(len: usize, alignment: u8) -> std::alloc::Layout {
         std::alloc::Layout::from_size_align(len, 1 << alignment).expect("valid layout")
     }
@@ -455,11 +458,13 @@ pub(crate) mod testing {
 
     /// Refuses any allocation larger than `cap` bytes and records the largest
     /// request, like the limit libghostty places on some callbacks.
+    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     pub(crate) struct Capped {
         cap: usize,
         largest_request: Cell<usize>,
     }
 
+    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     impl Capped {
         pub(crate) fn new(cap: usize) -> Self {
             Self {
@@ -484,6 +489,7 @@ pub(crate) mod testing {
         }
     }
 
+    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     unsafe extern "C" fn capped_alloc(
         ctx: *mut c_void,
         len: usize,
@@ -502,6 +508,7 @@ pub(crate) mod testing {
         unsafe { std::alloc::alloc(layout(len, alignment)).cast() }
     }
 
+    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     unsafe extern "C" fn heap_free(
         _ctx: *mut c_void,
         mem: *mut c_void,
@@ -511,6 +518,108 @@ pub(crate) mod testing {
     ) {
         // SAFETY: `mem` was allocated from the global heap with this layout.
         unsafe { std::alloc::dealloc(mem.cast(), layout(len, alignment)) };
+    }
+
+    /// An allocator that turns use-after-free inside libghostty into a
+    /// deterministic crash.
+    ///
+    /// `AddressSanitizer` doesn't instrument Zig code, so it can't see
+    /// libghostty reading memory it already freed. Instead, every allocation
+    /// gets its own mapping, and freeing it replaces the mapping with an
+    /// inaccessible one, so the pages are released but the address can't be
+    /// reused either.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub(crate) struct Guard;
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    impl Guard {
+        pub(crate) fn allocator() -> Allocator<'static> {
+            static VTABLE: ffi::AllocatorVtable = ffi::AllocatorVtable {
+                alloc: Some(guard_pages::alloc),
+                resize: Some(no_resize),
+                remap: Some(no_remap),
+                free: Some(guard_pages::free),
+            };
+            allocator(&(), &VTABLE)
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    mod guard_pages {
+        use std::ffi::{c_int, c_void};
+
+        unsafe extern "C" {
+            fn mmap(
+                addr: *mut c_void,
+                len: usize,
+                prot: c_int,
+                flags: c_int,
+                fd: c_int,
+                offset: i64,
+            ) -> *mut c_void;
+        }
+
+        const PROT_NONE: c_int = 0;
+        const PROT_READ_WRITE: c_int = 0x1 | 0x2;
+        const MAP_PRIVATE: c_int = 0x2;
+        const MAP_FIXED: c_int = 0x10;
+        #[cfg(target_os = "linux")]
+        const MAP_ANON: c_int = 0x20;
+        #[cfg(target_os = "macos")]
+        const MAP_ANON: c_int = 0x1000;
+        const MAP_FAILED: *mut c_void = usize::MAX as *mut c_void;
+        // Every page size we run on is a multiple of this, so mappings are
+        // always aligned at least this much.
+        const PAGE: usize = 4096;
+
+        pub(super) unsafe extern "C" fn alloc(
+            _ctx: *mut c_void,
+            len: usize,
+            alignment: u8,
+            _ret_addr: usize,
+        ) -> *mut c_void {
+            if 1usize << alignment > PAGE {
+                return std::ptr::null_mut();
+            }
+            // SAFETY: A fresh anonymous mapping has no preconditions.
+            let mem = unsafe {
+                mmap(
+                    std::ptr::null_mut(),
+                    len.max(1),
+                    PROT_READ_WRITE,
+                    MAP_PRIVATE | MAP_ANON,
+                    -1,
+                    0,
+                )
+            };
+            if mem == MAP_FAILED {
+                std::ptr::null_mut()
+            } else {
+                mem
+            }
+        }
+
+        pub(super) unsafe extern "C" fn free(
+            _ctx: *mut c_void,
+            mem: *mut c_void,
+            len: usize,
+            _alignment: u8,
+            _ret_addr: usize,
+        ) {
+            // SAFETY: `mem` is the start of a mapping of at least `len` bytes
+            // made by `alloc`, and nothing may use it after it is freed.
+            let result = unsafe {
+                mmap(
+                    mem,
+                    len.max(1),
+                    PROT_NONE,
+                    MAP_PRIVATE | MAP_ANON | MAP_FIXED,
+                    -1,
+                    0,
+                )
+            };
+            assert_eq!(result, mem, "remapping freed memory failed");
+        }
     }
 }
 
