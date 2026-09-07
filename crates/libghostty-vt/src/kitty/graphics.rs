@@ -947,12 +947,12 @@ pub trait DecodePng: 'static {
 /// A PNG decoder for [`set_png_decoder`] using the [`png`] crate.
 ///
 /// ```rust
-/// use ghostty::kitty::graphics;
+/// use libghostty_vt::kitty::graphics;
 ///
-/// graphics::set_png_decoder(RustPngDecoder::new());
+/// graphics::set_png_decoder(Some(Box::new(graphics::RustPngDecoder::default()))).unwrap();
 /// ```
 #[cfg(all(feature = "kitty-graphics", feature = "png"))]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct RustPngDecoder {
     buf: Vec<u8>,
 }
@@ -963,29 +963,40 @@ impl DecodePng for RustPngDecoder {
         alloc: &'alloc Allocator<'_>,
         data: &[u8],
     ) -> Option<DecodedImage<'alloc>> {
-        use png::{Decoder, Transformations};
+        use png::{ColorType, Decoder, Transformations};
         use std::io::Cursor;
 
         let mut decoder = Decoder::new(Cursor::new(data));
 
         // libghostty only accepts RGBA8 data, so we have to apply some
         // transformations to accept images in other formats, namely
-        // expanding palette and grayscale colors to RGBA8 and stripping
+        // expanding palette colors, adding alpha, and stripping
         // 16-bit color depth information back down into 8-bit.
         decoder.set_transformations(Transformations::ALPHA | Transformations::STRIP_16);
 
         let mut frame = decoder.read_info().ok()?;
         let buf_size = frame.output_buffer_size()?;
-        if buf_size > self.buf.capacity() {
-            self.buf.reserve(buf_size - self.buf.capacity());
-        }
-        self.buf.fill(0);
+        // The decoder needs initialized writable bytes, not just reserved capacity.
+        self.buf.resize(buf_size, 0);
 
         let info = frame.next_frame(&mut self.buf).ok()?;
 
-        let mut bytes = Bytes::new_with_alloc(alloc, info.buffer_size()).ok()?;
-        bytes.copy_from_slice(&self.buf[..info.buffer_size()]);
         frame.finish().ok()?;
+        let pixels = (info.width as usize).checked_mul(info.height as usize)?;
+        let rgba_len = pixels.checked_mul(4)?;
+        let decoded = &self.buf[..info.buffer_size()];
+        let mut bytes = Bytes::new_with_alloc(alloc, rgba_len).ok()?;
+        match info.color_type {
+            ColorType::Rgba if decoded.len() == rgba_len => bytes.copy_from_slice(decoded),
+            ColorType::GrayscaleAlpha if decoded.len() == pixels.checked_mul(2)? => {
+                // ALPHA expands palettes and supplies alpha, but keeps grayscale
+                // as two channels. Replicate luminance explicitly for RGBA8.
+                for (source, target) in decoded.chunks_exact(2).zip(bytes.chunks_exact_mut(4)) {
+                    target.copy_from_slice(&[source[0], source[0], source[0], source[1]]);
+                }
+            }
+            _ => return None,
+        }
 
         Some(DecodedImage {
             width: info.width,
@@ -1017,5 +1028,55 @@ impl From<DecodedImage<'_>> for ffi::SysImage {
             data: value.data.as_mut_ptr(),
             data_len: value.data.len(),
         }
+    }
+}
+
+#[cfg(all(test, not(miri), feature = "kitty-graphics", feature = "png"))]
+mod png_decoder_tests {
+    use super::*;
+
+    #[test]
+    fn decoder_expands_grayscale_to_rgba() {
+        for (color, pixels, expected) in [
+            (png::ColorType::Grayscale, vec![128], [128, 128, 128, 255]),
+            (
+                png::ColorType::GrayscaleAlpha,
+                vec![64, 96],
+                [64, 64, 64, 96],
+            ),
+        ] {
+            let mut encoded = Vec::new();
+            {
+                let mut encoder = png::Encoder::new(&mut encoded, 1, 1);
+                encoder.set_color(color);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .unwrap()
+                    .write_image_data(&pixels)
+                    .unwrap();
+            }
+            let decoded = RustPngDecoder::default()
+                .decode_png(&Allocator::GLOBAL, &encoded)
+                .unwrap();
+            assert_eq!(&*decoded.data, &expected);
+        }
+    }
+
+    #[test]
+    fn default_decoder_reads_rgba_pixels() {
+        let pixels = [255, 0, 128, 255];
+        let mut encoded = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut encoded, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&pixels).unwrap();
+        }
+        let mut decoder = RustPngDecoder::default();
+        let decoded = decoder.decode_png(&Allocator::GLOBAL, &encoded).unwrap();
+        assert_eq!((decoded.width, decoded.height), (1, 1));
+        assert_eq!(&*decoded.data, &pixels);
     }
 }
