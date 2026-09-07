@@ -1171,34 +1171,9 @@ impl SelectionState<'_> {
                 CursorIcon::Text
             }
         } else {
-            Self::cursor_icon(terminal.mouse_shape()?)
+            CursorIcon::Default
         });
         Ok(())
-    }
-
-    /// The closest macroquad cursor for a pointer shape a program asked for.
-    fn cursor_icon(shape: mouse::Shape) -> CursorIcon {
-        use mouse::Shape;
-        match shape {
-            Shape::Help => CursorIcon::Help,
-            Shape::Pointer | Shape::Alias | Shape::Copy | Shape::Grab | Shape::Grabbing => {
-                CursorIcon::Pointer
-            }
-            Shape::Progress | Shape::Wait => CursorIcon::Wait,
-            Shape::Cell | Shape::Crosshair => CursorIcon::Crosshair,
-            Shape::Text | Shape::VerticalText => CursorIcon::Text,
-            Shape::Move | Shape::AllScroll => CursorIcon::Move,
-            Shape::NoDrop | Shape::NotAllowed => CursorIcon::NotAllowed,
-            Shape::ColResize | Shape::EResize | Shape::WResize | Shape::EwResize => {
-                CursorIcon::EWResize
-            }
-            Shape::RowResize | Shape::NResize | Shape::SResize | Shape::NsResize => {
-                CursorIcon::NSResize
-            }
-            Shape::NeResize | Shape::SwResize | Shape::NeswResize => CursorIcon::NESWResize,
-            Shape::NwResize | Shape::SeResize | Shape::NwseResize => CursorIcon::NWSEResize,
-            _ => CursorIcon::Default,
-        }
     }
 }
 
