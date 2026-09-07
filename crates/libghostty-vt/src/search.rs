@@ -3,6 +3,22 @@
 //! A search is bound to one terminal, but borrows it only during operations.
 //! Mutate the terminal normally between feeds. Match snapshots borrow both the
 //! search and its terminal so their untracked page references cannot be invalidated.
+//!
+//! ```
+//! use libghostty_vt::{Terminal, search::{Search, MatchBuffer}};
+//! let mut terminal = Terminal::new(80, 24).unwrap();
+//! let mut search = Search::new(&mut terminal).unwrap();
+//! let mut storage = MatchBuffer::new();
+//! search.set_needle(&mut terminal, b"hello").unwrap();
+//! terminal.vt_write(b"hello world");
+//! search.run(&mut terminal).unwrap();
+//! let snapshot = search.snapshot(&mut terminal).unwrap();
+//! for selected in snapshot.matches(&mut storage).unwrap() {
+//!     selected.start().cell().unwrap();
+//! }
+//! // Once match borrows end, terminal edits and storage reuse are allowed again.
+//! terminal.resize(100, 30, 8, 16).unwrap();
+//! ```
 
 use std::rc::Rc;
 
@@ -286,46 +302,135 @@ impl<'ta: 'cb, 'cb> Snapshot<'_, '_, 'ta, 'cb> {
         Ok(from_optional_result(code, raw)?.map(|raw| unsafe { Selection::from_raw(raw) }))
     }
 
-    fn read_matches(&self, key: ffi::SearchData::Type) -> Result<Vec<Selection<'_>>> {
-        let mut buffer = ffi::SelectionBuffer::default();
-        let code = unsafe {
-            ffi::ghostty_search_get(
-                self.search.inner.as_raw(),
-                key,
-                std::ptr::from_mut(&mut buffer).cast(),
-            )
-        };
-        if code != ffi::Result::OUT_OF_SPACE {
+    fn read_matches<'s>(
+        &'s self,
+        storage: &'s mut MatchBuffer,
+        key: ffi::SearchData::Type,
+    ) -> Result<Matches<'s>> {
+        loop {
+            let mut buffer = ffi::SelectionBuffer {
+                ptr: storage.inner.as_mut_ptr(),
+                cap: storage.inner.len(),
+                len: 0,
+            };
+            let code = unsafe {
+                ffi::ghostty_search_get(
+                    self.search.inner.as_raw(),
+                    key,
+                    std::ptr::from_mut(&mut buffer).cast(),
+                )
+            };
+            if code == ffi::Result::OUT_OF_SPACE {
+                // A size query is only needed when the initialized storage is
+                // too small. Existing capacity is reused on subsequent frames.
+                if buffer.len <= storage.inner.len() {
+                    return Err(Error::InvalidValue);
+                }
+                storage
+                    .inner
+                    .resize(buffer.len, ffi::sized!(ffi::Selection));
+                continue;
+            }
             from_result(code)?;
+            // Never expose old entries after a shorter result or failed read.
+            let values = storage.inner.get(..buffer.len).ok_or(Error::InvalidValue)?;
+            return Ok(Matches {
+                inner: values.iter(),
+            });
         }
-        // Initialize every sized output. The second call runs without terminal
-        // mutation, so the required capacity cannot increase between calls.
-        let mut values = vec![ffi::sized!(ffi::Selection); buffer.len];
-        buffer.ptr = values.as_mut_ptr();
-        buffer.cap = values.len();
-        from_result(unsafe {
-            ffi::ghostty_search_get(
-                self.search.inner.as_raw(),
-                key,
-                std::ptr::from_mut(&mut buffer).cast(),
-            )
-        })?;
-        values.truncate(buffer.len);
-        Ok(values
-            .into_iter()
-            .map(|raw| unsafe { Selection::from_raw(raw) })
-            .collect())
     }
-    /// Borrow all matches in newest-to-oldest order.
-    pub fn matches(&self) -> Result<Vec<Selection<'_>>> {
-        self.read_matches(ffi::SearchData::MATCHES)
+
+    /// Read all matches in newest-to-oldest order, reusing caller-owned storage.
+    /// The returned iterator and its selections borrow both this snapshot and
+    /// the storage; neither can be reused while those selections remain in use.
+    pub fn matches<'s>(&'s self, storage: &'s mut MatchBuffer) -> Result<Matches<'s>> {
+        self.read_matches(storage, ffi::SearchData::MATCHES)
     }
-    /// Borrow matches on pages covering the viewport.
+
+    /// Read matches on pages covering the viewport, reusing caller-owned storage.
     /// Matches sharing those pages can extend beyond the visible rows.
-    pub fn viewport_matches(&self) -> Result<Vec<Selection<'_>>> {
-        self.read_matches(ffi::SearchData::VIEWPORT_MATCHES)
+    pub fn viewport_matches<'s>(&'s self, storage: &'s mut MatchBuffer) -> Result<Matches<'s>> {
+        self.read_matches(storage, ffi::SearchData::VIEWPORT_MATCHES)
     }
 }
+
+/// Reusable storage for search match snapshots.
+///
+/// Keep one buffer across refreshes. Its raw page references are private and
+/// can only be read through a freshly populated [`Matches`] view. The buffer
+/// itself may outlive the terminal: dropping stale raw values does not dereference
+/// them, and every returned view is bounded by the new snapshot's lifetime.
+#[derive(Debug, Default)]
+pub struct MatchBuffer {
+    inner: Vec<ffi::Selection>,
+}
+
+impl MatchBuffer {
+    /// Create empty storage; it grows when a search returns more matches.
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// An iterator over freshly read matches, borrowing their snapshot and storage.
+///
+/// A selection cannot survive its terminal:
+///
+/// ```compile_fail,E0505
+/// use libghostty_vt::{Terminal, search::{Search, MatchBuffer}};
+/// let mut terminal = Terminal::new(8, 2).unwrap();
+/// let mut search = Search::new(&mut terminal).unwrap();
+/// let mut storage = MatchBuffer::new();
+/// let snapshot = search.snapshot(&mut terminal).unwrap();
+/// let selected = snapshot.matches(&mut storage).unwrap().next().unwrap();
+/// drop(terminal);
+/// selected.start().cell().unwrap();
+/// ```
+///
+/// Reusing storage cannot overwrite a live selection:
+///
+/// ```compile_fail,E0499
+/// use libghostty_vt::{Terminal, search::{Search, MatchBuffer}};
+/// let mut terminal = Terminal::new(8, 2).unwrap();
+/// let mut search = Search::new(&mut terminal).unwrap();
+/// let mut storage = MatchBuffer::new();
+/// let snapshot = search.snapshot(&mut terminal).unwrap();
+/// let selected = snapshot.matches(&mut storage).unwrap().next().unwrap();
+/// snapshot.viewport_matches(&mut storage).unwrap();
+/// selected.start().cell().unwrap();
+/// ```
+#[derive(Debug)]
+pub struct Matches<'s> {
+    inner: std::slice::Iter<'s, ffi::Selection>,
+}
+
+impl<'s> Iterator for Matches<'s> {
+    type Item = Selection<'s>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // SAFETY: Only Snapshot::read_matches constructs this iterator, with its
+        // lifetime bounded by both the terminal snapshot and the output storage.
+        self.inner
+            .next()
+            .map(|raw| unsafe { Selection::from_raw(*raw) })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for Matches<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        // SAFETY: The same snapshot lifetime applies when traversing backwards.
+        self.inner
+            .next_back()
+            .map(|raw| unsafe { Selection::from_raw(*raw) })
+    }
+}
+
+impl ExactSizeIterator for Matches<'_> {}
+impl std::iter::FusedIterator for Matches<'_> {}
 
 impl Drop for Search<'_> {
     fn drop(&mut self) {
@@ -344,6 +449,7 @@ mod tests {
         let mut terminal = Terminal::new(30, 4).unwrap();
         terminal.vt_write(b"Hello hello\r\nother");
         let mut search = Search::new(&mut terminal).unwrap();
+        let mut storage = MatchBuffer::new();
         assert_eq!(search.status().unwrap(), Status::Complete);
         assert!(!search.select_next(&mut terminal).unwrap());
         search.set_needle(&mut terminal, b"HELLO").unwrap();
@@ -354,7 +460,7 @@ mod tests {
             search
                 .snapshot(&mut terminal)
                 .unwrap()
-                .matches()
+                .matches(&mut storage)
                 .unwrap()
                 .len(),
             2
@@ -378,7 +484,7 @@ mod tests {
             search
                 .snapshot(&mut terminal)
                 .unwrap()
-                .viewport_matches()
+                .viewport_matches(&mut storage)
                 .unwrap()
                 .len(),
             3
@@ -389,19 +495,35 @@ mod tests {
         search.run(&mut terminal).unwrap();
         assert_eq!(search.total_matches().unwrap(), 3);
         let snapshot = search.snapshot(&mut terminal).unwrap();
-        for selected in snapshot.matches().unwrap() {
+        for selected in snapshot.matches(&mut storage).unwrap() {
             selected.start().cell().unwrap();
             selected.end().cell().unwrap();
         }
+        let allocation = storage.inner.as_ptr();
+        let capacity = storage.inner.capacity();
         search.set_needle(&mut terminal, b"").unwrap();
         assert!(
             search
                 .snapshot(&mut terminal)
                 .unwrap()
-                .matches()
+                .matches(&mut storage)
                 .unwrap()
-                .is_empty()
+                .len()
+                == 0
         );
         assert_eq!(search.needle().unwrap(), None);
+        search.set_needle(&mut terminal, b"hello").unwrap();
+        search.run(&mut terminal).unwrap();
+        assert_eq!(
+            search
+                .snapshot(&mut terminal)
+                .unwrap()
+                .matches(&mut storage)
+                .unwrap()
+                .len(),
+            3
+        );
+        assert_eq!(storage.inner.as_ptr(), allocation);
+        assert_eq!(storage.inner.capacity(), capacity);
     }
 }

@@ -138,8 +138,24 @@ mod native_model {
         key: ffi::SearchData::Type,
         out: *mut c_void,
     ) -> ffi::Result::Type {
-        assert_eq!(key, ffi::SearchData::SELECTED_MATCH);
         let state = unsafe { &*search.cast::<NativeSearch>() };
+        if matches!(
+            key,
+            ffi::SearchData::MATCHES | ffi::SearchData::VIEWPORT_MATCHES
+        ) {
+            let buffer = unsafe { &mut *out.cast::<ffi::SelectionBuffer>() };
+            buffer.len = usize::from(state.last_selection.is_some());
+            if buffer.cap < buffer.len {
+                return ffi::Result::OUT_OF_SPACE;
+            }
+            if let Some(selection) = state.last_selection {
+                unsafe {
+                    *buffer.ptr = selection;
+                }
+            }
+            return ffi::Result::SUCCESS;
+        }
+        assert_eq!(key, ffi::SearchData::SELECTED_MATCH);
         if !state.selected {
             return ffi::Result::NO_VALUE;
         }
@@ -257,4 +273,43 @@ fn multiple_searches_share_identity_and_detach_on_terminal_drop() {
     drop(terminal);
     drop(first);
     drop(second);
+}
+
+#[test]
+fn match_storage_reuses_only_fresh_snapshots() {
+    use libghostty_vt::search::MatchBuffer;
+    let mut storage = MatchBuffer::new();
+    let mut terminal = Terminal::new(8, 2).unwrap();
+    let mut search = fixture(&mut terminal);
+    {
+        let snapshot = search.snapshot(&mut terminal).unwrap();
+        let mut matches = snapshot.matches(&mut storage).unwrap();
+        assert_eq!(matches.len(), 1);
+        matches.next_back().unwrap().start().cell().unwrap();
+        assert!(matches.next().is_none());
+        assert!(matches.next_back().is_none());
+    }
+    search.set_needle(&mut terminal, b"").unwrap();
+    assert_eq!(
+        search
+            .snapshot(&mut terminal)
+            .unwrap()
+            .matches(&mut storage)
+            .unwrap()
+            .len(),
+        0
+    );
+    drop(terminal);
+    drop(search);
+    // Storage still contains raw values from the old terminal. A new read must
+    // overwrite them before handing out references bounded by this new owner.
+    let mut terminal = Terminal::new(8, 2).unwrap();
+    let mut search = fixture(&mut terminal);
+    let snapshot = search.snapshot(&mut terminal).unwrap();
+    let selected = snapshot
+        .viewport_matches(&mut storage)
+        .unwrap()
+        .next()
+        .unwrap();
+    selected.start().cell().unwrap();
 }
