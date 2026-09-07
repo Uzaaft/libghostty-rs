@@ -423,9 +423,7 @@ unsafe fn get_allocator<'a, A: alloc::Allocator>(ptr: *mut c_void) -> Option<&'a
 /// libghostty allocates.
 #[cfg(all(test, not(miri)))]
 pub(crate) mod testing {
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
-    use std::cell::Cell;
-    use std::ffi::c_void;
+    use std::{cell::Cell, ffi::c_void};
 
     use super::Allocator;
     use crate::ffi;
@@ -443,7 +441,6 @@ pub(crate) mod testing {
         unsafe { Allocator::from_raw(&raw const raw) }
     }
 
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     fn layout(len: usize, alignment: u8) -> std::alloc::Layout {
         std::alloc::Layout::from_size_align(len, 1 << alignment).expect("valid layout")
     }
@@ -474,13 +471,11 @@ pub(crate) mod testing {
 
     /// Refuses any allocation larger than `cap` bytes and records the largest
     /// request, like the limit libghostty places on some callbacks.
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     pub(crate) struct Capped {
         cap: usize,
         largest_request: Cell<usize>,
     }
 
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     impl Capped {
         pub(crate) fn new(cap: usize) -> Self {
             Self {
@@ -500,12 +495,12 @@ pub(crate) mod testing {
         }
 
         /// The largest allocation requested so far, including refused ones.
+        #[cfg(all(feature = "kitty-graphics", feature = "png"))]
         pub(crate) fn largest_request(&self) -> usize {
             self.largest_request.get()
         }
     }
 
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     unsafe extern "C" fn capped_alloc(
         ctx: *mut c_void,
         len: usize,
@@ -524,7 +519,6 @@ pub(crate) mod testing {
         unsafe { std::alloc::alloc(layout(len, alignment)).cast() }
     }
 
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     unsafe extern "C" fn heap_free(
         _ctx: *mut c_void,
         mem: *mut c_void,
