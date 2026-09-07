@@ -302,6 +302,44 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         unsafe { ffi::ghostty_terminal_vt_write(self.inner.as_raw(), data.as_ptr(), data.len()) }
     }
 
+    /// Write VT-encoded data, but only the shortest prefix needed to reach
+    /// ground.
+    ///
+    /// Ground is when the stream isn't in the middle of any type of sequence:
+    /// UTF-8, ESC, CSI, OSC, etc. It is the stateless point of the stream.
+    ///
+    /// This is useful to know because it is a point at which you can safely
+    /// insert out-of-band VT sequences. For example, while reading from a pty
+    /// if you want to make your own changes, you can wait until the pty input
+    /// reaches ground, then write yours.
+    ///
+    /// If the stream is already at ground then this consumes nothing and
+    /// returns `Some(0)`. Otherwise it returns `Some(n)` with the number of
+    /// bytes consumed before reaching ground, including the byte that reaches
+    /// it, or `None` if the full slice was consumed without reaching ground.
+    ///
+    /// Like [`Self::vt_write`], the input is assumed to be untrusted.
+    pub fn vt_write_until_ground(&mut self, data: &[u8]) -> Result<Option<usize>> {
+        let mut consumed = 0;
+        let result = unsafe {
+            ffi::ghostty_terminal_vt_write_until_ground(
+                self.inner.as_raw(),
+                data.as_ptr(),
+                data.len(),
+                &raw mut consumed,
+            )
+        };
+        from_optional_result(result, consumed)
+    }
+
+    /// Whether VT processing is at ground.
+    ///
+    /// See [`Self::vt_write_until_ground`] for what ground means and why it
+    /// is useful.
+    pub fn vt_ground(&self) -> Result<bool> {
+        self.get(Data::VT_GROUND)
+    }
+
     /// Resize the terminal to the given dimensions.
     ///
     /// Changes the number of columns and rows in the terminal. The primary
@@ -817,6 +855,15 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn cursor_y(&self) -> Result<u16> {
         self.get(Data::CURSOR_Y)
     }
+    /// Whether the cursor is currently at a semantic shell prompt or input
+    /// area.
+    ///
+    /// This depends on semantic prompt markers such as OSC 133. Returns false
+    /// when semantic prompt information is unavailable or the alternate
+    /// screen is active.
+    pub fn cursor_at_prompt(&self) -> Result<bool> {
+        self.get(Data::CURSOR_AT_PROMPT)
+    }
     /// Get whether the cursor has a pending wrap (next print will soft-wrap).
     pub fn is_cursor_pending_wrap(&self) -> Result<bool> {
         self.get(Data::CURSOR_PENDING_WRAP)
@@ -1026,6 +1073,50 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// A `None` value removes all overrides, reverting to the built-in defaults.
     pub fn set_apc_max_bytes(&mut self, max: Option<usize>) -> Result<&mut Self> {
         self.set_optional(Opt::APC_MAX_BYTES, max.as_ref())?;
+        Ok(self)
+    }
+
+    /// Set the name of the terminfo entry this terminal runs as, reported in
+    /// response to an XTGETTCAP query for `TN` (e.g. `xterm-256color`).
+    ///
+    /// The name is copied into the terminal. An empty name clears it. A name
+    /// longer than 128 bytes returns `Err(Error::InvalidValue)`.
+    ///
+    /// If this is unset then nothing is reported for an XTGETTCAP `TN` query,
+    /// because libghostty doesn't know what the embedding terminal advertises
+    /// itself as.
+    pub fn set_terminfo_name(&mut self, name: &str) -> Result<&mut Self> {
+        self.set(Opt::TERMINFO_NAME, &ffi::String::from(name))?;
+        Ok(self)
+    }
+
+    /// The configured maximum decoded bytes per Kitty clipboard protocol
+    /// (OSC 5522) write transaction.
+    ///
+    /// See [`Self::set_clipboard_write_max_bytes`].
+    pub fn clipboard_write_max_bytes(&self) -> Result<usize> {
+        self.get(Data::CLIPBOARD_WRITE_MAX_BYTES)
+    }
+
+    /// Set the maximum total decoded bytes a single Kitty clipboard protocol
+    /// (OSC 5522) write transaction may accumulate. The limit is captured
+    /// when a transaction begins; an in-flight transaction keeps the limit it
+    /// started with.
+    ///
+    /// Data beyond the limit fails the whole transaction with EFBIG. The
+    /// transaction is discarded, later write-related packets are ignored
+    /// until a new write begins, and nothing reaches the
+    /// [clipboard write callback](Self::on_clipboard_write).
+    ///
+    /// Transactions are buffered in memory, so this limit bounds how much
+    /// memory a single write can make the terminal allocate. Pass
+    /// `Some(usize::MAX)` to remove the limit. `None` reverts to the built-in
+    /// default of 64 MiB, the minimum required by the protocol.
+    ///
+    /// This limit doesn't apply to OSC 52 writes, which are bounded by the
+    /// maximum length of an escape sequence instead.
+    pub fn set_clipboard_write_max_bytes(&mut self, limit: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(Opt::CLIPBOARD_WRITE_MAX_BYTES, limit.as_ref())?;
         Ok(self)
     }
 
@@ -2710,6 +2801,141 @@ mod tests {
         });
         let grants: Vec<_> = seen.iter().map(|s| (s.can_remember, s.granted)).collect();
         assert_eq!(grants, [(true, false), (true, true)]);
+    }
+
+    /// Feed `input` to a terminal configured by `setup`, returning what it
+    /// wrote back to the pty.
+    fn pty_output(setup: impl FnOnce(&mut Terminal<'_, '_>), input: &[u8]) -> Vec<u8> {
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .expect("callback should register");
+        setup(&mut terminal);
+        terminal.vt_write(input);
+        drop(terminal);
+        output.into_inner()
+    }
+
+    #[test]
+    fn vt_write_until_ground_stops_at_ground() {
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        // Already at ground: nothing is consumed.
+        assert!(terminal.vt_ground().unwrap());
+        assert_eq!(terminal.vt_write_until_ground(b"hello").unwrap(), Some(0));
+        assert_eq!(terminal.cursor_x().unwrap(), 0);
+
+        // An incomplete CSI sequence is only finished, not followed.
+        terminal.vt_write(b"\x1b[");
+        assert!(!terminal.vt_ground().unwrap());
+        assert_eq!(terminal.vt_write_until_ground(b"31").unwrap(), None);
+        // The count includes the byte that reaches ground.
+        assert_eq!(terminal.vt_write_until_ground(b"mhello").unwrap(), Some(1));
+        assert!(terminal.vt_ground().unwrap());
+        assert_eq!(terminal.cursor_x().unwrap(), 0);
+
+        // The same applies to an incomplete UTF-8 sequence ("€" is E2 82 AC).
+        terminal.vt_write(b"\xe2");
+        assert!(!terminal.vt_ground().unwrap());
+        assert_eq!(
+            terminal.vt_write_until_ground(b"\x82\xac!").unwrap(),
+            Some(2)
+        );
+        assert_eq!(terminal.cursor_x().unwrap(), 1);
+    }
+
+    #[test]
+    fn cursor_at_prompt_follows_semantic_prompts() {
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        assert!(!terminal.cursor_at_prompt().unwrap());
+        terminal.vt_write(b"\x1b]133;A\x1b\\");
+        assert!(terminal.cursor_at_prompt().unwrap());
+        // The alternate screen never counts as a prompt.
+        terminal.vt_write(b"\x1b[?1049h");
+        assert!(!terminal.cursor_at_prompt().unwrap());
+    }
+
+    #[test]
+    fn terminfo_name_answers_xtgettcap() {
+        // XTGETTCAP query for "TN" (hex 544e).
+        let query = b"\x1bP+q544e\x1b\\";
+        // Unset names are not reported at all.
+        assert_eq!(pty_output(|_| {}, query), b"");
+        assert_eq!(
+            pty_output(
+                |terminal| {
+                    terminal.set_terminfo_name("xterm-256color").unwrap();
+                },
+                query
+            ),
+            // "xterm-256color" in hex.
+            b"\x1bP1+r544E=787465726D2D323536636F6C6F72\x1b\\"
+        );
+        // An empty name clears it again.
+        assert_eq!(
+            pty_output(
+                |terminal| {
+                    terminal.set_terminfo_name("xterm-256color").unwrap();
+                    terminal.set_terminfo_name("").unwrap();
+                },
+                query
+            ),
+            b""
+        );
+
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        assert!(matches!(
+            terminal.set_terminfo_name(&"x".repeat(129)),
+            Err(Error::InvalidValue)
+        ));
+    }
+
+    #[test]
+    fn clipboard_write_max_bytes_bounds_kitty_writes() {
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        let default = terminal.clipboard_write_max_bytes().unwrap();
+        assert_eq!(default, 64 * 1024 * 1024);
+        terminal.set_clipboard_write_max_bytes(Some(4)).unwrap();
+        assert_eq!(terminal.clipboard_write_max_bytes().unwrap(), 4);
+        terminal.set_clipboard_write_max_bytes(None).unwrap();
+        assert_eq!(terminal.clipboard_write_max_bytes().unwrap(), default);
+
+        // A 5-byte ("Hello") OSC 5522 write transaction.
+        let write = concat!(
+            "\x1b]5522;type=write:id=c1\x1b\\",
+            "\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;SGVsbA==\x1b\\",
+            "\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;bw==\x1b\\",
+            "\x1b]5522;type=wdata\x1b\\",
+        );
+        let run = |limit| {
+            let written = RefCell::new(Vec::new());
+            let output = RefCell::new(Vec::new());
+            let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+            terminal
+                .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+                .unwrap()
+                .on_clipboard_write(|_term, request| {
+                    written
+                        .borrow_mut()
+                        .extend(request.contents().map(|c| c.data.to_vec()));
+                    request.reply(Ok(()), false);
+                })
+                .unwrap()
+                .set_clipboard_write_max_bytes(Some(limit))
+                .unwrap();
+            terminal.vt_write(write.as_bytes());
+            drop(terminal);
+            (output.into_inner(), written.into_inner())
+        };
+
+        // Exceeding the limit fails the transaction and never reaches the callback.
+        let (output, written) = run(4);
+        assert_eq!(output, b"\x1b]5522;type=write:status=EFBIG:id=c1\x1b\\");
+        assert!(written.is_empty());
+
+        let (output, written) = run(5);
+        assert_eq!(output, b"\x1b]5522;type=write:status=DONE:id=c1\x1b\\");
+        assert_eq!(written, [b"Hello".to_vec()]);
     }
 
     #[test]
