@@ -67,6 +67,12 @@ fn main() {
 }
 
 const PREFIXES: &[(&str, &str)] = &[
+    ("GhosttySearchOption", "GHOSTTY_SEARCH_OPT"),
+    ("GhosttySysOption", "GHOSTTY_SYS_OPT"),
+    (
+        "GhosttyTerminalUnknownSequenceTag",
+        "GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE",
+    ),
     ("GhosttyOptimizeMode", "GHOSTTY_OPTIMIZE"),
     ("GhosttyKeyEncoderOption", "GHOSTTY_KEY_ENCODER_OPT"),
     ("GhosttyMouseTrackingMode", "GHOSTTY_MOUSE_TRACKING"),
@@ -74,6 +80,7 @@ const PREFIXES: &[(&str, &str)] = &[
     ("GhosttySgrAttributeTag", "GHOSTTY_SGR_ATTR"),
     ("GhosttyOscCommandData", "GHOSTTY_OSC_DATA"),
     ("GhosttyOscCommandType", "GHOSTTY_OSC_COMMAND"),
+    ("GhosttyOscOption", "GHOSTTY_OSC_OPT"),
     ("GhosttyTerminalOption", "GHOSTTY_TERMINAL_OPT"),
     (
         "GhosttyTerminalScrollViewportTag",
