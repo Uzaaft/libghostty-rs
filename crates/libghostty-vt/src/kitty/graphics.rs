@@ -947,12 +947,12 @@ pub trait DecodePng: 'static {
 /// A PNG decoder for [`set_png_decoder`] using the [`png`] crate.
 ///
 /// ```rust
-/// use ghostty::kitty::graphics;
+/// use libghostty_vt::kitty::graphics;
 ///
-/// graphics::set_png_decoder(RustPngDecoder::new());
+/// graphics::set_png_decoder(Some(Box::new(graphics::RustPngDecoder::default()))).unwrap();
 /// ```
 #[cfg(all(feature = "kitty-graphics", feature = "png"))]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct RustPngDecoder {
     buf: Vec<u8>,
 }
@@ -976,10 +976,8 @@ impl DecodePng for RustPngDecoder {
 
         let mut frame = decoder.read_info().ok()?;
         let buf_size = frame.output_buffer_size()?;
-        if buf_size > self.buf.capacity() {
-            self.buf.reserve(buf_size - self.buf.capacity());
-        }
-        self.buf.fill(0);
+        // The decoder needs initialized writable bytes, not just reserved capacity.
+        self.buf.resize(buf_size, 0);
 
         let info = frame.next_frame(&mut self.buf).ok()?;
 
@@ -1017,5 +1015,27 @@ impl From<DecodedImage<'_>> for ffi::SysImage {
             data: value.data.as_mut_ptr(),
             data_len: value.data.len(),
         }
+    }
+}
+
+#[cfg(all(test, not(miri), feature = "kitty-graphics", feature = "png"))]
+mod png_decoder_tests {
+    use super::*;
+
+    #[test]
+    fn default_decoder_reads_rgba_pixels() {
+        let pixels = [255, 0, 128, 255];
+        let mut encoded = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut encoded, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&pixels).unwrap();
+        }
+        let mut decoder = RustPngDecoder::default();
+        let decoded = decoder.decode_png(&Allocator::GLOBAL, &encoded).unwrap();
+        assert_eq!((decoded.width, decoded.height), (1, 1));
+        assert_eq!(&*decoded.data, &pixels);
     }
 }
