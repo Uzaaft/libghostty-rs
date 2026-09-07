@@ -92,23 +92,49 @@ pub enum Source {
 }
 
 /// Options applied using the terminal's current paste modes.
+///
+/// Wrap the sized C request directly so new upstream fields do not require a
+/// second Rust representation. MIME pointers and the reader are supplied only
+/// for the duration of [`crate::Terminal::paste`]; stored options never borrow them.
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
-    /// Clipboard location reported in Kitty paste events.
-    pub location: crate::terminal::ClipboardLocation,
-    /// Whether this is a clipboard action or programmatic insertion.
-    pub source: Source,
+    inner: ffi::Paste,
+}
+
+impl Options {
+    /// Create a clipboard paste from the standard clipboard, rejecting unsafe text.
+    pub fn new() -> Self {
+        Self {
+            inner: ffi::Paste {
+                location: crate::terminal::ClipboardLocation::Standard.into(),
+                source: Source::Clipboard.into(),
+                ..ffi::sized!(ffi::Paste)
+            },
+        }
+    }
+
+    /// Set the clipboard location reported in Kitty paste events.
+    pub fn with_location(mut self, location: crate::terminal::ClipboardLocation) -> Self {
+        self.inner.location = location.into();
+        self
+    }
+
+    /// Specify whether this is a clipboard action or programmatic text insertion.
+    pub fn with_source(mut self, source: Source) -> Self {
+        self.inner.source = source.into();
+        self
+    }
+
     /// Permit text otherwise rejected as unsafe. Set only after host confirmation.
-    pub allow_unsafe: bool,
+    pub fn with_allow_unsafe(mut self, allow: bool) -> Self {
+        self.inner.allow_unsafe = allow;
+        self
+    }
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self {
-            location: crate::terminal::ClipboardLocation::Standard,
-            source: Source::Clipboard,
-            allow_unsafe: false,
-        }
+        Self::new()
     }
 }
 
@@ -120,7 +146,7 @@ impl crate::Terminal<'_, '_> {
     /// supplied sink. Kitty paste events list MIME types without calling it.
     /// Returns false if there is nothing to paste. [`crate::Error::Rejected`]
     /// leaves PTY output untouched so the host can confirm and retry with
-    /// `allow_unsafe`. A reader failure also writes nothing to the PTY.
+    /// [`Options::with_allow_unsafe`]. A reader failure also writes nothing to the PTY.
     pub fn paste<F>(&mut self, options: Options, mimes: &[&str], mut reader: F) -> Result<bool>
     where
         F: FnMut(&str, &mut dyn std::io::Write) -> std::io::Result<()>,
@@ -141,16 +167,13 @@ impl crate::Terminal<'_, '_> {
         }
         let mimes: Vec<ffi::String> = mimes.iter().map(|mime| (*mime).into()).collect();
         let raw = ffi::Paste {
-            location: options.location.into(),
-            source: options.source.into(),
-            allow_unsafe: options.allow_unsafe,
             mimes: mimes.as_ptr(),
             mimes_len: mimes.len(),
             reader: ffi::MimeReader {
                 read: Some(read::<F>),
                 userdata: std::ptr::from_mut(&mut reader).cast(),
             },
-            ..ffi::sized!(ffi::Paste)
+            ..options.inner
         };
         let mut written = false;
         // All request pointers and callbacks remain live for this synchronous call.
@@ -203,10 +226,7 @@ mod tests {
         assert!(
             terminal
                 .paste(
-                    Options {
-                        allow_unsafe: true,
-                        ..Options::default()
-                    },
+                    Options::new().with_allow_unsafe(true),
                     &["text/plain"],
                     |_, writer| writer.write_all(b"a\nb")
                 )
