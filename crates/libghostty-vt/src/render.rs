@@ -482,8 +482,13 @@ impl Snapshot<'_, '_> {
     /// Get the current color information from a render state.
     pub fn colors(&self) -> Result<Colors> {
         let mut colors = ffi::sized!(ffi::RenderStateColors);
-        let result =
-            unsafe { ffi::ghostty_render_state_colors_get(self.0.0.as_raw(), &raw mut colors) };
+        let result = unsafe {
+            ffi::ghostty_render_state_get(
+                self.0.0.as_raw(),
+                ffi::RenderStateData::COLORS,
+                std::ptr::from_mut(&mut colors).cast(),
+            )
+        };
         from_result(result)?;
 
         Ok(Colors {
@@ -925,7 +930,7 @@ pub struct Colors {
 }
 
 /// Dirty state of a render state after update.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 pub enum Dirty {
     /// Not dirty at all; rendering can be skipped.
@@ -937,7 +942,7 @@ pub enum Dirty {
 }
 
 /// Visual style of the cursor.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 pub enum CursorVisualStyle {

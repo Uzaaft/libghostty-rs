@@ -229,7 +229,7 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
 }
 
 /// Default visual style used when the cursor style is reset.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 pub enum CursorStyle {
@@ -1438,7 +1438,7 @@ impl From<TertiaryDeviceAttributes> for ffi::DeviceAttributesTertiary {
 
 /// Color scheme reported in response to a CSI ? 996 n query.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(i32)]
 #[expect(missing_docs, reason = "self-explanatory")]
 pub enum ColorScheme {
     Light = ffi::ColorScheme::LIGHT,
@@ -1484,7 +1484,7 @@ impl From<ColorScheme> for ffi::ColorScheme::Type {
 
 /// Amount of compression work to perform before returning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum CompressionMode {
     /// Perform one bounded compression step suitable for idle scheduling.
     Incremental = ffi::TerminalCompressionMode::INCREMENTAL,
@@ -1494,7 +1494,7 @@ pub enum CompressionMode {
 
 /// Scheduling result from terminal compression.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum CompressionResult {
     /// Retained-mapping reclamation is unavailable on this target.
     Unsupported = ffi::TerminalCompressionResult::UNSUPPORTED,
@@ -1524,6 +1524,35 @@ pub struct ClipboardWrite<'t> {
 }
 
 impl<'t> ClipboardWrite<'t> {
+    /// Program name supplied by the protocol, as arbitrary bytes.
+    pub fn name(&self) -> &'t [u8] {
+        // SAFETY: The request and its strings live for the callback duration.
+        unsafe { (*self.ptr).name.to_bytes() }
+    }
+
+    /// Whether a prior session grant permits this request.
+    pub fn granted(&self) -> bool {
+        unsafe { (*self.ptr).granted }
+    }
+
+    /// Whether a successful reply may remember permission for this program.
+    pub fn can_remember(&self) -> bool {
+        unsafe { (*self.ptr).can_remember }
+    }
+
+    /// Answer synchronously; a successful reply may remember the session grant.
+    pub fn reply(self, result: std::result::Result<(), ClipboardWriteError>, remember: bool) {
+        let reply = ffi::ClipboardWriteReply {
+            result: result.map_or_else(Into::into, |()| ffi::ClipboardWriteResult::SUCCESS),
+            remember,
+            ..ffi::sized!(ffi::ClipboardWriteReply)
+        };
+        // SAFETY: Both request and reply remain valid throughout this synchronous call.
+        if let Some(callback) = unsafe { (*self.ptr).reply } {
+            unsafe { callback(self.ptr, &reply) };
+        }
+    }
+
     /// # Safety
     ///
     /// Caller must ensure that the given pointer has the correct lifetime.
@@ -1631,7 +1660,7 @@ impl<'t> ClipboardContent<'t> {
 /// Protocol-specific destination identifiers are normalized to these values
 /// before the clipboard write callback is invoked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum ClipboardLocation {
     /// The standard system clipboard.
     Standard = ffi::ClipboardLocation::STANDARD,
@@ -1646,7 +1675,7 @@ pub enum ClipboardLocation {
 /// Protocols without write acknowledgements, including OSC 52 and iTerm2
 /// OSC 1337 Copy, ignore this result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum ClipboardWriteError {
     /// The clipboard write was denied by policy or the user.
     Denied = ffi::ClipboardWriteResult::DENIED,
@@ -1725,7 +1754,7 @@ impl<'t> ProgressReport<'t> {
 
 /// State of a terminal progress report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 #[non_exhaustive]
 pub enum ProgressState {
     /// Remove any visible progress indication.
@@ -1760,7 +1789,7 @@ pub enum ProgressState {
 ///
 ///     // The name of the original function type in C,
 ///     // along with the extra C parameters and the expected C return type
-///     from = GhosttyTerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
+///     from = TerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
 ///
 ///     // The name of mapped Rust function type,
 ///     // along with the Rust parameters and return type.
@@ -1848,6 +1877,10 @@ macro_rules! handlers {
                 // The callback must be coerced into a function *pointer*
                 // and not a function *item* (which is a ZST whose address is meaningless).
                 // :)
+                // Type-check against the generated C callback alias so ABI changes
+                // cannot silently pass through the type-erased option setter.
+                let _: $crate::ffi::$rawfnty = Some(callback);
+
                 let callback_ptr: unsafe extern "C" fn(
                     $crate::ffi::Terminal,
                     *mut ::std::ffi::c_void,
@@ -1915,7 +1948,7 @@ handlers! {
     pub fn on_pty_write(
         &mut self,
         tag = WRITE_PTY,
-        from = GhosttyTerminalWritePtyFn(ptr: *const u8, len: usize),
+        from = TerminalWritePtyFn(ptr: *const u8, len: usize),
         to = <'t>PtyWriteFn(&'t [u8]),
     ) |term, func| {
         // SAFETY: We trust libghostty to return valid memory given we
@@ -1930,7 +1963,7 @@ handlers! {
     pub fn on_bell(
         &mut self,
         tag = BELL,
-        from = GhosttyTerminalBellFn(),
+        from = TerminalBellFn(),
         to = BellFn(),
     ) |term, func| {
         func(&term);
@@ -1941,7 +1974,7 @@ handlers! {
     pub fn on_enquiry(
         &mut self,
         tag = ENQUIRY,
-        from = GhosttyTerminalEnquiryFn() -> ffi::String,
+        from = TerminalEnquiryFn() -> ffi::String,
         to = <'t>EnquiryFn() -> Option<&'t str>,
     ) |term, func| {
         func(&term).unwrap_or("").into()
@@ -1953,7 +1986,7 @@ handlers! {
     pub fn on_xtversion(
         &mut self,
         tag = XTVERSION,
-        from = GhosttyTerminalXtversionFn() -> ffi::String,
+        from = TerminalXtversionFn() -> ffi::String,
         to = <'t>XtversionFn() -> Option<&'t str>,
     ) |term, func| {
         func(&term).unwrap_or("").into()
@@ -1967,7 +2000,7 @@ handlers! {
     pub fn on_title_changed(
         &mut self,
         tag = TITLE_CHANGED,
-        from = GhosttyTerminalTitleChangedFn(),
+        from = TerminalTitleChangedFn(),
         to = TitleChangedFn(),
     ) |term, func| {
         func(&term);
@@ -1981,7 +2014,7 @@ handlers! {
     pub fn on_pwd_changed(
         &mut self,
         tag = PWD_CHANGED,
-        from = GhosttyTerminalPwdChangedFn(),
+        from = TerminalPwdChangedFn(),
         to = PwdChangedFn(),
     ) |term, func| {
         func(&term);
@@ -1992,7 +2025,7 @@ handlers! {
     pub fn on_size(
         &mut self,
         tag = SIZE,
-        from = GhosttyTerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
+        from = TerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
         to = SizeFn() -> Option<SizeReportSize>,
     ) |term, func| {
         if let Some(size) = func(&term) {
@@ -2012,7 +2045,7 @@ handlers! {
     pub fn on_color_scheme(
         &mut self,
         tag = COLOR_SCHEME,
-        from = GhosttyTerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
+        from = TerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
         to = ColorSchemeFn() -> Option<ColorScheme>,
     ) |term, func| {
         if let Some(size) = func(&term) {
@@ -2032,7 +2065,7 @@ handlers! {
     pub fn on_device_attributes(
         &mut self,
         tag = DEVICE_ATTRIBUTES,
-        from = GhosttyTerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
+        from = TerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
         to = DeviceAttributesFn() -> Option<DeviceAttributes>,
     ) |term, func| {
         if let Some(size) = func(&term) {
@@ -2051,20 +2084,17 @@ handlers! {
     /// invoked. OSC 52 and iTerm2 OSC 1337 Copy writes therefore use the same
     /// callback shape.
     ///
-    /// OSC 52 clipboard read requests (\"?\") are always ignored and never
-    /// forwarded to this callback.
+    /// Call [`ClipboardWrite::reply`] before returning to acknowledge the write.
+    /// Returning without a reply denies it.
     pub fn on_clipboard_write(
         &mut self,
         tag = CLIPBOARD_WRITE,
-        from = GhosttyTerminalClipboardWriteFn(
+        from = TerminalClipboardWriteFn(
             write: *const ffi::ClipboardWrite
-        ) -> ffi::ClipboardWriteResult::Type,
-        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>) -> std::result::Result<(), ClipboardWriteError>,
+        ) ,
+        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>),
     ) |term, func| {
-        match func(&term, unsafe { ClipboardWrite::from_raw(write) }) {
-            Ok(_) => ffi::ClipboardWriteResult::SUCCESS,
-            Err(e) => e.into()
-        }
+        func(&term, unsafe { ClipboardWrite::from_raw(write) });
     }
 
     /// Callback invoked when the running program requests a desktop
@@ -2072,7 +2102,7 @@ handlers! {
     pub fn on_desktop_notification(
         &mut self,
         tag = DESKTOP_NOTIFICATION,
-        from = GhosttyTerminalDesktopNotificationFn(
+        from = TerminalDesktopNotificationFn(
             notif: *const ffi::TerminalDesktopNotification
         ),
         to = <'t>DesktopNotificationFn(DesktopNotification<'t>),
@@ -2085,7 +2115,7 @@ handlers! {
     pub fn on_progress_report(
         &mut self,
         tag = PROGRESS_REPORT,
-        from = GhosttyTerminalProgressReportFn(
+        from = TerminalProgressReportFn(
             progress: *const ffi::TerminalProgressReport
         ),
         to = <'t>ProgressReportFn(ProgressReport<'t>),
@@ -2446,6 +2476,7 @@ mod miri_soundness {
             location: ffi::ClipboardLocation::STANDARD,
             contents: std::ptr::null(),
             contents_len: 0,
+            ..ffi::sized!(ffi::ClipboardWrite)
         };
         // SAFETY: `raw` outlives the borrow, matching the callback contract.
         let write = unsafe { ClipboardWrite::from_raw(&raw) };

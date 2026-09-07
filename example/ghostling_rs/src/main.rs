@@ -549,7 +549,10 @@ impl<'alloc> Renderer<'alloc> {
 
             let image_width = image.width()?;
             let image_height = image.height()?;
-            let data = image.data()?;
+            // Some placements have no decoded pixel buffer to upload yet.
+            let Some(data) = image.data()? else {
+                continue;
+            };
             if data.len() < (image_width * image_height * 4) as usize {
                 continue;
             }
