@@ -2680,3 +2680,85 @@ mod clipboard_reply_tests {
         assert!(output.borrow().windows(8).any(|bytes| bytes == b"aGVsbG8="));
     }
 }
+
+/// VT stream boundaries and protocol configuration.
+impl Terminal<'_, '_> {
+    /// Whether both the VT parser and UTF-8 decoder are at ground.
+    pub fn vt_ground(&self) -> Result<bool> {
+        self.get(ffi::TerminalData::VT_GROUND)
+    }
+
+    /// Consume only the prefix needed to finish an incomplete sequence.
+    ///
+    /// `Some(n)` reports bytes consumed before reaching ground (`0` if already
+    /// there). `None` means all input was consumed without reaching ground.
+    pub fn vt_write_until_ground(&mut self, data: &[u8]) -> Result<Option<usize>> {
+        let mut consumed = 0;
+        let result = unsafe {
+            ffi::ghostty_terminal_vt_write_until_ground(
+                self.inner.as_raw(),
+                data.as_ptr(),
+                data.len(),
+                &mut consumed,
+            )
+        };
+        from_optional_result(result, consumed)
+    }
+
+    /// Whether shell integration identifies the cursor as being at a prompt.
+    pub fn cursor_at_prompt(&self) -> Result<bool> {
+        self.get(ffi::TerminalData::CURSOR_AT_PROMPT)
+    }
+
+    /// Configure the copied terminfo name reported by XTGETTCAP TN queries.
+    /// Empty clears it; names longer than 128 bytes are rejected.
+    pub fn set_terminfo_name(&mut self, name: &str) -> Result<&mut Self> {
+        self.set(ffi::TerminalOption::TERMINFO_NAME, &ffi::String::from(name))?;
+        Ok(self)
+    }
+
+    /// Maximum decoded bytes buffered in one Kitty clipboard write transaction.
+    pub fn clipboard_write_max_bytes(&self) -> Result<usize> {
+        self.get(ffi::TerminalData::CLIPBOARD_WRITE_MAX_BYTES)
+    }
+
+    /// Set the Kitty clipboard write limit. `None` restores the upstream default;
+    /// `Some(usize::MAX)` removes the limit. Existing transactions keep their limit.
+    pub fn set_clipboard_write_max_bytes(&mut self, limit: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::CLIPBOARD_WRITE_MAX_BYTES,
+            limit.as_ref(),
+        )?;
+        Ok(self)
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+mod stream_api_tests {
+    use super::*;
+
+    #[test]
+    fn split_sequences_stop_at_ground() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        assert_eq!(terminal.vt_write_until_ground(b"hello").unwrap(), Some(0));
+        terminal.vt_write(b"\x1b[");
+        assert!(!terminal.vt_ground().unwrap());
+        assert_eq!(terminal.vt_write_until_ground(b"31").unwrap(), None);
+        assert_eq!(terminal.vt_write_until_ground(b"mhello").unwrap(), Some(1));
+        assert!(terminal.vt_ground().unwrap());
+        assert_eq!(terminal.cursor_x().unwrap(), 0);
+        terminal.vt_write(b"\xe2");
+        assert_eq!(
+            terminal.vt_write_until_ground(b"\x82\xac!").unwrap(),
+            Some(2)
+        );
+        assert_eq!(terminal.cursor_x().unwrap(), 1);
+        terminal.set_clipboard_write_max_bytes(Some(4096)).unwrap();
+        assert_eq!(terminal.clipboard_write_max_bytes().unwrap(), 4096);
+        terminal.set_terminfo_name("xterm-256color").unwrap();
+        assert!(terminal.set_terminfo_name(&"x".repeat(129)).is_err());
+        assert!(!terminal.cursor_at_prompt().unwrap());
+        terminal.vt_write(b"\x1b]133;A\x1b\\");
+        assert!(terminal.cursor_at_prompt().unwrap());
+    }
+}
