@@ -1524,6 +1524,35 @@ pub struct ClipboardWrite<'t> {
 }
 
 impl<'t> ClipboardWrite<'t> {
+    /// Program name supplied by the protocol, as arbitrary bytes.
+    pub fn name(&self) -> &'t [u8] {
+        // SAFETY: The request and its strings live for the callback duration.
+        unsafe { (*self.ptr).name.to_bytes() }
+    }
+
+    /// Whether a prior session grant permits this request.
+    pub fn granted(&self) -> bool {
+        unsafe { (*self.ptr).granted }
+    }
+
+    /// Whether a successful reply may remember permission for this program.
+    pub fn can_remember(&self) -> bool {
+        unsafe { (*self.ptr).can_remember }
+    }
+
+    /// Answer synchronously; a successful reply may remember the session grant.
+    pub fn reply(self, result: std::result::Result<(), ClipboardWriteError>, remember: bool) {
+        let reply = ffi::ClipboardWriteReply {
+            result: result.map_or_else(Into::into, |()| ffi::ClipboardWriteResult::SUCCESS),
+            remember,
+            ..ffi::sized!(ffi::ClipboardWriteReply)
+        };
+        // SAFETY: Both request and reply remain valid throughout this synchronous call.
+        if let Some(callback) = unsafe { (*self.ptr).reply } {
+            unsafe { callback(self.ptr, &reply) };
+        }
+    }
+
     /// # Safety
     ///
     /// Caller must ensure that the given pointer has the correct lifetime.
@@ -1760,7 +1789,7 @@ pub enum ProgressState {
 ///
 ///     // The name of the original function type in C,
 ///     // along with the extra C parameters and the expected C return type
-///     from = GhosttyTerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
+///     from = TerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
 ///
 ///     // The name of mapped Rust function type,
 ///     // along with the Rust parameters and return type.
@@ -1848,6 +1877,10 @@ macro_rules! handlers {
                 // The callback must be coerced into a function *pointer*
                 // and not a function *item* (which is a ZST whose address is meaningless).
                 // :)
+                // Type-check against the generated C callback alias so ABI changes
+                // cannot silently pass through the type-erased option setter.
+                let _: $crate::ffi::$rawfnty = Some(callback);
+
                 let callback_ptr: unsafe extern "C" fn(
                     $crate::ffi::Terminal,
                     *mut ::std::ffi::c_void,
@@ -1915,7 +1948,7 @@ handlers! {
     pub fn on_pty_write(
         &mut self,
         tag = WRITE_PTY,
-        from = GhosttyTerminalWritePtyFn(ptr: *const u8, len: usize),
+        from = TerminalWritePtyFn(ptr: *const u8, len: usize),
         to = <'t>PtyWriteFn(&'t [u8]),
     ) |term, func| {
         // SAFETY: We trust libghostty to return valid memory given we
@@ -1930,7 +1963,7 @@ handlers! {
     pub fn on_bell(
         &mut self,
         tag = BELL,
-        from = GhosttyTerminalBellFn(),
+        from = TerminalBellFn(),
         to = BellFn(),
     ) |term, func| {
         func(&term);
@@ -1941,7 +1974,7 @@ handlers! {
     pub fn on_enquiry(
         &mut self,
         tag = ENQUIRY,
-        from = GhosttyTerminalEnquiryFn() -> ffi::String,
+        from = TerminalEnquiryFn() -> ffi::String,
         to = <'t>EnquiryFn() -> Option<&'t str>,
     ) |term, func| {
         func(&term).unwrap_or("").into()
@@ -1953,7 +1986,7 @@ handlers! {
     pub fn on_xtversion(
         &mut self,
         tag = XTVERSION,
-        from = GhosttyTerminalXtversionFn() -> ffi::String,
+        from = TerminalXtversionFn() -> ffi::String,
         to = <'t>XtversionFn() -> Option<&'t str>,
     ) |term, func| {
         func(&term).unwrap_or("").into()
@@ -1967,7 +2000,7 @@ handlers! {
     pub fn on_title_changed(
         &mut self,
         tag = TITLE_CHANGED,
-        from = GhosttyTerminalTitleChangedFn(),
+        from = TerminalTitleChangedFn(),
         to = TitleChangedFn(),
     ) |term, func| {
         func(&term);
@@ -1981,7 +2014,7 @@ handlers! {
     pub fn on_pwd_changed(
         &mut self,
         tag = PWD_CHANGED,
-        from = GhosttyTerminalPwdChangedFn(),
+        from = TerminalPwdChangedFn(),
         to = PwdChangedFn(),
     ) |term, func| {
         func(&term);
@@ -1992,7 +2025,7 @@ handlers! {
     pub fn on_size(
         &mut self,
         tag = SIZE,
-        from = GhosttyTerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
+        from = TerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
         to = SizeFn() -> Option<SizeReportSize>,
     ) |term, func| {
         if let Some(size) = func(&term) {
@@ -2012,7 +2045,7 @@ handlers! {
     pub fn on_color_scheme(
         &mut self,
         tag = COLOR_SCHEME,
-        from = GhosttyTerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
+        from = TerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
         to = ColorSchemeFn() -> Option<ColorScheme>,
     ) |term, func| {
         if let Some(size) = func(&term) {
@@ -2032,7 +2065,7 @@ handlers! {
     pub fn on_device_attributes(
         &mut self,
         tag = DEVICE_ATTRIBUTES,
-        from = GhosttyTerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
+        from = TerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
         to = DeviceAttributesFn() -> Option<DeviceAttributes>,
     ) |term, func| {
         if let Some(size) = func(&term) {
@@ -2051,20 +2084,28 @@ handlers! {
     /// invoked. OSC 52 and iTerm2 OSC 1337 Copy writes therefore use the same
     /// callback shape.
     ///
-    /// OSC 52 clipboard read requests (\"?\") are always ignored and never
-    /// forwarded to this callback.
+    /// Call [`ClipboardWrite::reply`] before returning to acknowledge the write.
+    /// Returning without a reply denies it. Reads use [`Self::on_clipboard_read`].
     pub fn on_clipboard_write(
         &mut self,
         tag = CLIPBOARD_WRITE,
-        from = GhosttyTerminalClipboardWriteFn(
+        from = TerminalClipboardWriteFn(
             write: *const ffi::ClipboardWrite
-        ) -> ffi::ClipboardWriteResult::Type,
-        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>) -> std::result::Result<(), ClipboardWriteError>,
+        ) ,
+        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>),
     ) |term, func| {
-        match func(&term, unsafe { ClipboardWrite::from_raw(write) }) {
-            Ok(_) => ffi::ClipboardWriteResult::SUCCESS,
-            Err(e) => e.into()
-        }
+        func(&term, unsafe { ClipboardWrite::from_raw(write) });
+    }
+
+    /// Handle a synchronous clipboard read, including MIME negotiation and listing.
+    /// Reply with [`ClipboardRead::reply`] before returning; no reply denies the read.
+    pub fn on_clipboard_read(
+        &mut self,
+        tag = CLIPBOARD_READ,
+        from = TerminalClipboardReadFn(read: *const ffi::ClipboardRead),
+        to = <'t>ClipboardReadFn(ClipboardRead<'t>),
+    ) |term, func| {
+        func(&term, ClipboardRead { ptr: read, _phan: PhantomData });
     }
 
     /// Callback invoked when the running program requests a desktop
@@ -2072,7 +2113,7 @@ handlers! {
     pub fn on_desktop_notification(
         &mut self,
         tag = DESKTOP_NOTIFICATION,
-        from = GhosttyTerminalDesktopNotificationFn(
+        from = TerminalDesktopNotificationFn(
             notif: *const ffi::TerminalDesktopNotification
         ),
         to = <'t>DesktopNotificationFn(DesktopNotification<'t>),
@@ -2085,7 +2126,7 @@ handlers! {
     pub fn on_progress_report(
         &mut self,
         tag = PROGRESS_REPORT,
-        from = GhosttyTerminalProgressReportFn(
+        from = TerminalProgressReportFn(
             progress: *const ffi::TerminalProgressReport
         ),
         to = <'t>ProgressReportFn(ProgressReport<'t>),
@@ -2446,6 +2487,7 @@ mod miri_soundness {
             location: ffi::ClipboardLocation::STANDARD,
             contents: std::ptr::null(),
             contents_len: 0,
+            ..ffi::sized!(ffi::ClipboardWrite)
         };
         // SAFETY: `raw` outlives the borrow, matching the callback contract.
         let write = unsafe { ClipboardWrite::from_raw(&raw) };
@@ -2496,5 +2538,145 @@ mod miri_soundness {
         let content = unsafe { ClipboardContent::from_raw(&raw) };
         assert_eq!(content.mime, "application/octet-stream");
         assert_eq!(content.data, b"hello");
+    }
+}
+
+/// A synchronous clipboard read request, borrowed for the callback duration.
+#[derive(Debug)]
+pub struct ClipboardRead<'t> {
+    ptr: *const ffi::ClipboardRead,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> ClipboardRead<'t> {
+    /// Requested clipboard destination.
+    pub fn location(&self) -> ClipboardLocation {
+        unsafe { (*self.ptr).location }
+            .try_into()
+            .unwrap_or(ClipboardLocation::Standard)
+    }
+
+    /// Requested MIME types. The strings are binary-safe borrowed protocol values.
+    pub fn mimes(&self) -> impl ExactSizeIterator<Item = &'t [u8]> {
+        // SAFETY: The request owns the array for the callback duration; NULL is
+        // permitted for an empty array and cannot be passed to from_raw_parts.
+        let raw = unsafe { &*self.ptr };
+        let mimes = if raw.mimes_len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(raw.mimes, raw.mimes_len) }
+        };
+        mimes.iter().map(|mime| unsafe { mime.to_bytes() })
+    }
+
+    /// Whether the requester wants a list of available MIME types.
+    pub fn list(&self) -> bool {
+        unsafe { (*self.ptr).list }
+    }
+    /// Program name supplied by the protocol, as arbitrary bytes.
+    pub fn name(&self) -> &'t [u8] {
+        unsafe { (*self.ptr).name.to_bytes() }
+    }
+    /// Whether a prior session grant permits this request.
+    pub fn granted(&self) -> bool {
+        unsafe { (*self.ptr).granted }
+    }
+    /// Whether a successful reply may remember permission for this program.
+    pub fn can_remember(&self) -> bool {
+        unsafe { (*self.ptr).can_remember }
+    }
+
+    /// Answer with binary-safe contents and available MIME types, or a read error.
+    /// All buffers are borrowed only for this synchronous call.
+    pub fn reply(
+        self,
+        result: std::result::Result<&[ClipboardContent<'_>], ClipboardReadError>,
+        available: &[&str],
+        remember: bool,
+    ) {
+        let (result, contents) = match result {
+            Ok(contents) => (ffi::ClipboardReadResult::SUCCESS, contents),
+            Err(error) => (error.into(), &[][..]),
+        };
+        let contents: Vec<_> = contents
+            .iter()
+            .map(|content| ffi::ClipboardContent {
+                mime: content.mime.into(),
+                data: ffi::String {
+                    ptr: content.data.as_ptr(),
+                    len: content.data.len(),
+                },
+            })
+            .collect();
+        let available: Vec<ffi::String> = available.iter().map(|mime| (*mime).into()).collect();
+        let reply = ffi::ClipboardReadReply {
+            result,
+            contents: contents.as_ptr(),
+            contents_len: contents.len(),
+            available: available.as_ptr(),
+            available_len: available.len(),
+            remember,
+            ..ffi::sized!(ffi::ClipboardReadReply)
+        };
+        // SAFETY: All buffers and the terminal-owned request survive this call.
+        if let Some(callback) = unsafe { (*self.ptr).reply } {
+            unsafe { callback(self.ptr, &reply) };
+        }
+    }
+}
+
+/// Failures reported in a clipboard read reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(i32)]
+pub enum ClipboardReadError {
+    /// Permission was denied.
+    Denied = ffi::ClipboardReadResult::DENIED,
+    /// The clipboard cannot be read by this embedder.
+    Unsupported = ffi::ClipboardReadResult::UNSUPPORTED,
+    /// The clipboard is temporarily unavailable.
+    Busy = ffi::ClipboardReadResult::BUSY,
+    /// An I/O operation failed.
+    IoError = ffi::ClipboardReadResult::IO_ERROR,
+}
+
+#[cfg(all(test, not(miri)))]
+mod clipboard_reply_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn osc52_read_and_binary_write() {
+        let output = RefCell::new(Vec::new());
+        let written = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        terminal
+            .on_pty_write(|_, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .unwrap();
+        terminal
+            .on_clipboard_write(|_, request| {
+                assert_eq!(request.location(), ClipboardLocation::Standard);
+                written
+                    .borrow_mut()
+                    .extend_from_slice(request.contents().next().unwrap().data);
+                request.reply(Ok(()), false);
+            })
+            .unwrap();
+        terminal
+            .on_clipboard_read(|_, request| {
+                assert_eq!(request.location(), ClipboardLocation::Standard);
+                request.reply(
+                    Ok(&[ClipboardContent {
+                        mime: "text/plain",
+                        data: b"hello",
+                    }]),
+                    &[],
+                    false,
+                );
+            })
+            .unwrap();
+        terminal.vt_write(b"\x1b]52;c;//4=\x1b\\");
+        assert_eq!(*written.borrow(), [0xff, 0xfe]);
+        terminal.vt_write(b"\x1b]52;c;?\x1b\\");
+        assert!(output.borrow().windows(8).any(|bytes| bytes == b"aGVsbG8="));
     }
 }
