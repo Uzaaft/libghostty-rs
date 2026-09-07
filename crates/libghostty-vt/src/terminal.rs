@@ -1945,6 +1945,25 @@ macro_rules! handlers {
 }
 
 handlers! {
+    /// Observe unsupported sequences after enabling [`Self::set_unknown_max_bytes`].
+    /// Malformed recognized commands and aborted sequences are not reported.
+    pub fn on_unknown_sequence(
+        &mut self,
+        tag = UNKNOWN_SEQUENCE,
+        from = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence),
+        to = <'t>UnknownSequenceFn(UnknownSequence<'t>),
+    ) |term, func| {
+        // SAFETY: The tagged payload and its bytes are borrowed for this callback.
+        let sequence = unsafe { &*sequence };
+        if sequence.tag == ffi::TerminalUnknownSequenceTag::APC {
+            let apc = unsafe { sequence.value.apc };
+            func(&term, UnknownSequence::Apc {
+                content: unsafe { apc.content.to_bytes() },
+                truncated: apc.truncated,
+            });
+        }
+    }
+
     /// Call the given function when the terminal needs to write data back
     /// to the pty (e.g. in response to a DECRQM query or device status report).
     pub fn on_pty_write(
@@ -2762,5 +2781,50 @@ mod stream_api_tests {
         assert!(!terminal.cursor_at_prompt().unwrap());
         terminal.vt_write(b"\x1b]133;A\x1b\\");
         assert!(terminal.cursor_at_prompt().unwrap());
+    }
+}
+
+/// Unsupported sequence content, valid only during the effect callback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnknownSequence<'t> {
+    /// Application Program Command content, excluding introducer and terminator.
+    Apc {
+        /// Binary-safe retained content.
+        content: &'t [u8],
+        /// Whether the configured limit or allocation failure shortened it.
+        truncated: bool,
+    },
+}
+
+impl Terminal<'_, '_> {
+    /// Maximum retained content per unsupported sequence. Zero disables capture.
+    /// Installing a handler alone does not retain content or allocate memory.
+    pub fn set_unknown_max_bytes(&mut self, max: usize) -> Result<&mut Self> {
+        self.set(ffi::TerminalOption::UNKNOWN_MAX_BYTES, &max)?;
+        Ok(self)
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+mod unknown_sequence_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn unknown_apc_is_opt_in_and_bounded() {
+        let seen = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .on_unknown_sequence(|_, sequence| {
+                let UnknownSequence::Apc { content, truncated } = sequence;
+                seen.borrow_mut().push((content.to_vec(), truncated));
+            })
+            .unwrap();
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        assert!(seen.borrow().is_empty());
+        terminal.set_unknown_max_bytes(3).unwrap();
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        assert_eq!(*seen.borrow(), vec![(b"unk".to_vec(), true)]);
     }
 }
