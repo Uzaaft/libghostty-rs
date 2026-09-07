@@ -9,7 +9,7 @@ use crate::{
         from_optional_result_with_len, from_result, from_result_with_len,
     },
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
-    key, mouse,
+    key, mouse, osc,
     screen::{GridRef, Screen, TrackedGridRef},
     style::{self, Palette, RawPalette, RgbColor},
 };
@@ -1113,8 +1113,29 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// This prevents malicious input from causing unbounded memory allocation.
     /// A `None` value removes all overrides, reverting to the built-in defaults.
+    /// APC sequences no protocol implements are bounded separately, by
+    /// [`set_unknown_max_bytes`](Self::set_unknown_max_bytes).
     pub fn set_apc_max_bytes(&mut self, max: Option<usize>) -> Result<&mut Self> {
         self.set_optional(Opt::APC_MAX_BYTES, max.as_ref())?;
+        Ok(self)
+    }
+
+    /// Set the most bytes of each unsupported sequence to keep and pass to the
+    /// [unknown sequence callback](Self::on_unknown_sequence). The same limit
+    /// applies to APC and OSC sequences.
+    ///
+    /// Zero, the default, turns unsupported sequence reporting off.
+    ///
+    /// A sequence longer than the limit is still reported. Its content holds
+    /// the first bytes up to the limit, and `truncated` is true.
+    ///
+    /// Choose a limit that fits the largest sequence you expect. Unknown OSC
+    /// sequences up to 2048 bytes are kept in a buffer the terminal already
+    /// owns, so limits up to 2048 add no memory allocations for OSC. Larger
+    /// limits allocate memory for each unknown OSC sequence. Unknown APC
+    /// sequences are always kept in allocated memory.
+    pub fn set_unknown_max_bytes(&mut self, max: usize) -> Result<&mut Self> {
+        self.set(Opt::UNKNOWN_MAX_BYTES, &max)?;
         Ok(self)
     }
 
@@ -2222,6 +2243,110 @@ pub enum ClipboardReadError {
     Busy = ffi::ClipboardReadResult::BUSY,
     /// Reading the clipboard failed due to an I/O error.
     IoError = ffi::ClipboardReadResult::IO_ERROR,
+}
+
+/// An unsupported terminal sequence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnknownSequence<'t> {
+    /// Application Program Command (APC).
+    ///
+    /// The content is borrowed and valid only for the callback duration. It
+    /// contains the bytes between the sequence introducer and terminator, may
+    /// contain arbitrary binary data, and is not null-terminated.
+    #[non_exhaustive]
+    Apc {
+        /// Retained sequence content.
+        content: &'t [u8],
+        /// Whether content was shortened by the byte limit or allocation
+        /// failure.
+        truncated: bool,
+    },
+    /// An OSC sequence whose number libghostty-vt does not implement.
+    ///
+    /// OSC sequences start with `ESC ]`, followed by a number that identifies
+    /// the command, usually a `;`, and then the command's data. The sequence
+    /// ends with either BEL or ESC followed by a backslash. For example, a
+    /// program might write:
+    ///
+    /// ```text
+    /// ESC ] 7400;status=busy BEL
+    /// ```
+    ///
+    /// For that sequence, `content` is `7400;status=busy` and `terminator`
+    /// is [`osc::Terminator::Bel`]. See [`Terminal::on_unknown_sequence`]
+    /// for a complete example.
+    #[non_exhaustive]
+    Osc {
+        /// Everything between `ESC ]` and the terminator, including the number
+        /// at the start. The bytes are not null-terminated and are only valid
+        /// until the callback returns. Copy them if you need them later.
+        content: &'t [u8],
+        /// True if the sequence was longer than
+        /// [`Terminal::set_unknown_max_bytes`], or memory ran out while
+        /// reading it. In that case `content` holds only the beginning of the
+        /// sequence.
+        truncated: bool,
+        /// How the program ended the sequence. If you send a reply, end it the
+        /// same way.
+        terminator: osc::Terminator,
+    },
+}
+
+impl UnknownSequence<'_> {
+    /// Reads a sequence, or gives `None` for a kind or OSC terminator these
+    /// bindings don't know.
+    ///
+    /// This takes a pointer rather than a reference on purpose: upstream
+    /// writes only the active union field, and for a kind without a payload
+    /// it may leave the whole union unwritten. Referencing or copying such a
+    /// union relies on validity rules Rust hasn't settled yet. So we only
+    /// read the tag, and then only the union field the tag says is active.
+    ///
+    /// # Safety
+    ///
+    /// Caller must guarantee that `raw` is valid for reads and properly
+    /// aligned, that its `tag` is initialized, that the union field named by
+    /// `tag` is initialized, and that the content it points to is valid for
+    /// the lifetime `'t`.
+    unsafe fn from_raw<'t>(
+        raw: *const ffi::TerminalUnknownSequence,
+    ) -> Option<UnknownSequence<'t>> {
+        // SAFETY: Upheld by caller. This reads just the tag field through
+        // the raw pointer, without making a reference to the whole struct.
+        match unsafe { (*raw).tag } {
+            ffi::TerminalUnknownSequenceTag::APC => {
+                // SAFETY: Upheld by caller; the tag says `apc` is the active
+                // union field.
+                let apc = unsafe { (*raw).value.apc };
+                Some(UnknownSequence::Apc {
+                    // SAFETY: Upheld by caller; the content is valid for `'t`.
+                    content: unsafe { apc.content.to_bytes() },
+                    truncated: apc.truncated,
+                })
+            }
+            ffi::TerminalUnknownSequenceTag::OSC => {
+                // SAFETY: Upheld by caller; the tag says `osc` is the active
+                // union field.
+                let osc = unsafe { (*raw).value.osc };
+                // A terminator these bindings don't know has no Rust value
+                // either, so skip the sequence (like `osc::Command`, which
+                // reports it as `Invalid`) instead of inventing one.
+                let terminator = osc.terminator.try_into().ok()?;
+                Some(UnknownSequence::Osc {
+                    // SAFETY: Ditto
+                    content: unsafe { osc.content.to_bytes() },
+                    truncated: osc.truncated,
+                    terminator,
+                })
+            }
+            // Upstream asks callbacks to ignore tags they don't handle.
+            // Sequence kinds added upstream later have no Rust value, so they
+            // are skipped rather than misreported; the enum is non-exhaustive
+            // to grow with them.
+            _ => None,
+        }
+    }
 }
 
 /// A request to show a desktop notification.
@@ -3344,6 +3469,93 @@ handlers! {
             func(term, request);
         }
     }
+
+    /// Called once for each complete sequence that libghostty-vt does not
+    /// implement. Match on [`UnknownSequence`] first, because more kinds of
+    /// sequences may be reported in later versions.
+    ///
+    /// Sequences of a kind these bindings don't know, and OSC sequences with
+    /// an [`osc::Terminator`] these bindings don't know, are not passed to the
+    /// closure.
+    ///
+    /// These are not reported:
+    ///
+    /// - Sequences the program cancelled partway through with CAN or SUB.
+    /// - Sequences libghostty-vt implements, even when their contents are
+    ///   malformed.
+    /// - Supported protocols that the embedder turned off.
+    ///
+    /// The callback runs during [`Self::vt_write`]. It may write a reply to
+    /// the pty, and that reply stays in order with the terminal's own
+    /// replies. It must not call [`Self::vt_write`] on the same terminal.
+    ///
+    /// Nothing is reported until [`Self::set_unknown_max_bytes`] is also set
+    /// to a nonzero value. Installing the callback by itself keeps no sequence
+    /// data and allocates no sequence-capture buffers.
+    ///
+    /// For OSC, the content is everything between `ESC ]` and the terminator,
+    /// including the number that identifies the sequence. As an example,
+    /// suppose your application invents its own OSC 7400 so that programs can
+    /// report their status. If a program writes `ESC ] 7400;status=busy BEL`,
+    /// the callback receives the content `7400;status=busy` and the
+    /// terminator [`osc::Terminator::Bel`]. Match on the number followed by
+    /// `;`, so that `7400;` does not also match an unrelated `74000;`
+    /// sequence.
+    ///
+    /// Only numbers libghostty-vt does not recognize are reported. A sequence
+    /// that uses a number it does implement, such as OSC 2 for the window
+    /// title, is never reported, even when its contents are malformed.
+    ///
+    /// Use the terminator from the request in your reply, since that is what
+    /// the program expects.
+    ///
+    /// ```rust
+    /// use std::cell::RefCell;
+    /// use libghostty_vt::{Terminal, terminal::UnknownSequence};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let statuses = RefCell::new(Vec::new());
+    ///
+    /// let mut terminal = Terminal::new(80, 24)?;
+    /// terminal
+    ///     .on_unknown_sequence(|_term, sequence| {
+    ///         let UnknownSequence::Osc { content, truncated, .. } = sequence else {
+    ///             return;
+    ///         };
+    ///         // This protocol needs the whole sequence, so skip cut-off ones.
+    ///         if truncated {
+    ///             return;
+    ///         }
+    ///         // Only handle OSC 7400. Everything else is ignored.
+    ///         if let Some(status) = content.strip_prefix(b"7400;") {
+    ///             // The content is only valid during this call. Copy it if you need it
+    ///             // later.
+    ///             statuses.borrow_mut().push(status.to_vec());
+    ///         }
+    ///     })?
+    ///     // Keep up to 4 KiB of each unknown sequence and report them.
+    ///     .set_unknown_max_bytes(4096)?;
+    ///
+    /// terminal.vt_write(b"\x1b]7400;status=busy\x07");
+    /// assert_eq!(*statuses.borrow(), [b"status=busy".to_vec()]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn on_unknown_sequence(
+        &mut self,
+        tag = UNKNOWN_SEQUENCE,
+        from = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence),
+        to = <'t>UnknownSequenceFn(UnknownSequence<'t>),
+    ) |term, func| {
+        // SAFETY: libghostty passes a valid, aligned sequence for the
+        // callback duration, with the tag and the union field it names
+        // written (`lib.TaggedUnion.cval`). Upstream documents the content
+        // as valid only for the callback duration; the higher-ranked `'t` on
+        // `UnknownSequenceFn` stops the closure from keeping it.
+        if let Some(sequence) = unsafe { UnknownSequence::from_raw(sequence) } {
+            func(term, sequence);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3680,6 +3892,53 @@ mod tests {
         let (output, written) = run(5);
         assert_eq!(output, b"\x1b]5522;type=write:status=DONE:id=c1\x1b\\");
         assert_eq!(written, [b"Hello".to_vec()]);
+    }
+
+    #[test]
+    fn unknown_sequences_are_reported() {
+        use osc::Terminator::{Bel, St};
+
+        let seen = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .on_unknown_sequence(|_term, sequence| {
+                // Record rather than assert: a panic in a callback aborts the
+                // whole test binary.
+                seen.borrow_mut().push(match sequence {
+                    UnknownSequence::Apc {
+                        content, truncated, ..
+                    } => (content.to_vec(), truncated, None),
+                    UnknownSequence::Osc {
+                        content,
+                        truncated,
+                        terminator,
+                        ..
+                    } => (content.to_vec(), truncated, Some(terminator)),
+                });
+            })
+            .unwrap();
+        // Registration alone leaves reporting disabled.
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        terminal.set_unknown_max_bytes(4).unwrap();
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        terminal.vt_write(b"\x1b]7400;status=busy\x07");
+        terminal.set_unknown_max_bytes(64).unwrap();
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        terminal.vt_write(b"\x1b]7400;status=busy\x1b\\");
+        // Numbers libghostty-vt implements are never reported, even with no
+        // callback for them: OSC 7501 is program status, OSC 2 the title.
+        terminal.vt_write(b"\x1b]7501;state=working\x1b\\");
+        terminal.vt_write(b"\x1b]2;title\x07");
+        drop(terminal);
+        assert_eq!(
+            seen.into_inner(),
+            [
+                (b"unkn".to_vec(), true, None),
+                (b"7400".to_vec(), true, Some(Bel)),
+                (b"unknown".to_vec(), false, None),
+                (b"7400;status=busy".to_vec(), false, Some(St)),
+            ]
+        );
     }
 
     #[test]
@@ -4558,6 +4817,64 @@ mod tests {
         assert_eq!(unsafe { ResizeWindow::from_raw(&raw const raw) }, None);
     }
 
+    #[test]
+    fn unknown_sequence_from_raw_skips_unknown_tags_and_terminators() {
+        let apc_bytes = *b"Gf=100";
+        let osc_bytes = *b"7400;status=busy";
+        let mut raw = ffi::TerminalUnknownSequence {
+            tag: ffi::TerminalUnknownSequenceTag::APC,
+            ..Default::default()
+        };
+        raw.value.apc = ffi::TerminalUnknownStringSequence {
+            truncated: true,
+            content: ffi::String {
+                ptr: apc_bytes.as_ptr(),
+                len: apc_bytes.len(),
+            },
+        };
+        assert_eq!(
+            // SAFETY: `raw` is a live local with the tag and `apc` written,
+            // and its content points into `apc_bytes`, which outlives it.
+            unsafe { UnknownSequence::from_raw(&raw const raw) },
+            Some(UnknownSequence::Apc {
+                content: b"Gf=100",
+                truncated: true,
+            })
+        );
+
+        raw.tag = ffi::TerminalUnknownSequenceTag::OSC;
+        raw.value.osc = ffi::TerminalUnknownOscSequence {
+            truncated: false,
+            content: ffi::String {
+                ptr: osc_bytes.as_ptr(),
+                len: osc_bytes.len(),
+            },
+            terminator: ffi::OscTerminator::ST,
+        };
+        assert_eq!(
+            // SAFETY: Ditto, with `osc` written and pointing into `osc_bytes`.
+            unsafe { UnknownSequence::from_raw(&raw const raw) },
+            Some(UnknownSequence::Osc {
+                content: b"7400;status=busy",
+                truncated: false,
+                terminator: osc::Terminator::St,
+            })
+        );
+
+        // A terminator added upstream later has no Rust value, so the
+        // sequence is skipped rather than given an invented one.
+        raw.value.osc.terminator = ffi::OscTerminator::BEL + 1;
+        // SAFETY: Ditto
+        assert_eq!(unsafe { UnknownSequence::from_raw(&raw const raw) }, None);
+
+        // A kind added upstream later has no Rust value either. That the
+        // trampoline then skips the closure is checked by the miri mock in
+        // `miri_soundness::unknown_sequence_skips_unknown_tags_and_terminators`.
+        raw.tag = ffi::TerminalUnknownSequenceTag::OSC + 1;
+        // SAFETY: Ditto; an unknown tag makes `from_raw` read nothing else.
+        assert_eq!(unsafe { UnknownSequence::from_raw(&raw const raw) }, None);
+    }
+
     fn tiny_terminal() -> Terminal<'static, 'static> {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
@@ -4981,6 +5298,7 @@ mod miri_soundness {
         write: ffi::TerminalWritePtyFn,
         read: ffi::TerminalClipboardReadFn,
         resize: ffi::TerminalResizeWindowFn,
+        unknown: ffi::TerminalUnknownSequenceFn,
     }
 
     #[unsafe(no_mangle)]
@@ -4995,6 +5313,7 @@ mod miri_soundness {
             write: None,
             read: None,
             resize: None,
+            unknown: None,
         });
         // SAFETY: The constructor supplies a writable out parameter.
         unsafe { *out = Box::into_raw(terminal).cast() };
@@ -5029,6 +5348,10 @@ mod miri_soundness {
                 // SAFETY: The wrapper supplies the matching callback ABI.
                 terminal.resize = Some(unsafe { std::mem::transmute(value) });
             }
+            ffi::TerminalOption::UNKNOWN_SEQUENCE => {
+                // SAFETY: The wrapper supplies the matching callback ABI.
+                terminal.unknown = Some(unsafe { std::mem::transmute(value) });
+            }
             _ => return ffi::Result::INVALID_VALUE,
         }
         ffi::Result::SUCCESS
@@ -5050,11 +5373,17 @@ mod miri_soundness {
         data: *const u8,
         len: usize,
     ) {
-        let (userdata, write, read, resize) = {
+        let (userdata, write, read, resize, unknown) = {
             // SAFETY: The wrapper supplies a live handle. End this borrow
             // before dispatch, since a clipboard reply can dispatch again.
             let mock = unsafe { &*terminal.cast::<MockTerminal>() };
-            (mock.userdata, mock.write, mock.read, mock.resize)
+            (
+                mock.userdata,
+                mock.write,
+                mock.read,
+                mock.resize,
+                mock.unknown,
+            )
         };
         // SAFETY: vt_write supplies initialized bytes for this call.
         let bytes = unsafe { std::slice::from_raw_parts(data, len) };
@@ -5088,6 +5417,48 @@ mod miri_soundness {
             // SAFETY: Registration provided this callback and its userdata;
             // the request remains live throughout synchronous dispatch.
             unsafe { resize.unwrap()(terminal, userdata, p.cast_const()) };
+        } else if let Some(kind) = bytes.strip_prefix(b"unknown:") {
+            // Like `resize:` above, the input picks the shape and only the tag
+            // and the active field are written. `future` is a kind added
+            // upstream later, so its whole union stays uninitialized;
+            // `osc-badterm` is an OSC with a terminator added upstream later.
+            let content = b"payload";
+            let content = ffi::String {
+                ptr: content.as_ptr(),
+                len: content.len(),
+            };
+            let mut sequence = MaybeUninit::<ffi::TerminalUnknownSequence>::uninit();
+            let p = sequence.as_mut_ptr();
+            // SAFETY: As for `resize:` above.
+            unsafe {
+                match kind {
+                    b"apc" => {
+                        (&raw mut (*p).tag).write(ffi::TerminalUnknownSequenceTag::APC);
+                        (&raw mut (*p).value.apc).write(ffi::TerminalUnknownStringSequence {
+                            truncated: true,
+                            content,
+                        });
+                    }
+                    b"osc" | b"osc-badterm" => {
+                        let terminator = if kind == b"osc" {
+                            ffi::OscTerminator::BEL
+                        } else {
+                            ffi::OscTerminator::BEL + 1
+                        };
+                        (&raw mut (*p).tag).write(ffi::TerminalUnknownSequenceTag::OSC);
+                        (&raw mut (*p).value.osc).write(ffi::TerminalUnknownOscSequence {
+                            truncated: false,
+                            content,
+                            terminator,
+                        });
+                    }
+                    _ => (&raw mut (*p).tag).write(ffi::TerminalUnknownSequenceTag::OSC + 1),
+                }
+            }
+            // SAFETY: Registration provided this callback and its userdata;
+            // the sequence and its static content remain live throughout
+            // synchronous dispatch.
+            unsafe { unknown.unwrap()(terminal, userdata, p.cast_const()) };
         } else if bytes == b"clipboard" {
             let request = ffi::ClipboardRead {
                 ctx: terminal.cast(),
@@ -5195,6 +5566,47 @@ mod miri_soundness {
                 rows: NonZeroU16::new(30),
                 columns: NonZeroU16::new(100),
             }]
+        );
+    }
+
+    /// Upstream may add unknown-sequence kinds and OSC terminators without an
+    /// ABI break, and fills the union with `lib.TaggedUnion.cval`, which
+    /// leaves bytes outside the active field (the whole union, for a kind
+    /// without a payload) undefined. The trampoline must read only the tag
+    /// and then the field it names, and skip the closure for a kind or
+    /// terminator it doesn't know, while still delivering known ones.
+    #[test]
+    fn unknown_sequence_skips_unknown_tags_and_terminators() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .on_unknown_sequence(|_, sequence| {
+                // Copy the content out; it is only borrowed for the callback.
+                seen.borrow_mut().push(match sequence {
+                    UnknownSequence::Apc { content, truncated } => {
+                        (None, content.to_vec(), truncated)
+                    }
+                    UnknownSequence::Osc {
+                        content,
+                        truncated,
+                        terminator,
+                    } => (Some(terminator), content.to_vec(), truncated),
+                });
+            })
+            .unwrap();
+        // `OSC + 1` and an OSC ending in `BEL + 1`, then APC and OSC as the
+        // positive controls.
+        terminal.vt_write(b"unknown:future");
+        terminal.vt_write(b"unknown:osc-badterm");
+        terminal.vt_write(b"unknown:apc");
+        terminal.vt_write(b"unknown:osc");
+        drop(terminal);
+        assert_eq!(
+            seen.into_inner(),
+            [
+                (None, b"payload".to_vec(), true),
+                (Some(osc::Terminator::Bel), b"payload".to_vec(), false),
+            ]
         );
     }
 

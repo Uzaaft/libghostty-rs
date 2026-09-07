@@ -504,7 +504,9 @@ pub enum CommandType<'p> {
 ///
 /// Newer versions of libghostty may add terminators. A terminator these
 /// bindings don't know yet makes [`Command::command_type`] give
-/// [`CommandType::Invalid`].
+/// [`CommandType::Invalid`], and makes
+/// [`Terminal::on_unknown_sequence`](crate::Terminal::on_unknown_sequence)
+/// skip the sequence.
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
