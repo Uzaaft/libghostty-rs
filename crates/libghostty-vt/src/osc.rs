@@ -218,3 +218,18 @@ pub enum CommandType<'p> {
     ConemuComment,
     KittyTextSizing,
 }
+
+/// How an OSC sequence was ended.
+///
+/// Programs can end an OSC sequence in two ways. When you reply to a
+/// sequence, end the reply the same way the program ended its request.
+/// Some programs only recognize replies that match.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum Terminator {
+    /// The string terminator (ST): ESC followed by a backslash (0x1B 0x5C).
+    St = ffi::OscTerminator::ST,
+    /// The bell character, BEL (byte 0x07).
+    Bel = ffi::OscTerminator::BEL,
+}
