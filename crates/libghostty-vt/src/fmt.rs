@@ -134,6 +134,13 @@ impl<'t, 's> FormatterOptions<'t, 's> {
 }
 
 impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
+    /// Stream formatted content to a writer without allocating a complete output buffer.
+    /// On failure the writer may contain partial output; it is not flushed.
+    pub fn format<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
+        let writer = crate::io::to_writer(writer);
+        from_result(unsafe { ffi::ghostty_formatter_format(self.inner.as_raw(), writer) })
+    }
+
     /// Create a formatter for a terminal's active screen.
     pub fn new(
         terminal: &'t Terminal<'alloc, 'cb>,
@@ -267,4 +274,32 @@ pub enum Format {
     Vt = ffi::FormatterFormat::VT,
     /// HTML with inline styles.
     Html = ffi::FormatterFormat::HTML,
+}
+
+#[cfg(all(test, not(miri)))]
+mod writer_tests {
+    use super::*;
+    use crate::Error;
+
+    #[test]
+    fn writer_matches_buffer_format_and_propagates_failure() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal.vt_write(b"hello");
+        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        let mut expected = [0; 128];
+        let len = formatter.format_buf(&mut expected).unwrap();
+        let mut actual = Vec::new();
+        formatter.format(&mut actual).unwrap();
+        assert_eq!(actual, expected[..len]);
+        struct Reject;
+        impl std::io::Write for Reject {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("rejected"))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        assert!(matches!(formatter.format(&mut Reject), Err(Error::IoError)));
+    }
 }
