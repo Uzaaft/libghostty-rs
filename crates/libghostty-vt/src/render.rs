@@ -624,6 +624,47 @@ impl Drop for RowIterator<'_> {
     }
 }
 
+impl<'s> RowIteration<'_, 's> {
+    /// The raw cell values for the current row, one per column.
+    ///
+    /// This is identical to querying [`CellIteration::raw_cell`] for each
+    /// cell, and is the bulk alternative to iterating cells one at a time.
+    ///
+    /// The values are only valid as long as the underlying render state is
+    /// not updated, so they borrow what the row iteration borrows (the
+    /// snapshot and the row iterator) rather than this row: the iteration may
+    /// keep advancing while they are in use.
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{RenderState, Terminal, render::RowIterator};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut iteration = rows.update(&snapshot).unwrap();
+    /// let cells = iteration.next().unwrap().cells_raw().unwrap();
+    /// drop(snapshot); // The cells still borrow the snapshot.
+    /// cells.count();
+    /// ```
+    pub fn cells_raw(&self) -> Result<impl ExactSizeIterator<Item = Cell> + use<'s>> {
+        let view: ffi::CellsView = self.get(ffi::RenderStateRowData::CELLS_RAW)?;
+        // An empty row's view comes from an empty Zig slice, whose pointer
+        // need not be dereferenceable or aligned, so never build a slice
+        // from it.
+        let cells: &'s [ffi::Cell] = if view.len == 0 {
+            &[]
+        } else {
+            // SAFETY: libghostty keeps the view valid until the render state
+            // is updated, which the snapshot borrow `'s` rules out. The only
+            // writes possible meanwhile are to dirty flags (`set_dirty`,
+            // `clean`), which live outside the cells. Each element is the
+            // cell's `u64` value (`ffi::Cell`), which `Cell` wraps by value.
+            unsafe { std::slice::from_raw_parts(view.ptr, view.len) }
+        };
+        Ok(cells.iter().copied().map(Cell))
+    }
+}
+
 impl RowIteration<'_, '_> {
     /// Move a row iteration to the next row requiring a redraw.
     ///
@@ -1186,5 +1227,37 @@ mod tests {
         let snapshot = state.update(&terminal).unwrap();
         assert_eq!(snapshot.dirty().unwrap(), Dirty::Partial);
         assert_eq!(dirty_rows(&mut rows, &snapshot), [1]);
+    }
+
+    #[test]
+    fn cells_raw_matches_cell_iteration_and_outlives_the_row() {
+        let mut terminal = Terminal::new(4, 2).unwrap();
+        terminal.vt_write(b"ab\r\ncd");
+        let mut state = RenderState::new().unwrap();
+        let snapshot = state.update(&terminal).unwrap();
+        let mut rows = RowIterator::new().unwrap();
+        let mut cells = CellIterator::new().unwrap();
+        let mut iteration = rows.update(&snapshot).unwrap();
+
+        let row = iteration.next().unwrap();
+        let first_row = row.cells_raw().unwrap();
+        assert_eq!(first_row.len(), 4);
+        let mut expected = Vec::new();
+        let mut cell_iteration = cells.update(row).unwrap();
+        while let Some(cell) = cell_iteration.next() {
+            expected.push(cell.raw_cell().unwrap());
+        }
+
+        // The raw cells stay usable after advancing to the next row.
+        let second_row = iteration.next().unwrap().cells_raw().unwrap();
+        let first_row: Vec<_> = first_row.collect();
+        assert_eq!(first_row, expected);
+        let codepoints =
+            |cells: &[Cell]| -> Vec<u32> { cells.iter().map(|c| c.codepoint().unwrap()).collect() };
+        assert_eq!(codepoints(&first_row), [0x61, 0x62, 0, 0]);
+        assert_eq!(
+            codepoints(&second_row.collect::<Vec<_>>()),
+            [0x63, 0x64, 0, 0]
+        );
     }
 }
