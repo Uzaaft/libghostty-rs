@@ -1076,6 +1076,17 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 
+    /// Set the maximum content bytes retained for each unsupported terminal
+    /// sequence. Zero, the default, disables capture and prevents
+    /// [unknown sequence callbacks](Self::on_unknown_sequence).
+    ///
+    /// When this limit is hit, the unknown sequence callback is still invoked,
+    /// but with `truncated` set.
+    pub fn set_unknown_max_bytes(&mut self, max: usize) -> Result<&mut Self> {
+        self.set(Opt::UNKNOWN_MAX_BYTES, &max)?;
+        Ok(self)
+    }
+
     /// Set the name of the terminfo entry this terminal runs as, reported in
     /// response to an XTGETTCAP query for `TN` (e.g. `xterm-256color`).
     ///
@@ -2053,6 +2064,26 @@ pub enum ClipboardReadError {
     IoError = ffi::ClipboardReadResult::IO_ERROR,
 }
 
+/// An unsupported terminal sequence, passed to
+/// [`Terminal::on_unknown_sequence`].
+///
+/// Only APC sequences are currently reported. Additional sequence types may be
+/// added.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnknownSequence<'t> {
+    /// Application Program Command (APC).
+    Apc {
+        /// The bytes between the sequence introducer and terminator. They may
+        /// contain arbitrary binary data, and are borrowed only for the
+        /// callback duration.
+        content: &'t [u8],
+        /// Whether content was shortened by the byte limit or allocation
+        /// failure.
+        truncated: bool,
+    },
+}
+
 /// A request to show a desktop notification.
 #[derive(Debug, Copy, Clone)]
 pub struct DesktopNotification<'t> {
@@ -2649,6 +2680,37 @@ handlers! {
     ) |term, func| {
         func(&term, unsafe { ProgressReport::from_raw(progress) });
     }
+
+    /// Call the given function for normally terminated sequences whose
+    /// identifier is not supported by the terminal. Aborted sequences,
+    /// malformed recognized commands, and explicitly disabled known protocols
+    /// are ignored.
+    ///
+    /// Capture must also be enabled with a nonzero
+    /// [`Self::set_unknown_max_bytes`]. Installing this callback alone does
+    /// not retain sequence content or allocate memory.
+    pub fn on_unknown_sequence(
+        &mut self,
+        tag = UNKNOWN_SEQUENCE,
+        from = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence),
+        to = <'t>UnknownSequenceFn(UnknownSequence<'t>),
+    ) |term, func| {
+        // SAFETY: libghostty passes a valid sequence that is borrowed for the
+        // callback duration.
+        let sequence = unsafe { &*sequence };
+        // Sequence kinds added upstream later are skipped rather than
+        // misreported; `UnknownSequence` is non-exhaustive to grow with them.
+        if sequence.tag == ffi::TerminalUnknownSequenceTag::APC {
+            // SAFETY: The tag says the union holds an APC payload.
+            let apc = unsafe { sequence.value.apc };
+            func(term, UnknownSequence::Apc {
+                // SAFETY: The content is borrowed for the callback duration,
+                // which `UnknownSequence`'s lifetime enforces.
+                content: unsafe { apc.content.to_bytes() },
+                truncated: apc.truncated,
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -2938,6 +3000,76 @@ mod tests {
         let (output, written) = run(5);
         assert_eq!(output, b"\x1b]5522;type=write:status=DONE:id=c1\x1b\\");
         assert_eq!(written, [b"Hello".to_vec()]);
+    }
+
+    /// Feed `input` to a terminal capturing unknown sequences up to `max`
+    /// bytes, returning each captured APC as `(content, truncated)`.
+    fn unknown_apcs(max: usize, input: &[u8]) -> Vec<(Vec<u8>, bool)> {
+        let seen = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        terminal
+            .on_unknown_sequence(|_term, sequence| {
+                let UnknownSequence::Apc { content, truncated } = sequence;
+                seen.borrow_mut().push((content.to_vec(), truncated));
+            })
+            .expect("callback should register")
+            .set_unknown_max_bytes(max)
+            .expect("limit should be settable");
+        terminal.vt_write(input);
+        drop(terminal);
+        seen.into_inner()
+    }
+
+    #[test]
+    fn unknown_apc_capture_is_opt_in_and_bounded() {
+        let apc = b"\x1b_unknown\x1b\\";
+        // Installing the callback alone captures nothing.
+        assert!(unknown_apcs(0, apc).is_empty());
+        // Content under the limit arrives whole, without the introducer and
+        // terminator.
+        assert_eq!(unknown_apcs(64, apc), [(b"unknown".to_vec(), false)]);
+        // Content over the limit is still reported, but truncated.
+        assert_eq!(unknown_apcs(3, apc), [(b"unk".to_vec(), true)]);
+    }
+
+    #[test]
+    fn unknown_apc_capture_can_be_disabled_again() {
+        let seen = RefCell::new(0);
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        terminal
+            .on_unknown_sequence(|_term, _sequence| *seen.borrow_mut() += 1)
+            .unwrap()
+            .set_unknown_max_bytes(64)
+            .unwrap();
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        terminal.set_unknown_max_bytes(0).unwrap();
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        drop(terminal);
+        assert_eq!(seen.into_inner(), 1);
+    }
+
+    #[test]
+    fn only_unsupported_sequences_are_reported() {
+        // An aborted sequence (CAN) is ignored.
+        assert!(unknown_apcs(64, b"\x1b_unknown\x18").is_empty());
+        // A garbage Kitty graphics command is malformed, not unknown.
+        assert!(unknown_apcs(64, b"\x1b_Gabcdef1234\x1b\\").is_empty());
+        // An incomplete known protocol identifier is malformed, not unknown.
+        assert!(unknown_apcs(64, b"\x1b_25a\x1b\\").is_empty());
+
+        // An explicitly disabled known protocol is ignored as well.
+        let seen = RefCell::new(0);
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        terminal
+            .on_unknown_sequence(|_term, _sequence| *seen.borrow_mut() += 1)
+            .unwrap()
+            .set_unknown_max_bytes(64)
+            .unwrap()
+            .set_glyph_protocol_enabled(false)
+            .unwrap();
+        terminal.vt_write(b"\x1b_25a1;q;cp=E0A0\x1b\\");
+        drop(terminal);
+        assert_eq!(seen.into_inner(), 0);
     }
 
     #[test]
