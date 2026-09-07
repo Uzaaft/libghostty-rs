@@ -229,7 +229,7 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
 }
 
 /// Default visual style used when the cursor style is reset.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 pub enum CursorStyle {
@@ -624,9 +624,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         };
 
         let out = from_optional_result(result, out)?;
-        Ok(out
-            .and_then(NonNull::new)
-            .map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
+        // SAFETY: On success, libghostty hands over `out_len` bytes allocated
+        // with `alloc`, or NULL for empty output.
+        Ok(out.map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
     }
 
     /// Copy the terminal's replay-safe VT continuation into a caller buffer.
@@ -1441,7 +1441,7 @@ impl From<TertiaryDeviceAttributes> for ffi::DeviceAttributesTertiary {
 
 /// Color scheme reported in response to a CSI ? 996 n query.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(i32)]
 #[expect(missing_docs, reason = "self-explanatory")]
 pub enum ColorScheme {
     Light = ffi::ColorScheme::LIGHT,
@@ -1487,7 +1487,7 @@ impl From<ColorScheme> for ffi::ColorScheme::Type {
 
 /// Amount of compression work to perform before returning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum CompressionMode {
     /// Perform one bounded compression step suitable for idle scheduling.
     Incremental = ffi::TerminalCompressionMode::INCREMENTAL,
@@ -1497,7 +1497,7 @@ pub enum CompressionMode {
 
 /// Scheduling result from terminal compression.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum CompressionResult {
     /// Retained-mapping reclamation is unavailable on this target.
     Unsupported = ffi::TerminalCompressionResult::UNSUPPORTED,
@@ -1516,17 +1516,81 @@ pub enum CompressionResult {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompressionActivity(u64);
 
-/// A semantic, atomic clipboard write.
+/// A synchronous request to write clipboard contents.
 ///
 /// The request, contents array, MIME strings, and data strings are all
 /// borrowed and valid only for the callback duration.
-#[derive(Clone, Debug)]
+///
+/// All entries in [`contents`](Self::contents) are representations of the
+/// same logical value and must be committed atomically. An empty `contents`
+/// requests that the destination be cleared. This is distinct from a content
+/// entry whose data has zero length.
+///
+/// The write is answered by calling [`reply`](Self::reply). This must happen
+/// within the clipboard write request callback. Returning without replying
+/// denies the write.
+///
+/// Fields a linked libghostty is too old to send read as empty or false,
+/// and [`reply`](Self::reply) then does nothing, which denies the write.
+#[derive(Debug)]
 pub struct ClipboardWrite<'t> {
     ptr: *const ffi::ClipboardWrite,
     _phan: PhantomData<&'t ()>,
 }
 
 impl<'t> ClipboardWrite<'t> {
+    /// Name of the writing program for permission prompts, if the protocol
+    /// carries one. Empty otherwise.
+    #[must_use]
+    pub fn name(&self) -> &'t [u8] {
+        // SAFETY: The request and its strings live for the callback duration.
+        unsafe {
+            crate::sized_field!(self.ptr, ffi::ClipboardWrite, name).map_or(&[], |n| n.to_bytes())
+        }
+    }
+
+    /// True if the terminal already holds a session grant for this request.
+    /// The embedder should skip any permission prompt and perform the write.
+    #[must_use]
+    pub fn granted(&self) -> bool {
+        // SAFETY: The request lives for the callback duration.
+        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardWrite, granted) }.unwrap_or(false)
+    }
+
+    /// True if the program supplied a session password, so the embedder may
+    /// offer to remember the user's decision through the `remember` argument
+    /// of [`reply`](Self::reply). When false, `remember` is ignored.
+    #[must_use]
+    pub fn can_remember(&self) -> bool {
+        // SAFETY: The request lives for the callback duration.
+        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardWrite, can_remember) }.unwrap_or(false)
+    }
+
+    /// Answer the write.
+    ///
+    /// The result answers the program with the matching protocol status for
+    /// protocols with a write acknowledgement (OSC 5522: DONE, EPERM, ENOSYS,
+    /// EBUSY, EINVAL, EIO); protocols without one (OSC 52, OSC 1337 Copy)
+    /// discard the reply.
+    ///
+    /// `remember` records a session grant so future requests from the same
+    /// program skip the permission prompt. It is only honored on success when
+    /// [`can_remember`](Self::can_remember) is set.
+    pub fn reply(self, result: std::result::Result<(), ClipboardWriteError>, remember: bool) {
+        let reply = ffi::ClipboardWriteReply {
+            result: result.map_or_else(Into::into, |()| ffi::ClipboardWriteResult::SUCCESS),
+            remember,
+            ..ffi::sized!(ffi::ClipboardWriteReply)
+        };
+        // SAFETY: The request lives for the callback duration.
+        if let Some(callback) =
+            unsafe { crate::sized_field!(self.ptr, ffi::ClipboardWrite, reply) }.flatten()
+        {
+            // SAFETY: The reply only needs to outlive this synchronous call.
+            unsafe { callback(self.ptr, &raw const reply) };
+        }
+    }
+
     /// # Safety
     ///
     /// Caller must ensure that the given pointer has the correct lifetime.
@@ -1542,9 +1606,8 @@ impl<'t> ClipboardWrite<'t> {
     pub fn location(&self) -> ClipboardLocation {
         // SAFETY: We trust libghostty to give us a valid pointer
         // within the lifetime of the callback.
-        unsafe { *self.ptr }
-            .location
-            .try_into()
+        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardWrite, location) }
+            .and_then(|location| location.try_into().ok())
             .unwrap_or(ClipboardLocation::Standard)
     }
     /// Get an iterator into a borrowed array of MIME representations.
@@ -1556,16 +1619,22 @@ impl<'t> ClipboardWrite<'t> {
     pub fn contents(&self) -> ClipboardContents<'t> {
         // SAFETY: We trust libghostty to give us a valid pointer
         // within the lifetime of the callback.
-        let raw = unsafe { *self.ptr };
+        let (ptr, len) = unsafe {
+            (
+                crate::sized_field!(self.ptr, ffi::ClipboardWrite, contents),
+                crate::sized_field!(self.ptr, ffi::ClipboardWrite, contents_len),
+            )
+        };
         // The C API declares `contents` optional and sends null for a write
         // carrying no representations (the "clear the clipboard" shape);
         // `from_raw_parts` requires a non-null pointer even at length zero.
-        let contents: &'t [ffi::ClipboardContent] = if raw.contents.is_null() {
-            &[]
-        } else {
-            // SAFETY: We trust libghostty to give us a valid pointer and
-            // length within the lifetime of the callback.
-            unsafe { std::slice::from_raw_parts(raw.contents, raw.contents_len) }
+        let contents: &'t [ffi::ClipboardContent] = match (ptr, len) {
+            (Some(ptr), Some(len)) if !ptr.is_null() => {
+                // SAFETY: We trust libghostty to give us a valid pointer and
+                // length within the lifetime of the callback.
+                unsafe { std::slice::from_raw_parts(ptr, len) }
+            }
+            _ => &[],
         };
         ClipboardContents(contents.iter())
     }
@@ -1636,7 +1705,7 @@ impl ClipboardContent<'_> {
 /// Protocol-specific destination identifiers are normalized to these values
 /// before the clipboard write callback is invoked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum ClipboardLocation {
     /// The standard system clipboard.
     Standard = ffi::ClipboardLocation::STANDARD,
@@ -1646,12 +1715,13 @@ pub enum ClipboardLocation {
     Primary = ffi::ClipboardLocation::PRIMARY,
 }
 
-/// Possible errors caused by a clipboard write callback.
+/// Result of a clipboard write reply.
 ///
-/// Protocols without write acknowledgements, including OSC 52 and iTerm2
-/// OSC 1337 Copy, ignore this result.
+/// Protocols with a write acknowledgement (OSC 5522) answer the program with
+/// the matching status; protocols without one (OSC 52, OSC 1337 Copy) discard
+/// the reply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum ClipboardWriteError {
     /// The clipboard write was denied by policy or the user.
     Denied = ffi::ClipboardWriteResult::DENIED,
@@ -1731,7 +1801,7 @@ impl ProgressReport<'_> {
 
 /// State of a terminal progress report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 #[non_exhaustive]
 pub enum ProgressState {
     /// Remove any visible progress indication.
@@ -1766,7 +1836,7 @@ pub enum ProgressState {
 ///
 ///     // The name of the original function type in C,
 ///     // along with the extra C parameters and the expected C return type
-///     from = GhosttyTerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
+///     from = TerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
 ///
 ///     // The name of mapped Rust function type,
 ///     // along with the Rust parameters and return type.
@@ -1854,6 +1924,10 @@ macro_rules! handlers {
                 // The callback must be coerced into a function *pointer*
                 // and not a function *item* (which is a ZST whose address is meaningless).
                 // :)
+                // Type-check against the generated C callback alias so ABI changes
+                // cannot silently pass through the type-erased option setter.
+                let _: $crate::ffi::$rawfnty = Some(callback);
+
                 let callback_ptr: unsafe extern "C" fn(
                     $crate::ffi::Terminal,
                     *mut ::std::ffi::c_void,
@@ -1921,7 +1995,7 @@ handlers! {
     pub fn on_pty_write(
         &mut self,
         tag = WRITE_PTY,
-        from = GhosttyTerminalWritePtyFn(ptr: *const u8, len: usize),
+        from = TerminalWritePtyFn(ptr: *const u8, len: usize),
         to = <'t>PtyWriteFn(&'t [u8]),
     ) |term, func| {
         // SAFETY: We trust libghostty to return valid memory given we
@@ -1936,7 +2010,7 @@ handlers! {
     pub fn on_bell(
         &mut self,
         tag = BELL,
-        from = GhosttyTerminalBellFn(),
+        from = TerminalBellFn(),
         to = BellFn(),
     ) |term, func| {
         func(term);
@@ -1947,7 +2021,7 @@ handlers! {
     pub fn on_enquiry(
         &mut self,
         tag = ENQUIRY,
-        from = GhosttyTerminalEnquiryFn() -> ffi::String,
+        from = TerminalEnquiryFn() -> ffi::String,
         to = <'t>EnquiryFn() -> Option<&'t str>,
     ) |term, func| {
         func(term).unwrap_or("").into()
@@ -1959,7 +2033,7 @@ handlers! {
     pub fn on_xtversion(
         &mut self,
         tag = XTVERSION,
-        from = GhosttyTerminalXtversionFn() -> ffi::String,
+        from = TerminalXtversionFn() -> ffi::String,
         to = <'t>XtversionFn() -> Option<&'t str>,
     ) |term, func| {
         func(term).unwrap_or("").into()
@@ -1973,7 +2047,7 @@ handlers! {
     pub fn on_title_changed(
         &mut self,
         tag = TITLE_CHANGED,
-        from = GhosttyTerminalTitleChangedFn(),
+        from = TerminalTitleChangedFn(),
         to = TitleChangedFn(),
     ) |term, func| {
         func(term);
@@ -1987,7 +2061,7 @@ handlers! {
     pub fn on_pwd_changed(
         &mut self,
         tag = PWD_CHANGED,
-        from = GhosttyTerminalPwdChangedFn(),
+        from = TerminalPwdChangedFn(),
         to = PwdChangedFn(),
     ) |term, func| {
         func(term);
@@ -1998,7 +2072,7 @@ handlers! {
     pub fn on_size(
         &mut self,
         tag = SIZE,
-        from = GhosttyTerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
+        from = TerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
         to = SizeFn() -> Option<SizeReportSize>,
     ) |term, func| {
         if let Some(size) = func(term) {
@@ -2018,7 +2092,7 @@ handlers! {
     pub fn on_color_scheme(
         &mut self,
         tag = COLOR_SCHEME,
-        from = GhosttyTerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
+        from = TerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
         to = ColorSchemeFn() -> Option<ColorScheme>,
     ) |term, func| {
         if let Some(size) = func(term) {
@@ -2038,7 +2112,7 @@ handlers! {
     pub fn on_device_attributes(
         &mut self,
         tag = DEVICE_ATTRIBUTES,
-        from = GhosttyTerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
+        from = TerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
         to = DeviceAttributesFn() -> Option<DeviceAttributes>,
     ) |term, func| {
         if let Some(size) = func(term) {
@@ -2057,20 +2131,29 @@ handlers! {
     /// invoked. OSC 52 and iTerm2 OSC 1337 Copy writes therefore use the same
     /// callback shape.
     ///
-    /// OSC 52 clipboard read requests (\"?\") are always ignored and never
-    /// forwarded to this callback.
+    /// The embedder may ask for permission to write or perform the write
+    /// async, but the callback itself is synchronous and
+    /// [`ClipboardWrite::reply`] must be called before it returns. While this
+    /// callback is active the VT stream is paused. Returning without a reply
+    /// denies the write.
+    ///
+    /// The request may carry an optional program name requesting the write
+    /// and the state of prior permission granted. If
+    /// [`ClipboardWrite::can_remember`] is set the reply may set `remember`,
+    /// and future requests from this same program will be
+    /// [granted](ClipboardWrite::granted) so the embedder can skip permission
+    /// requests.
     pub fn on_clipboard_write(
         &mut self,
         tag = CLIPBOARD_WRITE,
-        from = GhosttyTerminalClipboardWriteFn(
+        from = TerminalClipboardWriteFn(
             write: *const ffi::ClipboardWrite
-        ) -> ffi::ClipboardWriteResult::Type,
-        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>) -> std::result::Result<(), ClipboardWriteError>,
+        ),
+        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>),
     ) |term, func| {
-        match func(term, unsafe { ClipboardWrite::from_raw(write) }) {
-            Ok(()) => ffi::ClipboardWriteResult::SUCCESS,
-            Err(e) => e.into()
-        }
+        // SAFETY: The request is only borrowed for the callback duration,
+        // which `ClipboardWrite`'s lifetime enforces.
+        func(term, unsafe { ClipboardWrite::from_raw(write) });
     }
 
     /// Callback invoked when the running program requests a desktop
@@ -2078,7 +2161,7 @@ handlers! {
     pub fn on_desktop_notification(
         &mut self,
         tag = DESKTOP_NOTIFICATION,
-        from = GhosttyTerminalDesktopNotificationFn(
+        from = TerminalDesktopNotificationFn(
             notif: *const ffi::TerminalDesktopNotification
         ),
         to = <'t>DesktopNotificationFn(DesktopNotification<'t>),
@@ -2091,7 +2174,7 @@ handlers! {
     pub fn on_progress_report(
         &mut self,
         tag = PROGRESS_REPORT,
-        from = GhosttyTerminalProgressReportFn(
+        from = TerminalProgressReportFn(
             progress: *const ffi::TerminalProgressReport
         ),
         to = <'t>ProgressReportFn(ProgressReport<'t>),
@@ -2422,6 +2505,46 @@ mod tests {
             original
         );
     }
+
+    /// An older libghostty sends a smaller request that ends before `name`.
+    /// The fields past its `size` must not be read, and `reply` must not
+    /// call whatever lies where the reply function would be.
+    #[test]
+    fn clipboard_write_from_an_older_libghostty() {
+        unsafe extern "C" fn reply(
+            _: *const ffi::ClipboardWrite,
+            _: *const ffi::ClipboardWriteReply,
+        ) {
+            panic!("a reply function past the request's size was called");
+        }
+        let data = b"hi";
+        let content = ffi::ClipboardContent {
+            mime: ffi::String::from("text/plain"),
+            data: ffi::String {
+                ptr: data.as_ptr(),
+                len: data.len(),
+            },
+        };
+        let raw = ffi::ClipboardWrite {
+            size: std::mem::offset_of!(ffi::ClipboardWrite, name),
+            location: ffi::ClipboardLocation::PRIMARY,
+            contents: &raw const content,
+            contents_len: 1,
+            name: ffi::String::from("program"),
+            granted: true,
+            can_remember: true,
+            reply: Some(reply),
+            ..ffi::sized!(ffi::ClipboardWrite)
+        };
+        // SAFETY: `raw` outlives the borrow, matching the callback contract.
+        let write = unsafe { ClipboardWrite::from_raw(&raw const raw) };
+        assert_eq!(write.location(), ClipboardLocation::Primary);
+        assert_eq!(write.contents().next().unwrap().data, b"hi");
+        assert!(write.name().is_empty());
+        assert!(!write.granted());
+        assert!(!write.can_remember());
+        write.reply(Ok(()), false);
+    }
 }
 
 /// Soundness regression tests for
@@ -2448,10 +2571,10 @@ mod miri_soundness {
     #[test]
     fn clipboard_write_with_no_representations() {
         let raw = ffi::ClipboardWrite {
-            size: std::mem::size_of::<ffi::ClipboardWrite>(),
             location: ffi::ClipboardLocation::STANDARD,
             contents: std::ptr::null(),
             contents_len: 0,
+            ..ffi::sized!(ffi::ClipboardWrite)
         };
         // SAFETY: `raw` outlives the borrow, matching the callback contract.
         let write = unsafe { ClipboardWrite::from_raw(&raw) };
