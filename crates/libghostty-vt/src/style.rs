@@ -147,9 +147,7 @@ impl TryFrom<ffi::Style> for Style {
             invisible: value.invisible,
             strikethrough: value.strikethrough,
             overline: value.overline,
-            #[expect(clippy::cast_sign_loss, reason = "bindgen ain't perfect")]
-            underline: Underline::try_from(value.underline)
-                .map_err(|_| Error::InvalidValue)?,
+            underline: Underline::try_from(value.underline).map_err(|_| Error::InvalidValue)?,
         })
     }
 }
@@ -169,7 +167,6 @@ impl From<Style> for ffi::Style {
             invisible: value.invisible,
             strikethrough: value.strikethrough,
             overline: value.overline,
-            #[expect(clippy::cast_possible_wrap, reason = "bindgen ain't perfect")]
             underline: i32::from(value.underline),
         }
     }
