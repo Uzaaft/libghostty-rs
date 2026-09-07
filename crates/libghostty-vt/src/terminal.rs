@@ -2085,7 +2085,7 @@ handlers! {
     /// callback shape.
     ///
     /// Call [`ClipboardWrite::reply`] before returning to acknowledge the write.
-    /// Returning without a reply denies it.
+    /// Returning without a reply denies it. Reads use [`Self::on_clipboard_read`].
     pub fn on_clipboard_write(
         &mut self,
         tag = CLIPBOARD_WRITE,
@@ -2095,6 +2095,17 @@ handlers! {
         to = <'t>ClipboardWriteFn(ClipboardWrite<'t>),
     ) |term, func| {
         func(&term, unsafe { ClipboardWrite::from_raw(write) });
+    }
+
+    /// Handle a synchronous clipboard read, including MIME negotiation and listing.
+    /// Reply with [`ClipboardRead::reply`] before returning; no reply denies the read.
+    pub fn on_clipboard_read(
+        &mut self,
+        tag = CLIPBOARD_READ,
+        from = TerminalClipboardReadFn(read: *const ffi::ClipboardRead),
+        to = <'t>ClipboardReadFn(ClipboardRead<'t>),
+    ) |term, func| {
+        func(&term, ClipboardRead { ptr: read, _phan: PhantomData });
     }
 
     /// Callback invoked when the running program requests a desktop
@@ -2547,5 +2558,145 @@ mod miri_soundness {
         let content = unsafe { ClipboardContent::from_raw(&raw) };
         assert_eq!(content.mime, "application/octet-stream");
         assert_eq!(content.data, b"hello");
+    }
+}
+
+/// A synchronous clipboard read request, borrowed for the callback duration.
+#[derive(Debug)]
+pub struct ClipboardRead<'t> {
+    ptr: *const ffi::ClipboardRead,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> ClipboardRead<'t> {
+    /// Requested clipboard destination.
+    pub fn location(&self) -> ClipboardLocation {
+        unsafe { (*self.ptr).location }
+            .try_into()
+            .unwrap_or(ClipboardLocation::Standard)
+    }
+
+    /// Requested MIME types. The strings are binary-safe borrowed protocol values.
+    pub fn mimes(&self) -> impl ExactSizeIterator<Item = &'t [u8]> {
+        // SAFETY: The request owns the array for the callback duration; NULL is
+        // permitted for an empty array and cannot be passed to from_raw_parts.
+        let raw = unsafe { &*self.ptr };
+        let mimes = if raw.mimes_len == 0 {
+            &[]
+        } else {
+            unsafe { std::slice::from_raw_parts(raw.mimes, raw.mimes_len) }
+        };
+        mimes.iter().map(|mime| unsafe { mime.to_bytes() })
+    }
+
+    /// Whether the requester wants a list of available MIME types.
+    pub fn list(&self) -> bool {
+        unsafe { (*self.ptr).list }
+    }
+    /// Program name supplied by the protocol, as arbitrary bytes.
+    pub fn name(&self) -> &'t [u8] {
+        unsafe { (*self.ptr).name.to_bytes() }
+    }
+    /// Whether a prior session grant permits this request.
+    pub fn granted(&self) -> bool {
+        unsafe { (*self.ptr).granted }
+    }
+    /// Whether a successful reply may remember permission for this program.
+    pub fn can_remember(&self) -> bool {
+        unsafe { (*self.ptr).can_remember }
+    }
+
+    /// Answer with binary-safe contents and available MIME types, or a read error.
+    /// All buffers are borrowed only for this synchronous call.
+    pub fn reply(
+        self,
+        result: std::result::Result<&[ClipboardContent<'_>], ClipboardReadError>,
+        available: &[&str],
+        remember: bool,
+    ) {
+        let (result, contents) = match result {
+            Ok(contents) => (ffi::ClipboardReadResult::SUCCESS, contents),
+            Err(error) => (error.into(), &[][..]),
+        };
+        let contents: Vec<_> = contents
+            .iter()
+            .map(|content| ffi::ClipboardContent {
+                mime: content.mime.into(),
+                data: ffi::String {
+                    ptr: content.data.as_ptr(),
+                    len: content.data.len(),
+                },
+            })
+            .collect();
+        let available: Vec<ffi::String> = available.iter().map(|mime| (*mime).into()).collect();
+        let reply = ffi::ClipboardReadReply {
+            result,
+            contents: contents.as_ptr(),
+            contents_len: contents.len(),
+            available: available.as_ptr(),
+            available_len: available.len(),
+            remember,
+            ..ffi::sized!(ffi::ClipboardReadReply)
+        };
+        // SAFETY: All buffers and the terminal-owned request survive this call.
+        if let Some(callback) = unsafe { (*self.ptr).reply } {
+            unsafe { callback(self.ptr, &reply) };
+        }
+    }
+}
+
+/// Failures reported in a clipboard read reply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(i32)]
+pub enum ClipboardReadError {
+    /// Permission was denied.
+    Denied = ffi::ClipboardReadResult::DENIED,
+    /// The clipboard cannot be read by this embedder.
+    Unsupported = ffi::ClipboardReadResult::UNSUPPORTED,
+    /// The clipboard is temporarily unavailable.
+    Busy = ffi::ClipboardReadResult::BUSY,
+    /// An I/O operation failed.
+    IoError = ffi::ClipboardReadResult::IO_ERROR,
+}
+
+#[cfg(all(test, not(miri)))]
+mod clipboard_reply_tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn osc52_read_and_binary_write() {
+        let output = RefCell::new(Vec::new());
+        let written = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        terminal
+            .on_pty_write(|_, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .unwrap();
+        terminal
+            .on_clipboard_write(|_, request| {
+                assert_eq!(request.location(), ClipboardLocation::Standard);
+                written
+                    .borrow_mut()
+                    .extend_from_slice(request.contents().next().unwrap().data);
+                request.reply(Ok(()), false);
+            })
+            .unwrap();
+        terminal
+            .on_clipboard_read(|_, request| {
+                assert_eq!(request.location(), ClipboardLocation::Standard);
+                request.reply(
+                    Ok(&[ClipboardContent {
+                        mime: "text/plain",
+                        data: b"hello",
+                    }]),
+                    &[],
+                    false,
+                );
+            })
+            .unwrap();
+        terminal.vt_write(b"\x1b]52;c;//4=\x1b\\");
+        assert_eq!(*written.borrow(), [0xff, 0xfe]);
+        terminal.vt_write(b"\x1b]52;c;?\x1b\\");
+        assert!(output.borrow().windows(8).any(|bytes| bytes == b"aGVsbG8="));
     }
 }
