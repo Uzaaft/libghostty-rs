@@ -63,24 +63,48 @@ impl<'alloc> Parser<'alloc> {
 
     /// Finalize OSC parsing and retrieve the parsed command.
     ///
-    /// Call this function after feeding all bytes of an OSC sequence to the parser
-    /// using [`Parser::next_byte`] with the exception of the terminating character
-    /// (ESC or ST). This function finalizes the parsing process and returns the
-    /// parsed OSC command. Invalid commands will return a command with type
+    /// Call this after feeding every byte of the sequence to
+    /// [`Parser::next_byte`], except the byte that ended it. Pass that byte
+    /// here as the terminator: 0x07 for BEL, 0x5C for ST, or 0x18 (CAN) or
+    /// 0x1A (SUB) if it was cancelled.
+    /// Call [`Parser::reset`] before parsing the next sequence.
+    ///
+    /// If the sequence is not a valid command, the command has type
     /// [`CommandType::Invalid`].
     ///
-    /// The terminator parameter specifies the byte that terminated the OSC
-    /// sequence (typically 0x07 for BEL or 0x5C for ST after ESC).
-    /// This information is preserved in the parsed command so that responses
-    /// can use the same terminator format for better compatibility with the
-    /// calling program. For commands that do not require a response, this
-    /// parameter is ignored and the resulting command will not retain the
-    /// terminator information.
-    #[expect(clippy::missing_panics_doc, reason = "internal invariant")]
+    /// Commands that reply to the program, such as color queries, end their
+    /// reply the same way the request ended. A terminator of 0x07 (BEL) gets a
+    /// BEL reply, and any other byte gets an ST reply. Commands that don't
+    /// reply ignore the terminator.
+    ///
+    /// If the program cancelled the sequence with CAN (0x18) or SUB (0x1A),
+    /// pass that byte as the terminator. The sequence is then discarded and
+    /// the command has type [`CommandType::Invalid`], whatever command it
+    /// contained. This matches xterm.
+    ///
+    /// ```rust
+    /// use libghostty_vt::osc::{CommandType, Parser};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut parser = Parser::new()?;
+    ///
+    /// // The program sent "ESC ] 2 ; hello" to set the window title, then
+    /// // sent CAN instead of a terminator.
+    /// for byte in *b"2;hello" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// let command = parser.end(0x18);
+    /// // So the window title does not change.
+    /// assert!(matches!(command.command_type(), CommandType::Invalid));
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn end<'p>(&'p mut self, terminator: u8) -> Command<'p, 'alloc> {
-        let raw = unsafe { ffi::ghostty_osc_end(self.0.as_raw(), terminator) };
         Command {
-            inner: Object::new(raw).expect("command must not be null"),
+            // NULL for an invalid or cancelled sequence.
+            // `ghostty_osc_command_type` reports that as an invalid command,
+            // so data is only ever read from a command of a matched type.
+            inner: unsafe { ffi::ghostty_osc_end(self.0.as_raw(), terminator) },
             _parser: PhantomData,
         }
     }
@@ -97,7 +121,7 @@ impl Drop for Parser<'_> {
 /// The command can be queried for its type and associated data.
 #[derive(Debug)]
 pub struct Command<'p, 'alloc> {
-    inner: Object<'alloc, ffi::OscCommandImpl>,
+    inner: ffi::OscCommand,
     _parser: PhantomData<&'p Parser<'alloc>>,
 }
 
@@ -115,7 +139,7 @@ impl<'p> Command<'p, '_> {
         use ffi::OscCommandData as Data;
         use ffi::OscCommandType as Type;
 
-        let raw_type = unsafe { ffi::ghostty_osc_command_type(self.inner.as_raw()) };
+        let raw_type = unsafe { ffi::ghostty_osc_command_type(self.inner) };
         Some(match raw_type {
             Type::CHANGE_WINDOW_TITLE => CommandType::ChangeWindowTitle {
                 title: self.get(Data::CHANGE_WINDOW_TITLE_STR)?,
@@ -150,9 +174,8 @@ impl<'p> Command<'p, '_> {
 
     fn get<T>(&self, tag: ffi::OscCommandData::Type) -> Option<T> {
         let mut value = MaybeUninit::<T>::zeroed();
-        let result = unsafe {
-            ffi::ghostty_osc_command_data(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
-        };
+        let result =
+            unsafe { ffi::ghostty_osc_command_data(self.inner, tag, value.as_mut_ptr().cast()) };
 
         if result {
             // SAFETY: Value should be initialized after successful call.
@@ -164,7 +187,6 @@ impl<'p> Command<'p, '_> {
 }
 
 /// Type of an OSC command.
-#[repr(u32)]
 #[derive(Debug, Clone, Default)]
 #[expect(missing_docs, reason = "missing upstream docs")]
 pub enum CommandType<'p> {
