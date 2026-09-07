@@ -1747,6 +1747,219 @@ pub enum ClipboardWriteError {
     IoError = ffi::ClipboardWriteResult::IO_ERROR,
 }
 
+/// A synchronous request to read clipboard contents.
+///
+/// The request is borrowed and valid only for the callback duration.
+///
+/// The read is answered by calling [`reply`](Self::reply). This must happen
+/// before the callback returns. Returning without replying answers the
+/// program with an empty clipboard (OSC 52) or EPERM (OSC 5522).
+#[derive(Debug)]
+pub struct ClipboardRead<'t> {
+    ptr: *const ffi::ClipboardRead,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> ClipboardRead<'t> {
+    /// # Safety
+    ///
+    /// Caller must ensure that the given pointer is valid for `'t`.
+    unsafe fn from_raw(ptr: *const ffi::ClipboardRead) -> Self {
+        Self {
+            ptr,
+            _phan: PhantomData,
+        }
+    }
+
+    /// Clipboard to read.
+    ///
+    /// Locations this version of the bindings does not know about are
+    /// reported as [`ClipboardLocation::Standard`]. That only happens when
+    /// linking a newer libghostty than these bindings were generated for.
+    #[must_use]
+    pub fn location(&self) -> ClipboardLocation {
+        // SAFETY: The request lives for the callback duration.
+        unsafe { (*self.ptr).location }
+            .try_into()
+            .unwrap_or(ClipboardLocation::Standard)
+    }
+
+    /// The MIME types the program wants, in order of preference. Protocols
+    /// that only carry text (OSC 52) request `text/plain`.
+    ///
+    /// The values come straight from the program, so they are exposed as
+    /// raw bytes.
+    #[must_use]
+    pub fn mimes(&self) -> impl ExactSizeIterator<Item = &'t [u8]> {
+        // SAFETY: The request lives for the callback duration.
+        let raw = unsafe { &*self.ptr };
+        let mimes: &'t [ffi::String] = if raw.mimes_len == 0 {
+            // `mimes` is NULL when empty, which `from_raw_parts` rejects.
+            &[]
+        } else {
+            // SAFETY: libghostty provides `mimes_len` strings that live for
+            // the callback duration.
+            unsafe { std::slice::from_raw_parts(raw.mimes, raw.mimes_len) }
+        };
+        // SAFETY: Each string lives for the callback duration.
+        mimes.iter().map(|mime| unsafe { mime.to_bytes() })
+    }
+
+    /// True if the program also wants the list of MIME types available on
+    /// the clipboard, delivered through the `available` argument of
+    /// [`reply`](Self::reply).
+    #[must_use]
+    pub fn list(&self) -> bool {
+        // SAFETY: The request lives for the callback duration.
+        unsafe { (*self.ptr).list }
+    }
+
+    /// Name of the requesting program for permission prompts, if the protocol
+    /// carries one. Empty otherwise.
+    #[must_use]
+    pub fn name(&self) -> &'t [u8] {
+        // SAFETY: The request and its strings live for the callback duration.
+        unsafe { (*self.ptr).name.to_bytes() }
+    }
+
+    /// True if the terminal already holds a session grant for this request
+    /// (kitty clipboard protocol passwords). The embedder should skip any
+    /// permission prompt and serve the read.
+    ///
+    /// Always false when [`mimes`](Self::mimes) is empty: such a request is
+    /// served without a prompt (see [`Terminal::on_clipboard_read`]), so the
+    /// terminal never consults grants for it and a one-time password is
+    /// preserved for the follow-up data read.
+    #[must_use]
+    pub fn granted(&self) -> bool {
+        // SAFETY: The request lives for the callback duration.
+        unsafe { (*self.ptr).granted }
+    }
+
+    /// True if the program supplied a session password, so the embedder may
+    /// offer to remember the user's decision through the `remember` argument
+    /// of [`reply`](Self::reply). When false, `remember` is ignored.
+    #[must_use]
+    pub fn can_remember(&self) -> bool {
+        // SAFETY: The request lives for the callback duration.
+        unsafe { (*self.ptr).can_remember }
+    }
+
+    /// Answer the read.
+    ///
+    /// Any error answers the program with an empty clipboard (OSC 52) or the
+    /// matching protocol status (OSC 5522: EPERM, ENOSYS, EBUSY, EIO); the
+    /// other arguments are ignored in that case. On success, `contents`
+    /// should carry one representation per requested MIME type
+    /// ([`mimes`](Self::mimes)) that the clipboard has; unrequested
+    /// representations are ignored. Protocols that carry a single text value
+    /// (OSC 52) use the first entry with a text MIME type such as
+    /// `text/plain`.
+    ///
+    /// `available` lists all MIME types available on the clipboard. It is
+    /// only used when [`list`](Self::list) is set.
+    ///
+    /// `remember` records a session grant so future requests from the same
+    /// program skip the permission prompt. It is only honored on success when
+    /// [`can_remember`](Self::can_remember) is set.
+    ///
+    /// All arguments are borrowed only for the duration of this call.
+    pub fn reply(
+        self,
+        result: std::result::Result<&[ClipboardReplyContent<'_>], ClipboardReadError>,
+        available: &[ClipboardMime<'_>],
+        remember: bool,
+    ) {
+        let (result, contents) = match result {
+            Ok(contents) => (ffi::ClipboardReadResult::SUCCESS, contents),
+            Err(error) => (error.into(), &[][..]),
+        };
+        // Both wrapper types are `repr(transparent)` over their C
+        // counterparts, so the slices can be handed over without copying.
+        let reply = ffi::ClipboardReadReply {
+            result,
+            contents: contents.as_ptr().cast(),
+            contents_len: contents.len(),
+            available: available.as_ptr().cast(),
+            available_len: available.len(),
+            remember,
+            ..ffi::sized!(ffi::ClipboardReadReply)
+        };
+        // SAFETY: The request lives for the callback duration.
+        if let Some(callback) = unsafe { (*self.ptr).reply } {
+            // SAFETY: The reply and the buffers it points to only need to
+            // outlive this synchronous call.
+            unsafe { callback(self.ptr, &raw const reply) };
+        }
+    }
+}
+
+/// One MIME representation in a [`ClipboardRead::reply`].
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct ClipboardReplyContent<'a> {
+    raw: ffi::ClipboardContent,
+    _phan: PhantomData<&'a [u8]>,
+}
+
+impl<'a> ClipboardReplyContent<'a> {
+    /// A representation of the clipboard contents with the given MIME type.
+    ///
+    /// The data is binary-safe.
+    #[must_use]
+    pub const fn new(mime: &'a str, data: &'a [u8]) -> Self {
+        Self {
+            raw: ffi::ClipboardContent {
+                mime: ffi::String {
+                    ptr: mime.as_ptr(),
+                    len: mime.len(),
+                },
+                data: ffi::String {
+                    ptr: data.as_ptr(),
+                    len: data.len(),
+                },
+            },
+            _phan: PhantomData,
+        }
+    }
+}
+
+/// A MIME type listed in a [`ClipboardRead::reply`].
+#[derive(Clone, Copy, Debug)]
+#[repr(transparent)]
+pub struct ClipboardMime<'a> {
+    raw: ffi::String,
+    _phan: PhantomData<&'a str>,
+}
+
+impl<'a> ClipboardMime<'a> {
+    /// A MIME type available on the clipboard.
+    #[must_use]
+    pub const fn new(mime: &'a str) -> Self {
+        Self {
+            raw: ffi::String {
+                ptr: mime.as_ptr(),
+                len: mime.len(),
+            },
+            _phan: PhantomData,
+        }
+    }
+}
+
+/// Errors that can be returned in a [`ClipboardRead::reply`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(i32)]
+pub enum ClipboardReadError {
+    /// The clipboard read was denied by policy or the user.
+    Denied = ffi::ClipboardReadResult::DENIED,
+    /// The embedder cannot read this clipboard.
+    Unsupported = ffi::ClipboardReadResult::UNSUPPORTED,
+    /// The clipboard is temporarily unavailable.
+    Busy = ffi::ClipboardReadResult::BUSY,
+    /// Reading the clipboard failed due to an I/O error.
+    IoError = ffi::ClipboardReadResult::IO_ERROR,
+}
+
 /// A request to show a desktop notification.
 #[derive(Debug, Copy, Clone)]
 pub struct DesktopNotification<'t> {
@@ -2261,6 +2474,9 @@ handlers! {
     /// and future requests from this same program will be
     /// [granted](ClipboardWrite::granted) so the embedder can skip permission
     /// requests.
+    ///
+    /// Clipboard read requests (OSC 52 `?` and OSC 5522 reads) are delivered
+    /// to [`Self::on_clipboard_read`] instead.
     pub fn on_clipboard_write(
         &mut self,
         tag = CLIPBOARD_WRITE,
@@ -2272,6 +2488,47 @@ handlers! {
         // SAFETY: The request is only borrowed for the callback duration,
         // which `ClipboardWrite`'s lifetime enforces.
         func(term, unsafe { ClipboardWrite::from_raw(write) });
+    }
+
+    /// Call the given function when the running program requests clipboard
+    /// contents via OSC 52 with a `?` payload or a Kitty clipboard (OSC 5522)
+    /// read.
+    ///
+    /// Answering lets the program read the user's clipboard, so the embedder
+    /// is expected to mediate consent. Because the read is synchronous, an
+    /// embedder that needs to ask the user must block (for example by running
+    /// a modal prompt) until it has an answer; the VT stream waits until the
+    /// callback returns.
+    ///
+    /// Answer by calling [`ClipboardRead::reply`] before returning. See
+    /// [`ClipboardRead`] for the full contract.
+    ///
+    /// OSC 5522 requests carry the program's MIME list, name, and password
+    /// grant state; a reply that sets `remember` records a session grant so
+    /// later requests with the same password arrive with
+    /// [`granted`](ClipboardRead::granted) set. Kitty itself serves a request
+    /// for only the targets listing ([`list`](ClipboardRead::list) with no
+    /// [`mimes`](ClipboardRead::mimes)) without prompting, and embedders are
+    /// expected to do the same; the terminal never consults grants for such
+    /// requests (`granted` is false and one-time passwords are not consumed).
+    ///
+    /// <div class="warning">
+    ///
+    /// Installing this callback also enables Kitty paste events (mode 5522):
+    /// pasting sends the program an event instead of the text, and the
+    /// program's follow-up read arrives here with `granted` set since the user
+    /// already pasted.
+    ///
+    /// </div>
+    pub fn on_clipboard_read(
+        &mut self,
+        tag = CLIPBOARD_READ,
+        from = TerminalClipboardReadFn(read: *const ffi::ClipboardRead),
+        to = <'t>ClipboardReadFn(ClipboardRead<'t>),
+    ) |term, func| {
+        // SAFETY: The request is only borrowed for the callback duration,
+        // which `ClipboardRead`'s lifetime enforces.
+        func(term, unsafe { ClipboardRead::from_raw(read) });
     }
 
     /// Callback invoked when the running program requests a desktop
@@ -2308,6 +2565,152 @@ mod tests {
     use crate::render::CursorVisualStyle;
     use std::cell::{Cell, RefCell};
     use std::mem::ManuallyDrop;
+
+    /// What a clipboard read callback observed about its request.
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct SeenRead {
+        location: Option<ClipboardLocation>,
+        mimes: Vec<Vec<u8>>,
+        list: bool,
+        name: Vec<u8>,
+        granted: bool,
+        can_remember: bool,
+    }
+
+    /// Feed `input` to a terminal whose clipboard read callback records the
+    /// request and hands it to `answer`, returning what was seen and what
+    /// the terminal wrote back to the pty.
+    ///
+    /// Assertions happen outside the callback: a panic inside it would
+    /// abort the whole test binary instead of failing the test.
+    fn clipboard_read(
+        input: &[u8],
+        answer: impl Fn(ClipboardRead<'_>),
+    ) -> (Vec<SeenRead>, Vec<u8>) {
+        let seen = RefCell::new(Vec::new());
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .expect("callback should register");
+        terminal
+            .on_clipboard_read(|_term, request| {
+                seen.borrow_mut().push(SeenRead {
+                    location: Some(request.location()),
+                    mimes: request.mimes().map(<[u8]>::to_vec).collect(),
+                    list: request.list(),
+                    name: request.name().to_vec(),
+                    granted: request.granted(),
+                    can_remember: request.can_remember(),
+                });
+                answer(request);
+            })
+            .expect("callback should register");
+        terminal.vt_write(input);
+        drop(terminal);
+        (seen.into_inner(), output.into_inner())
+    }
+
+    #[test]
+    fn osc52_clipboard_read() {
+        let (seen, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
+            request.reply(
+                Ok(&[ClipboardReplyContent::new("text/plain", b"hello")]),
+                &[],
+                false,
+            );
+        });
+        assert_eq!(
+            seen,
+            [SeenRead {
+                location: Some(ClipboardLocation::Standard),
+                mimes: vec![b"text/plain".to_vec()],
+                ..SeenRead::default()
+            }]
+        );
+        assert_eq!(output, b"\x1b]52;c;aGVsbG8=\x1b\\");
+
+        // Errors and missing replies both answer with an empty clipboard.
+        let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
+            request.reply(Err(ClipboardReadError::Denied), &[], false);
+        });
+        assert_eq!(output, b"\x1b]52;c;\x1b\\");
+        let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |_request| {});
+        assert_eq!(output, b"\x1b]52;c;\x1b\\");
+    }
+
+    #[test]
+    fn osc5522_clipboard_read() {
+        // Requests text/plain plus the listing ("."), from a program named
+        // "app" without a password.
+        let (seen, output) = clipboard_read(
+            b"\x1b]5522;type=read:id=r1:name=YXBw;dGV4dC9wbGFpbiAu\x1b\\",
+            |request| {
+                request.reply(
+                    Ok(&[
+                        ClipboardReplyContent::new("text/plain", b"hello"),
+                        // Not requested, so it must be ignored.
+                        ClipboardReplyContent::new("image/png", b"png"),
+                    ]),
+                    &[
+                        ClipboardMime::new("text/plain"),
+                        ClipboardMime::new("image/png"),
+                    ],
+                    false,
+                );
+            },
+        );
+        assert_eq!(
+            seen,
+            [SeenRead {
+                location: Some(ClipboardLocation::Standard),
+                mimes: vec![b"text/plain".to_vec()],
+                list: true,
+                name: b"app".to_vec(),
+                ..SeenRead::default()
+            }]
+        );
+        assert_eq!(
+            output,
+            concat!(
+                "\x1b]5522;type=read:status=OK:id=r1\x1b\\",
+                // "text/plain image/png\n"
+                "\x1b]5522;type=read:status=DATA:id=r1:mime=Lg==;dGV4dC9wbGFpbiBpbWFnZS9wbmcK\x1b\\",
+                "\x1b]5522;type=read:status=DATA:id=r1:mime=dGV4dC9wbGFpbg==;aGVsbG8=\x1b\\",
+                "\x1b]5522;type=read:status=DONE:id=r1\x1b\\",
+            )
+            .as_bytes()
+        );
+
+        // Errors map to protocol statuses, and a missing reply is EPERM.
+        let (_, output) = clipboard_read(
+            b"\x1b]5522;type=read:id=r2;dGV4dC9wbGFpbg==\x1b\\",
+            |request| request.reply(Err(ClipboardReadError::Busy), &[], false),
+        );
+        assert_eq!(output, b"\x1b]5522;type=read:status=EBUSY:id=r2\x1b\\");
+        let (_, output) = clipboard_read(
+            b"\x1b]5522;type=read:id=r3;dGV4dC9wbGFpbg==\x1b\\",
+            |_request| {},
+        );
+        assert_eq!(output, b"\x1b]5522;type=read:status=EPERM:id=r3\x1b\\");
+    }
+
+    #[test]
+    fn osc5522_clipboard_read_remembers_password_grants() {
+        // Two reads from "app" with the same password ("secret"): remembering
+        // the first grant makes the second arrive already granted. Per the
+        // spec, a password without a name is no password.
+        let read = "\x1b]5522;type=read:id=a:name=YXBw:pw=c2VjcmV0;dGV4dC9wbGFpbg==\x1b\\";
+        let (seen, _) = clipboard_read(read.repeat(2).as_bytes(), |request| {
+            request.reply(
+                Ok(&[ClipboardReplyContent::new("text/plain", b"hi")]),
+                &[],
+                true,
+            );
+        });
+        let grants: Vec<_> = seen.iter().map(|s| (s.can_remember, s.granted)).collect();
+        assert_eq!(grants, [(true, false), (true, true)]);
+    }
 
     #[test]
     fn resize_pull_scrollback_controls_growing_rows() {
