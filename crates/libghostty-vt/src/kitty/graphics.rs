@@ -894,6 +894,13 @@ pub fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
             let data = unsafe { std::slice::from_raw_parts(data, data_len) };
 
             match decoder.decode_png(&alloc, data) {
+                // libghostty frees the buffer with the allocator it passed
+                // in, so a buffer from any other allocator would be freed
+                // with the wrong one. `DecodePng` is a safe trait and
+                // `Bytes::new` type-checks here, so reject such an image
+                // instead of trusting the decoder; dropping it frees the
+                // buffer with its own allocator.
+                Some(result) if result.data.allocator() != alloc.to_raw() => false,
                 Some(result) => {
                     // IMPORTANT: Do NOT run the Rust destructor here
                     // to avoid double-freeing the byte buffer.
@@ -935,8 +942,10 @@ pub fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
 pub trait DecodePng: 'static {
     /// Decode a PNG into 8-bit RGBA pixels.
     ///
-    /// The returned image's byte buffer *must* be allocated by
-    /// the provided allocator.
+    /// The returned image's byte buffer must be allocated with
+    /// [`Bytes::new_with_alloc`] from the provided allocator, since
+    /// libghostty frees it with that allocator. An image whose buffer
+    /// comes from anywhere else is rejected as if decoding failed.
     fn decode_png<'alloc>(
         &mut self,
         alloc: &'alloc Allocator<'_>,
@@ -947,14 +956,26 @@ pub trait DecodePng: 'static {
 /// A PNG decoder for [`set_png_decoder`] using the [`png`] crate.
 ///
 /// ```rust
-/// use ghostty::kitty::graphics;
+/// use libghostty_vt::kitty::graphics;
 ///
-/// graphics::set_png_decoder(RustPngDecoder::new());
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// graphics::set_png_decoder(Some(Box::new(graphics::RustPngDecoder::new())))?;
+/// # Ok(())
+/// # }
 /// ```
 #[cfg(all(feature = "kitty-graphics", feature = "png"))]
-#[derive(Clone, Debug)]
-pub struct RustPngDecoder {
-    buf: Vec<u8>,
+#[derive(Clone, Debug, Default)]
+// Keep the decoder constructible only through `new` and `Default`, so that
+// it can grow internal state later without breaking callers.
+#[non_exhaustive]
+pub struct RustPngDecoder;
+#[cfg(all(feature = "kitty-graphics", feature = "png"))]
+impl RustPngDecoder {
+    /// Create a PNG decoder.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self
+    }
 }
 #[cfg(all(feature = "kitty-graphics", feature = "png"))]
 impl DecodePng for RustPngDecoder {
@@ -963,33 +984,64 @@ impl DecodePng for RustPngDecoder {
         alloc: &'alloc Allocator<'_>,
         data: &[u8],
     ) -> Option<DecodedImage<'alloc>> {
-        use png::{Decoder, Transformations};
+        use png::{BitDepth, ColorType, Decoder, Transformations};
         use std::io::Cursor;
 
         let mut decoder = Decoder::new(Cursor::new(data));
 
         // libghostty only accepts RGBA8 data, so we have to apply some
         // transformations to accept images in other formats, namely
-        // expanding palette and grayscale colors to RGBA8 and stripping
+        // expanding palette colors, adding alpha, and stripping
         // 16-bit color depth information back down into 8-bit.
         decoder.set_transformations(Transformations::ALPHA | Transformations::STRIP_16);
 
-        let mut frame = decoder.read_info().ok()?;
-        let buf_size = frame.output_buffer_size()?;
-        if buf_size > self.buf.capacity() {
-            self.buf.reserve(buf_size - self.buf.capacity());
+        let mut reader = decoder.read_info().ok()?;
+        let (width, height) = reader.info().size();
+        let pixels = (width as usize).checked_mul(height as usize)?;
+        let rgba_len = pixels.checked_mul(4)?;
+
+        // Allocate the output with the provided allocator *before* decoding
+        // anything. libghostty caps what the decoder may allocate, and the
+        // dimensions come straight from untrusted PNG headers: decoding into
+        // an image-sized buffer on the global heap would sidestep that cap
+        // and let a tiny PNG claim gigabytes. (The png crate's own row and
+        // zlib buffers stay on the global heap, but they are bounded by the
+        // row length and the compressed size, not the image size.)
+        let mut bytes = Bytes::new_with_alloc(alloc, rgba_len).ok()?;
+
+        // `ALPHA` expands palettes and adds alpha, but keeps grayscale as two
+        // channels, so the decoded output is either RGBA8 or GA8. Both fit in
+        // the RGBA buffer, so decode into its prefix and expand GA in place.
+        let (decoded_len, gray_alpha) = match reader.output_color_type() {
+            (ColorType::Rgba, BitDepth::Eight) => (rgba_len, false),
+            (ColorType::GrayscaleAlpha, BitDepth::Eight) => (pixels.checked_mul(2)?, true),
+            _ => return None,
+        };
+        // Bail out instead of letting slicing panic below, since a panic
+        // here would abort through the `extern "C"` callback.
+        if reader.output_buffer_size()? != decoded_len {
+            return None;
         }
-        self.buf.fill(0);
 
-        let info = frame.next_frame(&mut self.buf).ok()?;
+        let info = reader.next_frame(&mut bytes[..decoded_len]).ok()?;
+        if info.buffer_size() != decoded_len {
+            return None;
+        }
+        reader.finish().ok()?;
 
-        let mut bytes = Bytes::new_with_alloc(alloc, info.buffer_size()).ok()?;
-        bytes.copy_from_slice(&self.buf[..info.buffer_size()]);
-        frame.finish().ok()?;
+        if gray_alpha {
+            // Walk backwards: pixel `i` is read from `2i..2i + 2` and written
+            // to `4i..4i + 4`, which never overlaps a lower pixel that has not
+            // been read yet.
+            for i in (0..pixels).rev() {
+                let (luma, alpha) = (bytes[2 * i], bytes[2 * i + 1]);
+                bytes[4 * i..4 * i + 4].copy_from_slice(&[luma, luma, luma, alpha]);
+            }
+        }
 
         Some(DecodedImage {
-            width: info.width,
-            height: info.height,
+            width,
+            height,
             data: bytes,
         })
     }
@@ -1009,13 +1061,188 @@ pub struct DecodedImage<'alloc> {
     /// Byte buffer containing the decoded RGBA pixel data.
     pub data: Bytes<'alloc>,
 }
-impl From<DecodedImage<'_>> for ffi::SysImage {
-    fn from(mut value: DecodedImage<'_>) -> Self {
-        Self {
-            width: value.width,
-            height: value.height,
-            data: value.data.as_mut_ptr(),
-            data_len: value.data.len(),
+
+#[cfg(all(test, not(miri), feature = "kitty-graphics", feature = "png"))]
+mod png_decoder_tests {
+    use super::*;
+    use crate::alloc::testing::Capped;
+
+    struct Png<'a> {
+        width: u32,
+        height: u32,
+        color: png::ColorType,
+        depth: png::BitDepth,
+        palette: Option<&'a [u8]>,
+        trns: Option<&'a [u8]>,
+        pixels: &'a [u8],
+    }
+
+    impl Png<'_> {
+        fn encode(&self) -> Vec<u8> {
+            let mut out = Vec::new();
+            let mut encoder = png::Encoder::new(&mut out, self.width, self.height);
+            encoder.set_color(self.color);
+            encoder.set_depth(self.depth);
+            if let Some(palette) = self.palette {
+                encoder.set_palette(palette);
+            }
+            if let Some(trns) = self.trns {
+                encoder.set_trns(trns);
+            }
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(self.pixels)
+                .unwrap();
+            out
         }
+    }
+
+    fn png(color: png::ColorType, depth: png::BitDepth, pixels: &[u8]) -> Png<'_> {
+        Png {
+            width: 1,
+            height: 1,
+            color,
+            depth,
+            palette: None,
+            trns: None,
+            pixels,
+        }
+    }
+
+    fn decode(encoded: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+        RustPngDecoder
+            .decode_png(&Allocator::GLOBAL, encoded)
+            .map(|image| (image.width, image.height, image.data.to_vec()))
+    }
+
+    #[test]
+    fn decodes_every_color_type_to_rgba8() {
+        use png::{BitDepth, ColorType};
+
+        let cases: [(&str, Png<'_>, [u8; 4]); 8] = [
+            (
+                "rgba8",
+                png(ColorType::Rgba, BitDepth::Eight, &[255, 0, 128, 7]),
+                [255, 0, 128, 7],
+            ),
+            (
+                "rgb8 gains opaque alpha",
+                png(ColorType::Rgb, BitDepth::Eight, &[1, 2, 3]),
+                [1, 2, 3, 255],
+            ),
+            (
+                "rgba16 is stripped to 8 bits",
+                png(
+                    ColorType::Rgba,
+                    BitDepth::Sixteen,
+                    &[0xAB, 0xCD, 0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC],
+                ),
+                [0xAB, 0x12, 0x56, 0x9A],
+            ),
+            (
+                "gray8",
+                png(ColorType::Grayscale, BitDepth::Eight, &[128]),
+                [128, 128, 128, 255],
+            ),
+            (
+                "gray2 is expanded to 8 bits",
+                png(ColorType::Grayscale, BitDepth::Two, &[0b1000_0000]),
+                [0xAA, 0xAA, 0xAA, 255],
+            ),
+            (
+                "gray+alpha8",
+                png(ColorType::GrayscaleAlpha, BitDepth::Eight, &[64, 96]),
+                [64, 64, 64, 96],
+            ),
+            (
+                "palette",
+                Png {
+                    palette: Some(&[0, 0, 0, 10, 20, 30]),
+                    ..png(ColorType::Indexed, BitDepth::Eight, &[1])
+                },
+                [10, 20, 30, 255],
+            ),
+            (
+                "palette with tRNS",
+                Png {
+                    palette: Some(&[0, 0, 0, 10, 20, 30]),
+                    trns: Some(&[255, 42]),
+                    ..png(ColorType::Indexed, BitDepth::Eight, &[1])
+                },
+                [10, 20, 30, 42],
+            ),
+        ];
+
+        for (name, image, expected) in cases {
+            assert_eq!(
+                decode(&image.encode()),
+                Some((1, 1, expected.to_vec())),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn expands_multi_pixel_grayscale_alpha_in_place() {
+        // Several pixels exercise the backwards in-place expansion; a single
+        // pixel would not catch overlapping reads and writes.
+        let pixels = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        let image = Png {
+            width: 3,
+            height: 2,
+            ..png(
+                png::ColorType::GrayscaleAlpha,
+                png::BitDepth::Eight,
+                &pixels,
+            )
+        };
+        let expected: Vec<u8> = pixels
+            .chunks_exact(2)
+            .flat_map(|ga| [ga[0], ga[0], ga[0], ga[1]])
+            .collect();
+        assert_eq!(decode(&image.encode()), Some((3, 2, expected)));
+    }
+
+    #[test]
+    fn rejects_malformed_input() {
+        let encoded = png(png::ColorType::Rgba, png::BitDepth::Eight, &[1, 2, 3, 4]).encode();
+        assert_eq!(decode(&[]), None);
+        assert_eq!(decode(b"definitely not a png"), None);
+        assert_eq!(decode(&encoded[..encoded.len() / 2]), None);
+    }
+
+    #[test]
+    fn oversized_dimensions_are_rejected_by_the_provided_allocator() {
+        // A tiny PNG whose header claims 16000x16000 RGBA8 pixels (~1 GB).
+        // The decoder must ask the provided allocator for the output first,
+        // so the cap rejects it before any work is done on the global heap.
+        let mut encoded = png(png::ColorType::Rgba, png::BitDepth::Eight, &[0; 4]).encode();
+        encoded[16..24].copy_from_slice(&[0, 0, 0x3E, 0x80, 0, 0, 0x3E, 0x80]);
+        let crc = crc32(&encoded[12..29]);
+        encoded[29..33].copy_from_slice(&crc.to_be_bytes());
+
+        let capped = Capped::new(1024 * 1024);
+        assert!(
+            RustPngDecoder
+                .decode_png(&capped.allocator(), &encoded)
+                .is_none()
+        );
+        assert_eq!(capped.largest_request(), 16000 * 16000 * 4);
+    }
+
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &byte in bytes {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = if crc & 1 == 0 {
+                    crc >> 1
+                } else {
+                    0xEDB8_8320 ^ (crc >> 1)
+                };
+            }
+        }
+        !crc
     }
 }
