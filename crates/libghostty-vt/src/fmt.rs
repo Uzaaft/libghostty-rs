@@ -202,6 +202,38 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         })
     }
 
+    /// Run the formatter and stream output to a writer.
+    ///
+    /// Each call formats the current terminal state and invokes the writer
+    /// synchronously as output becomes available. The writer may be called
+    /// more than once.
+    ///
+    /// If an error occurs, the writer may already contain a partial formatted
+    /// output. The operation cannot be resumed from that partial output. This
+    /// function does not flush or make the writer's destination durable.
+    ///
+    /// The writer runs inside a call into libghostty, so a panic in it aborts
+    /// the process.
+    ///
+    /// # Safety
+    ///
+    /// The writer must not call formatter or terminal APIs using this
+    /// formatter or its terminal. The borrow checker can't rule that out,
+    /// since the formatter only borrows its terminal immutably, and some
+    /// terminal methods that take `&self` still change libghostty state (e.g.
+    /// [`Terminal::track_grid_ref`](crate::Terminal::track_grid_ref)).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::IoError`] if the writer rejects output, and
+    /// [`Error::LimitExceeded`] if output accounting overflows.
+    pub unsafe fn format_write<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
+        let writer = crate::io::to_writer(writer);
+        // SAFETY: The writer outlives this synchronous call, and the caller
+        // promises it doesn't reach this formatter or its terminal.
+        from_result(unsafe { ffi::ghostty_formatter_format(self.inner.as_raw(), writer) })
+    }
+
     /// Run the formatter and return an allocated buffer with the output.
     ///
     /// Each call formats the current terminal state. The buffer is allocated
@@ -292,4 +324,152 @@ pub enum Format {
     Vt = ffi::FormatterFormat::VT,
     /// HTML with inline styles.
     Html = ffi::FormatterFormat::HTML,
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::*;
+
+    /// A writer that accepts at most one byte per write, counting calls.
+    struct ByteAtATime {
+        bytes: Vec<u8>,
+        writes: usize,
+    }
+
+    impl std::io::Write for ByteAtATime {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.writes += 1;
+            self.bytes.extend_from_slice(&buf[..1]);
+            Ok(1)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A writer that rejects everything.
+    struct Reject;
+
+    impl std::io::Write for Reject {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("rejected"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn format_write<W: std::io::Write>(
+        formatter: &mut Formatter<'_, '_, '_>,
+        writer: &mut W,
+    ) -> Result<()> {
+        // SAFETY: None of the test writers touch the terminal.
+        unsafe { formatter.format_write(writer) }
+    }
+
+    fn format_buf(formatter: &mut Formatter<'_, '_, '_>) -> Vec<u8> {
+        let mut buf = vec![0; formatter.format_len().unwrap()];
+        let len = formatter.format_buf(&mut buf).unwrap();
+        buf.truncate(len);
+        buf
+    }
+
+    #[test]
+    fn writer_output_matches_buffer_output_in_every_format() {
+        let mut terminal = Terminal::new(20, 3).unwrap();
+        terminal.vt_write(b"plain \x1b[1;31mbold red\x1b[0m\r\nsecond line");
+        for format in [Format::Plain, Format::Vt, Format::Html] {
+            let options = FormatterOptions::new().with_format(format);
+            let mut formatter = Formatter::new(&terminal, options).unwrap();
+            let expected = format_buf(&mut formatter);
+            assert!(!expected.is_empty(), "{format:?}");
+
+            let mut actual = Vec::new();
+            format_write(&mut formatter, &mut actual).unwrap();
+            assert_eq!(actual, expected, "{format:?}");
+        }
+    }
+
+    #[test]
+    fn partial_writes_are_retried_until_complete() {
+        let mut terminal = Terminal::new(20, 3).unwrap();
+        terminal.vt_write(b"hello\r\nworld");
+        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        let expected = format_buf(&mut formatter);
+
+        let mut writer = ByteAtATime {
+            bytes: Vec::new(),
+            writes: 0,
+        };
+        format_write(&mut formatter, &mut writer).unwrap();
+        assert_eq!(writer.bytes, expected);
+        assert_eq!(writer.writes, expected.len());
+    }
+
+    #[test]
+    fn writer_failure_is_an_io_error() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal.vt_write(b"hello");
+        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        assert!(matches!(
+            format_write(&mut formatter, &mut Reject),
+            Err(Error::IoError)
+        ));
+        // The formatter stays usable afterwards.
+        let mut output = Vec::new();
+        format_write(&mut formatter, &mut output).unwrap();
+        assert_eq!(output, b"hello");
+    }
+
+    /// A writer that accepts `chunks` writes, then rejects everything.
+    struct FailAfter {
+        chunks: usize,
+        bytes: Vec<u8>,
+    }
+
+    impl std::io::Write for FailAfter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.chunks == 0 {
+                return Err(std::io::Error::other("rejected"));
+            }
+            self.chunks -= 1;
+            self.bytes.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn large_output_streams_in_several_writes() {
+        // Far more output than libghostty buffers before handing it over.
+        let mut terminal = Terminal::new(200, 100).unwrap();
+        for i in 0..100 {
+            terminal.vt_write(format!("{i:0>199}\r\n").as_bytes());
+        }
+        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        let expected = format_buf(&mut formatter);
+        assert!(expected.len() > 16 * 1024);
+
+        let mut writer = FailAfter {
+            chunks: usize::MAX,
+            bytes: Vec::new(),
+        };
+        format_write(&mut formatter, &mut writer).unwrap();
+        assert_eq!(writer.bytes, expected);
+        assert!(usize::MAX - writer.chunks > 1, "output came in one write");
+
+        // A writer that fails after the first chunk fails the whole call,
+        // having received only part of the output.
+        let mut writer = FailAfter {
+            chunks: 1,
+            bytes: Vec::new(),
+        };
+        assert!(matches!(
+            format_write(&mut formatter, &mut writer),
+            Err(Error::IoError)
+        ));
+        assert!(!writer.bytes.is_empty() && writer.bytes.len() < expected.len());
+    }
 }
