@@ -226,6 +226,9 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
     // Keep callbacks in a heap allocation so C can store a userdata pointer
     // to the VTable itself. That pointer remains stable even if Terminal moves.
     vtable: Box<VTable<'alloc, 'cb>>,
+    // Allocated only when a search is created. Sharing this identity token
+    // prevents a new terminal at a recycled native address matching an old search.
+    pub(crate) search_identity: Option<std::rc::Rc<()>>,
 }
 
 /// Default visual style used when the cursor style is reset.
@@ -282,6 +285,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(Self {
             inner: Object::new(raw)?,
             vtable: Box::new(VTable::default()),
+            search_identity: None,
         })
     }
 
@@ -1849,6 +1853,7 @@ macro_rules! handlers {
                     let mut term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
                         inner: obj,
                         vtable: ::core::default::Default::default(),
+                        search_identity: None,
                     });
                     let $t: &$crate::terminal::Terminal = &term;
                     let $func = vtable.$name.as_deref_mut()
