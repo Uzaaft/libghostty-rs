@@ -568,10 +568,21 @@ impl<'alloc> RowIterator<'alloc> {
 
     /// Update the row iterator for a snapshot of the render state,
     /// returning a new row iteration.
-    pub fn update(
-        &mut self,
-        snapshot: &'_ Snapshot<'alloc, '_>,
-    ) -> Result<RowIteration<'alloc, '_>> {
+    ///
+    /// ```compile_fail
+    /// use libghostty_vt::{Terminal, RenderState, render::RowIterator};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut iteration = rows.update(&snapshot).unwrap();
+    /// drop(snapshot); // Iteration still borrows its owning snapshot.
+    /// iteration.next();
+    /// ```
+    pub fn update<'s>(
+        &'s mut self,
+        snapshot: &'s Snapshot<'alloc, '_>,
+    ) -> Result<RowIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -598,8 +609,10 @@ impl RowIteration<'_, '_> {
     /// Advance to the next dirty row, returning its viewport row index.
     pub fn next_dirty(&mut self) -> Option<(u16, &Self)> {
         let mut y = 0;
-        unsafe { ffi::ghostty_render_state_row_iterator_next_dirty(self.iter.0.as_raw(), &mut y) }
-            .then_some((y, self))
+        unsafe {
+            ffi::ghostty_render_state_row_iterator_next_dirty(self.iter.0.as_raw(), &raw mut y)
+        }
+        .then_some((y, self))
     }
 
     /// Iterate over copied cell values from the current row's borrowed buffer.
@@ -710,10 +723,10 @@ impl<'alloc> CellIterator<'alloc> {
 
     /// Update the cell iterator for a new row iteration,
     /// returning a new cell iteration.
-    pub fn update(
-        &mut self,
-        row: &'_ RowIteration<'alloc, '_>,
-    ) -> Result<CellIteration<'alloc, '_>> {
+    pub fn update<'s>(
+        &'s mut self,
+        row: &'s RowIteration<'alloc, '_>,
+    ) -> Result<CellIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
