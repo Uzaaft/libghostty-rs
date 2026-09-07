@@ -86,6 +86,12 @@ fn main() {
 }
 
 const PREFIXES: &[(&str, &str)] = &[
+    ("GhosttySearchOption", "GHOSTTY_SEARCH_OPT"),
+    ("GhosttySysOption", "GHOSTTY_SYS_OPT"),
+    (
+        "GhosttyTerminalUnknownSequenceTag",
+        "GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE",
+    ),
     ("GhosttyOptimizeMode", "GHOSTTY_OPTIMIZE"),
     ("GhosttyKeyEncoderOption", "GHOSTTY_KEY_ENCODER_OPT"),
     ("GhosttyMouseTrackingMode", "GHOSTTY_MOUSE_TRACKING"),
