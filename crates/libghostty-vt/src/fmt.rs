@@ -3,7 +3,7 @@
 //! A formatter captures a reference to a terminal and formatting options.
 //! It can be used repeatedly to produce output that reflects the current
 //! terminal state at the time of each format call.
-use std::{marker::PhantomData, ptr::NonNull};
+use std::marker::PhantomData;
 
 use crate::{
     alloc::{Allocator, Bytes, Object},
@@ -205,8 +205,9 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         };
         from_result(result)?;
 
-        let ptr = NonNull::new(bytes).ok_or(Error::OutOfMemory)?;
-        Ok(unsafe { Bytes::from_raw_parts(ptr, len, alloc) })
+        // SAFETY: On success, libghostty hands over `len` bytes allocated
+        // with `alloc`, or NULL for empty output.
+        Ok(unsafe { Bytes::from_raw_parts(bytes, len, alloc) })
     }
 
     /// Run the formatter and produce output into the caller-provided buffer.
@@ -258,7 +259,7 @@ impl Drop for Formatter<'_, '_, '_> {
 }
 
 /// Output format.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
 pub enum Format {
     /// Plain text (no escape sequences).

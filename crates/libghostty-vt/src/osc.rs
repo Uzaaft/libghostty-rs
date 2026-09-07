@@ -164,7 +164,7 @@ impl<'p> Command<'p, '_> {
 }
 
 /// Type of an OSC command.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Debug, Clone, Default)]
 #[expect(missing_docs, reason = "missing upstream docs")]
 pub enum CommandType<'p> {

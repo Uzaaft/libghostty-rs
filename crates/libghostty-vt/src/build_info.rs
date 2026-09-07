@@ -95,7 +95,7 @@ fn build_info<T>(tag: ffi::BuildInfo::Type) -> Result<T> {
 }
 
 /// The optimization mode libghostty is compiled with.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, int_enum::IntEnum)]
 pub enum OptimizeMode {
     /// Debug mode.
