@@ -479,6 +479,37 @@ impl Snapshot<'_, '_> {
         }
     }
 
+    /// Read all cursor properties in a single call.
+    pub fn cursor(&self) -> Result<Cursor> {
+        let mut raw = ffi::sized!(ffi::RenderStateCursor);
+        from_result(unsafe {
+            ffi::ghostty_render_state_get(
+                self.0.0.as_raw(),
+                ffi::RenderStateData::CURSOR,
+                std::ptr::from_mut(&mut raw).cast(),
+            )
+        })?;
+        Ok(Cursor {
+            viewport: raw.viewport_has_value.then_some(CursorViewport {
+                x: raw.viewport_x,
+                y: raw.viewport_y,
+                at_wide_tail: raw.wide_tail,
+            }),
+            visible: raw.visible,
+            blinking: raw.blinking,
+            password_input: raw.password_input,
+            visual_style: raw
+                .visual_style
+                .try_into()
+                .map_err(|_| Error::InvalidValue)?,
+        })
+    }
+
+    /// Clear global and per-row dirty flags after rendering this snapshot.
+    pub fn clean(&mut self) -> Result<()> {
+        from_result(unsafe { ffi::ghostty_render_state_clean(self.0.0.as_raw()) })
+    }
+
     /// Get the current color information from a render state.
     pub fn colors(&self) -> Result<Colors> {
         let mut colors = ffi::sized!(ffi::RenderStateColors);
@@ -537,10 +568,21 @@ impl<'alloc> RowIterator<'alloc> {
 
     /// Update the row iterator for a snapshot of the render state,
     /// returning a new row iteration.
-    pub fn update(
-        &mut self,
-        snapshot: &'_ Snapshot<'alloc, '_>,
-    ) -> Result<RowIteration<'alloc, '_>> {
+    ///
+    /// ```compile_fail
+    /// use libghostty_vt::{Terminal, RenderState, render::RowIterator};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut iteration = rows.update(&snapshot).unwrap();
+    /// drop(snapshot); // Iteration still borrows its owning snapshot.
+    /// iteration.next();
+    /// ```
+    pub fn update<'s>(
+        &'s mut self,
+        snapshot: &'s Snapshot<'alloc, '_>,
+    ) -> Result<RowIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -564,6 +606,29 @@ impl Drop for RowIterator<'_> {
 }
 
 impl RowIteration<'_, '_> {
+    /// Advance to the next dirty row, returning its viewport row index.
+    pub fn next_dirty(&mut self) -> Option<(u16, &Self)> {
+        let mut y = 0;
+        unsafe {
+            ffi::ghostty_render_state_row_iterator_next_dirty(self.iter.0.as_raw(), &raw mut y)
+        }
+        .then_some((y, self))
+    }
+
+    /// Iterate over copied cell values from the current row's borrowed buffer.
+    ///
+    /// The borrow prevents advancing the iterator while its buffer is in use.
+    pub fn cells_raw(&self) -> Result<impl ExactSizeIterator<Item = Cell> + '_> {
+        let view: ffi::CellsView = self.get(ffi::RenderStateRowData::CELLS_RAW)?;
+        let cells = if view.len == 0 {
+            &[]
+        } else {
+            // SAFETY: The row owns this buffer and cannot advance while borrowed.
+            unsafe { std::slice::from_raw_parts(view.ptr, view.len) }
+        };
+        Ok(cells.iter().copied().map(Cell))
+    }
+
     /// Move a row iteration to the next row.
     ///
     /// Returns `Some(row)` if the iteration moved successfully and row
@@ -658,10 +723,10 @@ impl<'alloc> CellIterator<'alloc> {
 
     /// Update the cell iterator for a new row iteration,
     /// returning a new cell iteration.
-    pub fn update(
-        &mut self,
-        row: &'_ RowIteration<'alloc, '_>,
-    ) -> Result<CellIteration<'alloc, '_>> {
+    pub fn update<'s>(
+        &'s mut self,
+        row: &'s RowIteration<'alloc, '_>,
+    ) -> Result<CellIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
@@ -978,5 +1043,53 @@ mod tests {
             .unwrap();
 
         assert!(state.update(&terminal).unwrap().dirty().is_ok());
+    }
+}
+
+/// Cursor properties captured together from a render snapshot.
+#[derive(Clone, Copy, Debug)]
+pub struct Cursor {
+    /// Position when the cursor lies within the viewport.
+    pub viewport: Option<CursorViewport>,
+    /// Visibility according to terminal modes.
+    pub visible: bool,
+    /// Whether the cursor should blink.
+    pub blinking: bool,
+    /// Whether the cursor is at a password field.
+    pub password_input: bool,
+    /// Cursor shape.
+    pub visual_style: CursorVisualStyle,
+}
+
+#[cfg(test)]
+mod api_update_tests {
+    use super::*;
+
+    #[test]
+    fn bulk_state_and_dirty_rows() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal.vt_write(b"hi");
+        let mut state = RenderState::new().unwrap();
+        let mut snapshot = state.update(&terminal).unwrap();
+        assert_eq!(snapshot.cursor().unwrap().viewport.unwrap().x, 2);
+        assert_eq!(
+            snapshot.colors().unwrap().foreground,
+            snapshot
+                .get::<ffi::ColorRgb>(ffi::RenderStateData::COLOR_FOREGROUND)
+                .unwrap()
+                .into()
+        );
+        let mut rows = RowIterator::new().unwrap();
+        {
+            let mut rows = rows.update(&snapshot).unwrap();
+            let (y, row) = rows.next_dirty().unwrap();
+            assert_eq!(y, 0);
+            let cells: Vec<_> = row.cells_raw().unwrap().collect();
+            assert_eq!(cells.len(), 8);
+            assert_eq!(cells[0].codepoint().unwrap(), u32::from('h'));
+        }
+        snapshot.clean().unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Clean);
+        assert!(rows.update(&snapshot).unwrap().next_dirty().is_none());
     }
 }
