@@ -925,7 +925,7 @@ pub struct Colors {
 }
 
 /// Dirty state of a render state after update.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 pub enum Dirty {
     /// Not dirty at all; rendering can be skipped.
@@ -937,7 +937,7 @@ pub enum Dirty {
 }
 
 /// Visual style of the cursor.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 pub enum CursorVisualStyle {

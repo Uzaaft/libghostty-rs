@@ -109,7 +109,7 @@ impl<L: log::Log + 'static> Logger for L {
 
 /// Log severity levels for the log callback.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 #[non_exhaustive]
 #[expect(missing_docs, reason = "missing upstream docs")]
 pub enum Level {
@@ -206,7 +206,7 @@ pub fn set_logger(f: Option<Box<dyn Logger>>) -> Result<()> {
         *logger = f;
     }
     crate::sys_set(
-        ffi::SysOption::GHOSTTY_SYS_OPT_LOG,
+        ffi::SysOption::LOG,
         ptr.map_or(std::ptr::null(), |p| p as *const std::ffi::c_void),
     )
 }

@@ -229,7 +229,7 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
 }
 
 /// Default visual style used when the cursor style is reset.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 pub enum CursorStyle {
@@ -1438,7 +1438,7 @@ impl From<TertiaryDeviceAttributes> for ffi::DeviceAttributesTertiary {
 
 /// Color scheme reported in response to a CSI ? 996 n query.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u32)]
+#[repr(i32)]
 #[expect(missing_docs, reason = "self-explanatory")]
 pub enum ColorScheme {
     Light = ffi::ColorScheme::LIGHT,
@@ -1484,7 +1484,7 @@ impl From<ColorScheme> for ffi::ColorScheme::Type {
 
 /// Amount of compression work to perform before returning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum CompressionMode {
     /// Perform one bounded compression step suitable for idle scheduling.
     Incremental = ffi::TerminalCompressionMode::INCREMENTAL,
@@ -1494,7 +1494,7 @@ pub enum CompressionMode {
 
 /// Scheduling result from terminal compression.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum CompressionResult {
     /// Retained-mapping reclamation is unavailable on this target.
     Unsupported = ffi::TerminalCompressionResult::UNSUPPORTED,
@@ -1631,7 +1631,7 @@ impl<'t> ClipboardContent<'t> {
 /// Protocol-specific destination identifiers are normalized to these values
 /// before the clipboard write callback is invoked.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum ClipboardLocation {
     /// The standard system clipboard.
     Standard = ffi::ClipboardLocation::STANDARD,
@@ -1646,7 +1646,7 @@ pub enum ClipboardLocation {
 /// Protocols without write acknowledgements, including OSC 52 and iTerm2
 /// OSC 1337 Copy, ignore this result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 pub enum ClipboardWriteError {
     /// The clipboard write was denied by policy or the user.
     Denied = ffi::ClipboardWriteResult::DENIED,
@@ -1725,7 +1725,7 @@ impl<'t> ProgressReport<'t> {
 
 /// State of a terminal progress report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 #[non_exhaustive]
 pub enum ProgressState {
     /// Remove any visible progress indication.

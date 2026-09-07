@@ -605,7 +605,7 @@ impl<'alloc> DeepPressEvent<'alloc> {
 
 /// Current autoscroll direction for an active selection drag gesture.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 #[non_exhaustive]
 pub enum Autoscroll {
     /// No selection autoscroll is requested.
@@ -618,7 +618,7 @@ pub enum Autoscroll {
 
 /// Selection behavior chosen for a gesture's click sequence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 #[non_exhaustive]
 pub enum Behavior {
     /// Cell-granular drag selection.

@@ -115,7 +115,7 @@ impl PaletteIndex {
 }
 
 /// Underline style types.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, int_enum::IntEnum)]
 #[non_exhaustive]
 #[expect(missing_docs, reason = "self-explanatory")]
@@ -148,7 +148,7 @@ impl TryFrom<ffi::Style> for Style {
             strikethrough: value.strikethrough,
             overline: value.overline,
             #[expect(clippy::cast_sign_loss, reason = "bindgen ain't perfect")]
-            underline: Underline::try_from(value.underline as u32)
+            underline: Underline::try_from(value.underline)
                 .map_err(|_| Error::InvalidValue)?,
         })
     }
@@ -170,7 +170,7 @@ impl From<Style> for ffi::Style {
             strikethrough: value.strikethrough,
             overline: value.overline,
             #[expect(clippy::cast_possible_wrap, reason = "bindgen ain't perfect")]
-            underline: u32::from(value.underline) as i32,
+            underline: i32::from(value.underline),
         }
     }
 }
