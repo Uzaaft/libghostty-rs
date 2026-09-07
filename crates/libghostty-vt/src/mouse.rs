@@ -289,7 +289,7 @@ impl Drop for Event<'_> {
 }
 
 /// Mouse tracking mode.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 pub enum TrackingMode {
@@ -306,7 +306,7 @@ pub enum TrackingMode {
 }
 
 /// Mouse output format.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 #[expect(missing_docs, reason = "missing upstream docs")]
@@ -359,7 +359,7 @@ impl From<EncoderSize> for ffi::MouseEncoderSize {
 }
 
 /// Mouse event action type.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 pub enum Action {
@@ -372,7 +372,7 @@ pub enum Action {
 }
 
 /// Mouse event action identity.
-#[repr(u32)]
+#[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[non_exhaustive]
 #[expect(missing_docs, reason = "self-explanatory")]
