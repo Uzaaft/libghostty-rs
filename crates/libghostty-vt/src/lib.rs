@@ -112,6 +112,7 @@ pub mod selection;
 pub mod sgr;
 pub mod snapshot;
 pub mod style;
+pub mod sys;
 pub mod unicode;
 
 #[doc(inline)]
