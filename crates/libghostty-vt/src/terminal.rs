@@ -1104,6 +1104,36 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 
+    /// The configured maximum decoded bytes per Kitty clipboard protocol
+    /// (OSC 5522) write transaction.
+    ///
+    /// See [`Self::set_clipboard_write_max_bytes`].
+    pub fn clipboard_write_max_bytes(&self) -> Result<usize> {
+        self.get(Data::CLIPBOARD_WRITE_MAX_BYTES)
+    }
+
+    /// Set the maximum total decoded bytes a single Kitty clipboard protocol
+    /// (OSC 5522) write transaction may accumulate. The limit is captured
+    /// when a transaction begins; an in-flight transaction keeps the limit it
+    /// started with.
+    ///
+    /// Data beyond the limit fails the whole transaction with EFBIG. The
+    /// transaction is discarded, later write-related packets are ignored
+    /// until a new write begins, and nothing reaches the
+    /// [clipboard write callback](Self::on_clipboard_write).
+    ///
+    /// Transactions are buffered in memory, so this limit bounds how much
+    /// memory a single write can make the terminal allocate. Pass
+    /// `Some(usize::MAX)` to remove the limit. `None` reverts to the built-in
+    /// default of 64 MiB, the minimum required by the protocol.
+    ///
+    /// This limit doesn't apply to OSC 52 writes, which are bounded by the
+    /// maximum length of an escape sequence instead.
+    pub fn set_clipboard_write_max_bytes(&mut self, limit: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(Opt::CLIPBOARD_WRITE_MAX_BYTES, limit.as_ref())?;
+        Ok(self)
+    }
+
     /// Enable or disable Glyph Protocol APC handling.
     ///
     /// Disabling the protocol makes the terminal ignore Glyph Protocol APC
@@ -2946,6 +2976,54 @@ mod tests {
             terminal.set_terminfo_name(&"x".repeat(129)),
             Err(Error::InvalidValue)
         ));
+    }
+
+    #[test]
+    fn clipboard_write_max_bytes_bounds_kitty_writes() {
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        let default = terminal.clipboard_write_max_bytes().unwrap();
+        assert_eq!(default, 64 * 1024 * 1024);
+        terminal.set_clipboard_write_max_bytes(Some(4)).unwrap();
+        assert_eq!(terminal.clipboard_write_max_bytes().unwrap(), 4);
+        terminal.set_clipboard_write_max_bytes(None).unwrap();
+        assert_eq!(terminal.clipboard_write_max_bytes().unwrap(), default);
+
+        // A 5-byte ("Hello") OSC 5522 write transaction.
+        let write = concat!(
+            "\x1b]5522;type=write:id=c1\x1b\\",
+            "\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;SGVsbA==\x1b\\",
+            "\x1b]5522;type=wdata:mime=dGV4dC9wbGFpbg==;bw==\x1b\\",
+            "\x1b]5522;type=wdata\x1b\\",
+        );
+        let run = |limit| {
+            let written = RefCell::new(Vec::new());
+            let output = RefCell::new(Vec::new());
+            let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+            terminal
+                .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+                .unwrap()
+                .on_clipboard_write(|_term, request| {
+                    written
+                        .borrow_mut()
+                        .extend(request.contents().map(|c| c.data.to_vec()));
+                    request.reply(Ok(()), false);
+                })
+                .unwrap()
+                .set_clipboard_write_max_bytes(Some(limit))
+                .unwrap();
+            terminal.vt_write(write.as_bytes());
+            drop(terminal);
+            (output.into_inner(), written.into_inner())
+        };
+
+        // Exceeding the limit fails the transaction and never reaches the callback.
+        let (output, written) = run(4);
+        assert_eq!(output, b"\x1b]5522;type=write:status=EFBIG:id=c1\x1b\\");
+        assert!(written.is_empty());
+
+        let (output, written) = run(5);
+        assert_eq!(output, b"\x1b]5522;type=write:status=DONE:id=c1\x1b\\");
+        assert_eq!(written, [b"Hello".to_vec()]);
     }
 
     #[test]
