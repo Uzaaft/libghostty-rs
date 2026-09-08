@@ -10,7 +10,7 @@ for a new point.
 ## Usage
 
 ```sh
-cargo run -p grid_ref_tracked_rs
+cargo run --manifest-path example/Cargo.toml -p grid_ref_tracked_rs
 ```
 
 When building with `link-dynamic`, set `DYLD_LIBRARY_PATH` on macOS or

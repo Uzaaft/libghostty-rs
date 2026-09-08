@@ -71,6 +71,11 @@ jobs:
         if: runner.os == 'macOS'
         run: nix develop -c cargo check --locked -p libghostty-vt-sys --target aarch64-apple-ios
 
+      # The examples are their own workspace, so the flake checks above never
+      # build them. `--locked` also fails if example/Cargo.lock is stale.
+      - name: Build examples
+        run: nix develop -c cargo build --locked --manifest-path example/Cargo.toml --workspace
+
   miri:
     name: Linux Miri
     runs-on: namespace-profile-linux-x86-sm
