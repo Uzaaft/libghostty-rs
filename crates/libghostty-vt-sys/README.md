@@ -7,6 +7,10 @@ Raw FFI bindings for libghostty-vt.
 - Static linking is the baseline rather than a Cargo feature. Enable the
   additive `link-dynamic` feature to link the shared library instead.
 - Set `GHOSTTY_SOURCE_DIR` to force the build to use a local Ghostty checkout.
+  This bypasses bundled source patches. For the pinned Ghostty revision, apply
+  [`patches/windows-dll-crt.patch`](patches/windows-dll-crt.patch) to that checkout
+  before building Windows DLLs with SIMD. The default fetched source includes
+  this CRT initialization repair automatically.
 - Set `GHOSTTY_ZIG_SYSTEM_DIR` to force Zig package resolution through a
   pre-fetched `zig build --system` directory. This is intended for Nix and other
   sandboxed package managers that cannot fetch during build scripts.

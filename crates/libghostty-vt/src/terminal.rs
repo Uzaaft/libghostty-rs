@@ -2309,6 +2309,26 @@ mod tests {
         assert_eq!(*callback_count.borrow(), 1);
     }
 
+    /// Exercise native base64 decoding, including Windows DLL initialization.
+    /// Plain text writes do not touch simdutf's dispatch pointer and therefore
+    /// missed a null dereference in the dynamic library's OSC 52 decoder.
+    #[test]
+    fn clipboard_write_decodes_base64() {
+        let written = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .on_clipboard_write(|_, request| {
+                let contents: Vec<_> = request.contents().collect();
+                assert_eq!(contents.len(), 1);
+                written.borrow_mut().extend_from_slice(contents[0].data);
+                request.reply(Ok(()), false);
+            })
+            .unwrap();
+
+        terminal.vt_write(b"\x1b]52;c;//4=\x1b\\");
+        assert_eq!(*written.borrow(), [0xff, 0xfe]);
+    }
+
     fn tiny_terminal() -> Terminal<'static, 'static> {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
