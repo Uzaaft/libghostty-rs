@@ -439,8 +439,12 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     eprintln!("Fetching ghostty {GHOSTTY_COMMIT} ...");
 
     let mut clone = Command::new("git");
+    // Cargo's nested OUT_DIR plus Ghostty's fuzz corpus names can exceed
+    // Windows MAX_PATH. Scope long-path support to this fetched repository.
     clone
         .arg("clone")
+        .arg("--config")
+        .arg("core.longpaths=true")
         .arg("--filter=blob:none")
         .arg("--no-checkout")
         .arg(GHOSTTY_REPO)
