@@ -102,6 +102,7 @@
             (pkgs.lib.fileset.fileFilter (
               file:
                 file.hasExt "h"
+                || file.hasExt "patch"
                 || file.hasExt "zig"
                 || file.hasExt "zon"
                 || file.hasExt "md"
