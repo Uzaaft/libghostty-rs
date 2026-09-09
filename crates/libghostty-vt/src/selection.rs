@@ -609,7 +609,7 @@ impl Default for FormatOptions<'_, '_> {
 /// endpoint is visually bottom/right. This preserves keyboard and drag behavior
 /// for both forward and reversed selections.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 #[non_exhaustive]
 pub enum Adjustment {
     /// Move left to the previous non-empty cell, wrapping upward.
@@ -644,7 +644,7 @@ pub enum Adjustment {
 /// and end endpoints are on opposite diagonal corners that are not simple
 /// top-left-to-bottom-right or bottom-right-to-top-left orderings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(u32)]
+#[repr(i32)]
 #[non_exhaustive]
 pub enum Order {
     /// Start is before end in top-left to bottom-right order.
