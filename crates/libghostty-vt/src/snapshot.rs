@@ -194,6 +194,18 @@ pub struct Decoder<'alloc, 'r> {
 }
 
 impl<'alloc, 'r> Decoder<'alloc, 'r> {
+    /// Whether returned terminals retain the decoded continuation for export.
+    pub fn retain_continuation(&self) -> Result<bool> {
+        self.get(Data::RETAIN_CONTINUATION)
+    }
+
+    /// Retain decoded continuation bytes and ongoing tracking on the returned terminal.
+    /// The tracking limit is [`Self::max_continuation_bytes`]; zero disables it.
+    pub fn set_retain_continuation(&mut self, value: bool) -> Result<&mut Self> {
+        self.set(Opt::RETAIN_CONTINUATION, &value)?;
+        Ok(self)
+    }
+
     /// Create a snapshot decoder that reads from a caller-provided reader.
     ///
     /// Reads are synchronous and occur only during ready, next, or decode calls.
@@ -280,8 +292,9 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// through FINISH. It may only be called before decoding starts. Bytes
     /// following FINISH are left unread. On success this returns a
     /// caller-owned terminal with its persistent VT stream restored.
-    /// Continuation tracking on the returned terminal is disabled and
-    /// [`Terminal::continuation_max_bytes`] returns zero.
+    /// Continuation tracking on the returned terminal is disabled by default and
+    /// [`Terminal::continuation_max_bytes`] returns zero. Enable
+    /// [`Self::set_retain_continuation`] to retain and export unfinished input.
     ///
     /// A decoding, I/O, or allocation error after input consumption begins
     /// poisons the decoder, after which it must be dropped. An invalid
@@ -301,10 +314,10 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// The terminal is immediately usable for rendering and live input.
     /// Older scrollback remains to be restored with [`IncrementalDecoder::next`].
     ///
-    /// The restored parser state may be unfinished, but terminal continuation
-    /// tracking is disabled; [`Terminal::continuation_max_bytes`]
-    /// returns zero. The decoder's continuation option is an input limit,
-    /// not terminal runtime policy.
+    /// The restored parser state may be unfinished. Continuation tracking is
+    /// disabled by default; enable [`Self::set_retain_continuation`] before
+    /// decoding to retain and export it. The tracking limit then comes from
+    /// [`Self::max_continuation_bytes`].
     ///
     /// A decoding, I/O, or allocation error after input consumption begins
     /// poisons the decoder, after which it must be dropped. An invalid
@@ -360,8 +373,9 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// state. The decoder default matches the largest built-in APC protocol
     /// buffer limit, currently 65 MiB.
     ///
-    /// This is an input validation limit only. It does not configure continuation
-    /// tracking on a terminal returned by the decoder.
+    /// This limits accepted input. When [`Self::set_retain_continuation`] is
+    /// enabled, it also sets the restored terminal tracking limit; zero
+    /// disables tracking.
     pub fn set_max_continuation_bytes(&mut self, v: usize) -> Result<&mut Self> {
         self.set(Opt::MAX_CONTINUATION_BYTES, &v)?;
         Ok(self)
@@ -490,5 +504,38 @@ impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
     /// Get a reference to the underlying decoder.
     pub fn as_decoder(self) -> &'d Decoder<'alloc, 'r> {
         self.decoder
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+mod retention_tests {
+    use super::*;
+
+    #[test]
+    fn decoded_continuation_can_be_exported_and_resumed() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal.set_continuation_max_bytes(1024).unwrap();
+        terminal.vt_write(b"\x1b[31");
+        let mut bytes = Vec::new();
+        terminal.encode_snapshot(&mut bytes).unwrap();
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        assert!(!decoder.retain_continuation().unwrap());
+        decoder
+            .set_max_continuation_bytes(1024)
+            .unwrap()
+            .set_retain_continuation(true)
+            .unwrap();
+        assert!(decoder.retain_continuation().unwrap());
+        let mut restored = decoder.decode().unwrap();
+        assert_eq!(restored.continuation_max_bytes().unwrap(), 1024);
+        let mut continuation = [0; 16];
+        let len = restored
+            .continuation_buf(&mut continuation)
+            .unwrap()
+            .unwrap();
+        assert_eq!(&continuation[..len], b"\x1b[31");
+        restored.vt_write(b"mX");
+        assert!(restored.vt_ground().unwrap());
+        assert_eq!(restored.cursor_x().unwrap(), 1);
     }
 }
