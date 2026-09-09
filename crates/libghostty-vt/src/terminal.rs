@@ -2369,6 +2369,46 @@ mod tests {
         assert_eq!(*callback_count.borrow(), 1);
     }
 
+    // The next two tests reach simdutf, which libghostty-vt DLLs on Windows
+    // used to crash in, since their C++ global constructors never ran. Pure
+    // ASCII never reaches it.
+
+    #[test]
+    fn clipboard_write_decodes_base64() {
+        let written = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .on_clipboard_write(|_, request| {
+                // Record rather than assert here: a panic in a callback
+                // aborts the whole test binary.
+                for content in request.contents() {
+                    written.borrow_mut().push(content.data.to_vec());
+                }
+                request.reply(Ok(()), false);
+            })
+            .unwrap();
+
+        terminal.vt_write(b"\x1b]52;c;//4=\x1b\\");
+        assert_eq!(*written.borrow(), [vec![0xff, 0xfe]]);
+    }
+
+    #[test]
+    fn multibyte_utf8_is_decoded() {
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        // "é" is 0xC3 0xA9. Both bytes must arrive in one write: a character
+        // split across writes is finished by the scalar decoder, and never
+        // reaches simdutf.
+        terminal.vt_write(b"\xc3\xa9");
+        let codepoint = terminal
+            .grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .unwrap()
+            .cell()
+            .unwrap()
+            .codepoint()
+            .unwrap();
+        assert_eq!(codepoint, 0xe9);
+    }
+
     fn tiny_terminal() -> Terminal<'static, 'static> {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
