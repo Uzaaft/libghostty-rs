@@ -6,6 +6,10 @@ use std::process::Command;
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
 const GHOSTTY_COMMIT: &str = "82938b633ba646db38591d969c3c526332bd7e65";
 
+// Keep this source repair with the pin until Ghostty delegates Windows DLL
+// startup to the CRT upstream. Source overrides remain caller-owned.
+const WINDOWS_DLL_CRT_PATCH: &str = include_str!("patches/windows-dll-crt.patch");
+
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
 /// the import library for `ghostty-vt.dll`. Validation and link emission must
@@ -95,6 +99,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEBUG");
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
     println!("cargo:rerun-if-changed=crates/libghostty-vt-sys/build.rs");
+    println!("cargo:rerun-if-changed=patches/windows-dll-crt.patch");
 
     // An explicit source override should stay authoritative even when the
     // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
@@ -409,11 +414,18 @@ fn zig_optimize_mode() -> &'static str {
 fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     let src_dir = out_dir.join("ghostty-src");
     let stamp = src_dir.join(".ghostty-commit");
+    // Include the exact patch in the source identity so a cached checkout is
+    // rebuilt when either the upstream revision or our source repair changes.
+    // Git for Windows may check this crate out with CRLF, while Ghostty
+    // requires LF for Zig sources. Normalize the embedded diff before applying
+    // it so checkout preferences cannot corrupt patch context.
+    let patch_text = WINDOWS_DLL_CRT_PATCH.replace("\r\n", "\n");
+    let source_identity = format!("{GHOSTTY_COMMIT}\n{patch_text}");
 
     // Skip fetch if we already have the right commit.
     if stamp.exists()
         && let Ok(existing) = std::fs::read_to_string(&stamp)
-        && existing.trim() == GHOSTTY_COMMIT
+        && existing == source_identity
     {
         return src_dir;
     }
@@ -442,7 +454,17 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
         .current_dir(&src_dir);
     run(checkout, "git checkout ghostty commit");
 
-    std::fs::write(&stamp, GHOSTTY_COMMIT).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
+    // Patch only the checkout fetched into OUT_DIR. GHOSTTY_SOURCE_DIR bypasses
+    // this function, so rebuilding never edits a developer's local checkout.
+    let patch_path = out_dir.join("windows-dll-crt.patch");
+    std::fs::write(&patch_path, patch_text)
+        .unwrap_or_else(|e| panic!("failed to write Ghostty patch: {e}"));
+    let mut patch = Command::new("git");
+    patch.arg("apply").arg(&patch_path).current_dir(&src_dir);
+    run(patch, "apply Ghostty Windows DLL CRT patch");
+
+    std::fs::write(&stamp, source_identity)
+        .unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
 
     src_dir
 }
