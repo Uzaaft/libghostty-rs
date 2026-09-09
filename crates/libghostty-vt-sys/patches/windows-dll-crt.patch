@@ -1,0 +1,67 @@
+diff --git a/src/build/GhosttyZig.zig b/src/build/GhosttyZig.zig
+index 46ab05d56..12d1ddee6 100644
+--- a/src/build/GhosttyZig.zig
++++ b/src/build/GhosttyZig.zig
+@@ -115,7 +115,14 @@ fn initVt(
+     try cfg.addOptions(general_options);
+ 
+     const vt = b.addModule(name, .{
+-        .root_source_file = b.path("src/lib_vt.zig"),
++        // CRT-linked Windows C libraries use a root that lets the CRT own
++        // DLL startup. Keep the ordinary root for CRT-free builds and Zig
++        // consumers, which still need Zig's default startup and TLS setup.
++        .root_source_file = b.path(if (vt_options.c_abi and cfg.simd and
++            cfg.target.result.os.tag == .windows)
++            "src/lib_vt_windows.zig"
++        else
++            "src/lib_vt.zig"),
+         .target = cfg.target,
+         .optimize = cfg.optimize,
+ 
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index 162798894..7a08f83f0 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -169,7 +169,10 @@ var msvc_fltused: c_int = 1;
+ comptime {
+     // If we're building the C library (vs. the Zig module) then
+     // we want to reference the C API so that it gets exported.
+-    if (@import("root") == lib) {
++    if (@import("root") == lib or
++        (builtin.os.tag == .windows and builtin.link_libc and
++            @import("root") == @import("lib_vt_windows.zig")))
++    {
+         // MSVC requires this marker whenever floating-point code is present.
+         // Zig's compiler_rt only provides it when libc is not linked.
+         if (builtin.os.tag == .windows and
+diff --git a/src/lib_vt_windows.zig b/src/lib_vt_windows.zig
+new file mode 100644
+index 000000000..5a4fc588d
+--- /dev/null
++++ b/src/lib_vt_windows.zig
+@@ -0,0 +1,25 @@
++//! CRT-linked Windows C library entry point.
++const std = @import("std");
++const lib = @import("lib_vt.zig");
++
++comptime {
++    _ = lib;
++}
++
++// Preserve the C library's embedder logging and release panic behavior.
++pub const std_options = lib.std_options;
++pub const panic = lib.panic;
++pub const std_options_debug_io = lib.std_options_debug_io;
++
++// Zig 0.16 otherwise exports its minimal DLL entry point, bypassing the
++// CRT startup that runs C++ constructors and destructors. In particular,
++// simdutf's active implementation remains null without its constructor.
++// Declaring the symbol leaves its implementation to the linked CRT:
++// MinGW resolves it to DllMainCRTStartup; MSVC provides _DllMainCRTStartup.
++// This declaration is unused for static libraries, whose consumer owns CRT
++// startup. CRT-free builds use lib_vt.zig and retain Zig's default entry.
++pub extern "c" fn _DllMainCRTStartup(
++    instance: std.os.windows.HINSTANCE,
++    reason: std.os.windows.DWORD,
++    reserved: std.os.windows.LPVOID,
++) callconv(.winapi) std.os.windows.BOOL;
