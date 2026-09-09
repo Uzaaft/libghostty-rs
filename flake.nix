@@ -92,6 +92,9 @@
             # live in this module). Miri aborts the test process at the first
             # UB it finds, so a broken tree reports only the first failing test.
             cargo miri test --locked -p libghostty-vt --lib miri_soundness
+            # Rust stubs model native search ownership; cargo test runs the same
+            # scenarios against Ghostty to check the real FFI contract.
+            cargo miri test --locked -p libghostty-vt --test search_lifetimes
           '';
         };
 

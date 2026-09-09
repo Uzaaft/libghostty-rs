@@ -107,6 +107,7 @@ pub mod osc;
 pub mod paste;
 pub mod render;
 pub mod screen;
+pub mod search;
 pub mod selection;
 pub mod sgr;
 pub mod snapshot;
