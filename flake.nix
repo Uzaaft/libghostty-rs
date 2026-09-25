@@ -188,11 +188,26 @@
             inherit src;
           };
 
+          # No workspace member enables the optional `png` feature, so turn it
+          # on explicitly; otherwise the PNG decoder and its tests are never
+          # compiled in CI.
           cargo-test = craneLib.cargoTest (
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoTestExtraArgs = "--workspace --all-targets";
+              cargoTestExtraArgs = "--workspace --all-targets --features libghostty-vt/png";
+            }
+          );
+
+          # `--all-targets` does not include doctests, so run them separately.
+          # Only for the safe crate: the -sys bindings carry C header comments
+          # that rustdoc would otherwise try to compile as Rust.
+          cargo-doctest = craneLib.cargoTest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              pnameSuffix = "-doctest";
+              cargoTestExtraArgs = "-p libghostty-vt --doc --features libghostty-vt/png";
             }
           );
 
