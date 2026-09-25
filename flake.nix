@@ -182,6 +182,29 @@
             }
           );
 
+          # Regenerate the bindings from the pinned Ghostty headers and fail if
+          # they differ from the checked-in ones. GHOSTTY_INCLUDE_DIR is used
+          # instead of GHOSTTY_SOURCE_DIR so that the build script keeps linking
+          # the prebuilt library rather than building Ghostty from source.
+          bindings-fresh = craneCheckLib.mkCargoDerivation (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              pnameSuffix = "-bindings";
+              GHOSTTY_INCLUDE_DIR = "${ghostty}/include";
+              LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+              buildPhaseCargoCommand = ''
+                cargo run ${commonArgs.cargoExtraArgs} -p libghostty-vt-sys \
+                  --features libghostty-vt-sys/bindgen-tool --bin gen-bindings
+                cargo fmt -p libghostty-vt-sys
+                diff -u ${src}/crates/libghostty-vt-sys/src/bindings.rs \
+                  crates/libghostty-vt-sys/src/bindings.rs
+              '';
+              doInstallCargoArtifacts = false;
+              installPhaseCommand = "touch $out";
+            }
+          );
+
           cargo-fmt = craneCheckLib.cargoFmt {
             pname = "libghostty-rs";
             version = "0.2.1";
