@@ -479,6 +479,49 @@ impl Snapshot<'_, '_> {
         }
     }
 
+    /// All cursor state in one call.
+    ///
+    /// This is equivalent to the individual `cursor_*` getters, but needs a
+    /// single query instead of one per property.
+    pub fn cursor(&self) -> Result<Cursor> {
+        let mut raw = ffi::sized!(ffi::RenderStateCursor);
+        from_result(unsafe {
+            ffi::ghostty_render_state_get(
+                self.0.0.as_raw(),
+                ffi::RenderStateData::CURSOR,
+                (&raw mut raw).cast(),
+            )
+        })?;
+        Ok(Cursor {
+            // The viewport fields are undefined unless `viewport_has_value`
+            // is set, so they must not be read otherwise.
+            viewport: raw.viewport_has_value.then_some(CursorViewport {
+                x: raw.viewport_x,
+                y: raw.viewport_y,
+                at_wide_tail: raw.wide_tail,
+            }),
+            visible: raw.visible,
+            blinking: raw.blinking,
+            password_input: raw.password_input,
+            visual_style: raw
+                .visual_style
+                .try_into()
+                .map_err(|_| Error::InvalidValue)?,
+        })
+    }
+
+    /// Mark all dirty render-state data as consumed.
+    ///
+    /// This sets the global [dirty state](Self::dirty) to [`Dirty::Clean`] and
+    /// clears every per-row dirty flag. It is idempotent and does not modify
+    /// cell contents or dirty state owned by the terminal. Call this only
+    /// after a complete frame has been rendered successfully; partial
+    /// consumers should use [`Self::set_dirty`] and [`RowIteration::set_dirty`]
+    /// instead.
+    pub fn clean(&mut self) -> Result<()> {
+        from_result(unsafe { ffi::ghostty_render_state_clean(self.0.0.as_raw()) })
+    }
+
     /// Get the current color information from a render state.
     pub fn colors(&self) -> Result<Colors> {
         let mut colors = ffi::sized!(ffi::RenderStateColors);
@@ -537,10 +580,23 @@ impl<'alloc> RowIterator<'alloc> {
 
     /// Update the row iterator for a snapshot of the render state,
     /// returning a new row iteration.
-    pub fn update(
-        &mut self,
-        snapshot: &'_ Snapshot<'alloc, '_>,
-    ) -> Result<RowIteration<'alloc, '_>> {
+    ///
+    /// The iteration borrows the snapshot, so it cannot outlive it:
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{Terminal, RenderState, render::RowIterator};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut iteration = rows.update(&snapshot).unwrap();
+    /// drop(snapshot); // Iteration still borrows its owning snapshot.
+    /// iteration.next();
+    /// ```
+    pub fn update<'s>(
+        &'s mut self,
+        snapshot: &'s Snapshot<'alloc, '_>,
+    ) -> Result<RowIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -563,7 +619,57 @@ impl Drop for RowIterator<'_> {
     }
 }
 
+impl<'s> RowIteration<'_, 's> {
+    /// The raw cell values for the current row, one per column.
+    ///
+    /// This is identical to querying [`CellIteration::raw_cell`] for each
+    /// cell, and is the bulk alternative to iterating cells one at a time.
+    ///
+    /// The values are only valid as long as the underlying render state is
+    /// not updated, so they borrow the snapshot rather than this row: the
+    /// iteration may keep advancing while they are in use.
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{RenderState, Terminal, render::RowIterator};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut iteration = rows.update(&snapshot).unwrap();
+    /// let cells = iteration.next().unwrap().cells_raw().unwrap();
+    /// drop(snapshot); // The cells still borrow the snapshot.
+    /// cells.count();
+    /// ```
+    pub fn cells_raw(&self) -> Result<impl ExactSizeIterator<Item = Cell> + 's> {
+        let view: ffi::CellsView = self.get(ffi::RenderStateRowData::CELLS_RAW)?;
+        let cells: &'s [ffi::Cell] = if view.len == 0 {
+            &[]
+        } else {
+            // SAFETY: libghostty keeps the view valid until the render state
+            // is updated, which the snapshot borrow `'s` rules out.
+            unsafe { std::slice::from_raw_parts(view.ptr, view.len) }
+        };
+        Ok(cells.iter().copied().map(Cell))
+    }
+}
+
 impl RowIteration<'_, '_> {
+    /// Move a row iteration to the next row requiring a redraw.
+    ///
+    /// If the global dirty state is [`Dirty::Clean`], this returns `None`. If
+    /// it is [`Dirty::Partial`], clean rows are skipped. If it is
+    /// [`Dirty::Full`], every remaining row is returned regardless of its
+    /// per-row dirty flag. Rows are returned in ascending viewport order,
+    /// together with their viewport y coordinate. This does not clear any
+    /// dirty state.
+    pub fn next_dirty(&mut self) -> Option<(u16, &Self)> {
+        let mut y = 0;
+        unsafe {
+            ffi::ghostty_render_state_row_iterator_next_dirty(self.iter.0.as_raw(), &raw mut y)
+        }
+        .then_some((y, self))
+    }
+
     /// Move a row iteration to the next row.
     ///
     /// Returns `Some(row)` if the iteration moved successfully and row
@@ -658,10 +764,29 @@ impl<'alloc> CellIterator<'alloc> {
 
     /// Update the cell iterator for a new row iteration,
     /// returning a new cell iteration.
-    pub fn update(
-        &mut self,
-        row: &'_ RowIteration<'alloc, '_>,
-    ) -> Result<CellIteration<'alloc, '_>> {
+    ///
+    /// The iteration borrows the row, so it cannot outlive it:
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{
+    ///     RenderState, Terminal,
+    ///     render::{CellIterator, RowIterator},
+    /// };
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut row = rows.update(&snapshot).unwrap();
+    /// row.next();
+    /// let mut cells = CellIterator::new().unwrap();
+    /// let mut iteration = cells.update(&row).unwrap();
+    /// drop(row); // Iteration still borrows its owning row.
+    /// iteration.next();
+    /// ```
+    pub fn update<'s>(
+        &'s mut self,
+        row: &'s RowIteration<'alloc, '_>,
+    ) -> Result<CellIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
@@ -916,6 +1041,21 @@ pub struct CursorViewport {
     pub at_wide_tail: bool,
 }
 
+/// Render-state cursor information, as returned by [`Snapshot::cursor`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cursor {
+    /// The cursor position if the cursor is visible within the viewport.
+    pub viewport: Option<CursorViewport>,
+    /// Whether the cursor is visible based on terminal modes.
+    pub visible: bool,
+    /// Whether the cursor should blink based on terminal modes.
+    pub blinking: bool,
+    /// Whether the cursor is at a password input field.
+    pub password_input: bool,
+    /// The visual style of the cursor.
+    pub visual_style: CursorVisualStyle,
+}
+
 /// Render-state color information.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Colors {
@@ -978,5 +1118,133 @@ mod tests {
             .unwrap();
 
         assert!(state.update(&terminal).unwrap().dirty().is_ok());
+    }
+
+    /// Build the expected bulk cursor from the individual getters.
+    fn cursor_from_getters(snapshot: &Snapshot<'_, '_>) -> Cursor {
+        Cursor {
+            viewport: snapshot.cursor_viewport().unwrap(),
+            visible: snapshot.cursor_visible().unwrap(),
+            blinking: snapshot.cursor_blinking().unwrap(),
+            password_input: snapshot.cursor_password_input().unwrap(),
+            visual_style: snapshot.cursor_visual_style().unwrap(),
+        }
+    }
+
+    #[test]
+    fn bulk_cursor_matches_individual_getters() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        let mut state = RenderState::new().unwrap();
+
+        // Default cursor after writing a narrow character.
+        terminal.vt_write(b"hi");
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert_eq!(
+            cursor.viewport,
+            Some(CursorViewport {
+                x: 2,
+                y: 0,
+                at_wide_tail: false
+            })
+        );
+
+        // Hidden blinking bar cursor on the tail of a wide character.
+        terminal.vt_write("\x1b[?25l\x1b[5 q\r\n中\x1b[2G".as_bytes());
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert!(!cursor.visible);
+        assert_eq!(cursor.visual_style, CursorVisualStyle::Bar);
+        assert_eq!(
+            cursor.viewport,
+            Some(CursorViewport {
+                x: 1,
+                y: 1,
+                at_wide_tail: true
+            })
+        );
+
+        // Scrolling the cursor out of the viewport leaves no position.
+        terminal.vt_write(b"\r\n\r\n\r\n");
+        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert_eq!(cursor.viewport, None);
+    }
+
+    /// Collect the viewport rows returned by `next_dirty`.
+    fn dirty_rows<'alloc>(
+        rows: &mut RowIterator<'alloc>,
+        snapshot: &Snapshot<'alloc, '_>,
+    ) -> Vec<u16> {
+        let mut iteration = rows.update(snapshot).unwrap();
+        let mut ys = Vec::new();
+        while let Some((y, _)) = iteration.next_dirty() {
+            ys.push(y);
+        }
+        ys
+    }
+
+    #[test]
+    fn next_dirty_follows_global_and_row_dirty_state() {
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        // Park the cursor on the row we write to below: moving the cursor
+        // also dirties the row it leaves.
+        terminal.vt_write(b"\x1b[2;1H");
+        let mut state = RenderState::new().unwrap();
+        let mut rows = RowIterator::new().unwrap();
+
+        // The first update is fully dirty, so every row is returned.
+        let mut snapshot = state.update(&terminal).unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Full);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [0, 1, 2]);
+
+        // Once clean, nothing is returned.
+        snapshot.clean().unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Clean);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [] as [u16; 0]);
+        // Cleaning is idempotent.
+        snapshot.clean().unwrap();
+
+        // Changing one row only makes that row dirty.
+        terminal.vt_write(b"x");
+        let snapshot = state.update(&terminal).unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Partial);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [1]);
+    }
+
+    #[test]
+    fn cells_raw_matches_cell_iteration_and_outlives_the_row() {
+        let mut terminal = Terminal::new(4, 2).unwrap();
+        terminal.vt_write(b"ab\r\ncd");
+        let mut state = RenderState::new().unwrap();
+        let snapshot = state.update(&terminal).unwrap();
+        let mut rows = RowIterator::new().unwrap();
+        let mut cells = CellIterator::new().unwrap();
+        let mut iteration = rows.update(&snapshot).unwrap();
+
+        let row = iteration.next().unwrap();
+        let first_row = row.cells_raw().unwrap();
+        assert_eq!(first_row.len(), 4);
+        let mut expected = Vec::new();
+        let mut cell_iteration = cells.update(row).unwrap();
+        while let Some(cell) = cell_iteration.next() {
+            expected.push(cell.raw_cell().unwrap());
+        }
+
+        // The raw cells stay usable after advancing to the next row.
+        let second_row = iteration.next().unwrap().cells_raw().unwrap();
+        let first_row: Vec<_> = first_row.collect();
+        assert_eq!(first_row, expected);
+        let codepoints =
+            |cells: &[Cell]| -> Vec<u32> { cells.iter().map(|c| c.codepoint().unwrap()).collect() };
+        assert_eq!(codepoints(&first_row), [0x61, 0x62, 0, 0]);
+        assert_eq!(
+            codepoints(&second_row.collect::<Vec<_>>()),
+            [0x63, 0x64, 0, 0]
+        );
     }
 }
