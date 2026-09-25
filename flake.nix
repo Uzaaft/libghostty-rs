@@ -116,7 +116,12 @@
             version = "0.2.1";
             inherit src;
             strictDeps = true;
-            cargoExtraArgs = "--locked --features libghostty-vt-sys/pkg-config";
+            # No workspace member enables the optional `png` feature, so turn it
+            # on here; otherwise the PNG decoder is never type-checked, linted,
+            # doc-checked or tested in CI. Setting it in the shared arguments
+            # also builds the dependency artifacts with it, so the checks
+            # below don't each rebuild png and its dependencies.
+            cargoExtraArgs = "--locked --features libghostty-vt-sys/pkg-config --features libghostty-vt/png";
 
             nativeBuildInputs = [
               pkgs.pkg-config
@@ -169,7 +174,8 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--workspace --all-targets";
+              # Without denying warnings, clippy findings never fail CI.
+              cargoClippyExtraArgs = "--workspace --all-targets -- --deny warnings";
             }
           );
 
@@ -193,6 +199,18 @@
             // {
               inherit cargoArtifacts;
               cargoTestExtraArgs = "--workspace --all-targets";
+            }
+          );
+
+          # `--all-targets` does not include doctests, so run them separately.
+          # Only for the safe crate: the -sys bindings carry C header comments
+          # that rustdoc would otherwise try to compile as Rust.
+          cargo-doctest = craneLib.cargoTest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              pnameSuffix = "-doctest";
+              cargoTestExtraArgs = "-p libghostty-vt --doc";
             }
           );
 
