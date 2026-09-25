@@ -63,17 +63,20 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 /// attributes queries, and more. To handle these sequences, the user
 /// must configure "effects."
 ///
-/// Effects are callbacks that the terminal invokes in response to VT sequences
-/// processed during [`Terminal::vt_write`]. They let the embedding application
-/// react to terminal-initiated events such as bell characters, title changes,
-/// device status report responses, and more.
+/// Effects are callbacks that the terminal invokes, mostly in response to VT
+/// sequences processed during [`Terminal::vt_write`]. They let the embedding
+/// application react to terminal-initiated events such as bell characters,
+/// title changes, device status report responses, and more.
 ///
 /// Each effect is registered with its corresponding `Terminal::on_<effect>`
 /// function, which accepts a closure with access to the terminal state and
 /// possibly other parameters. Some examples include [`Terminal::on_bell`]
 /// and [`Terminal::on_pty_write`].
 ///
-/// All callbacks are invoked synchronously during [`Terminal::vt_write`].
+/// All callbacks are invoked synchronously, mostly during
+/// [`Terminal::vt_write`]. A few also fire from [`Terminal::reset`] and
+/// [`Terminal::resize`], such as [`Terminal::on_render_hold`] and the
+/// in-band size report sent through [`Terminal::on_pty_write`].
 /// Callbacks must be very careful to not block for too long or perform
 /// expensive operations, since they are blocking further IO processing.
 ///
@@ -313,6 +316,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// protocols and size reports), disables synchronized output mode (allowed
     /// by the spec so that resize results are shown immediately), and sends an
     /// in-band size report if mode 2048 is enabled.
+    ///
+    /// If synchronized output was enabled, the [render hold](Self::on_render_hold)
+    /// callback is invoked to report that the hold ended.
     pub fn resize(
         &mut self,
         cols: u16,
@@ -337,6 +343,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Resets all terminal state back to its initial configuration,
     /// including modes, scrollback, scrolling region, and screen contents.
     /// The terminal dimensions are preserved.
+    ///
+    /// If synchronized output was enabled, the [render hold](Self::on_render_hold)
+    /// callback is invoked to report that the hold ended.
     pub fn reset(&mut self) {
         unsafe { ffi::ghostty_terminal_reset(self.inner.as_raw()) }
     }
@@ -1865,9 +1874,13 @@ macro_rules! handlers {
                     // SAFETY: USERDATA is set to the boxed VTable pointee
                     // (derived from a mutable reference for write provenance)
                     // before the callback is registered. ghostty invokes
-                    // callbacks synchronously during vt_write, so the VTable
-                    // remains alive and exclusively accessed for the duration
-                    // of this call.
+                    // callbacks synchronously from vt_write, reset and
+                    // resize. All three take `&mut self`, so the VTable
+                    // outlives this call and nothing else touches it
+                    // meanwhile. Callbacks only get a `&Terminal`, so they
+                    // can't reach any of those entry points, and dispatch
+                    // never nests: at most one `&mut VTable` exists at a
+                    // time.
                     let vtable = unsafe { &mut *ud.cast::<VTable<'_, '_>>() };
 
                     let obj = $crate::alloc::Object::new(t).expect("received null terminal ptr in callback - this is a bug!");
@@ -1997,6 +2010,160 @@ handlers! {
         to = BellFn(),
     ) |term, func| {
         func(&term);
+    }
+
+    /// Call the given function when the running program asks the terminal to
+    /// stop updating the screen, and again when it lets the screen update
+    /// again. We call the time in between a "render hold".
+    ///
+    /// Programs use a hold to avoid flicker. A full-screen program usually
+    /// redraws in several steps: clear, draw the text, move the cursor. If
+    /// the screen is drawn halfway through, the user sees a broken frame. To
+    /// prevent that, the program starts a hold, draws everything, and then
+    /// releases the hold. The screen should keep showing the last finished
+    /// frame the whole time and then switch to the new one all at once.
+    ///
+    /// Today the only way a program can start a hold is synchronized output
+    /// ([`Mode::SYNC_OUTPUT`], DEC private mode 2026). The callback is named
+    /// for what the embedder should do rather than for that mode so that
+    /// other sources of holds can be added later.
+    ///
+    /// # When it is called
+    ///
+    /// With `held` set to `true` when the program sets mode 2026.
+    ///
+    /// With `held` set to `false` when the hold ends, which happens when:
+    ///
+    /// - the program resets mode 2026
+    /// - the terminal is fully reset, by the program (RIS) or by
+    ///   [`Terminal::reset`]
+    /// - the terminal is resized with [`Terminal::resize`]
+    ///
+    /// The two calls always come in pairs. Setting the mode while a hold is
+    /// already active does nothing, and neither does resetting it when there
+    /// is no hold. Changing the mode yourself with [`Terminal::set_mode`]
+    /// never invokes the callback.
+    ///
+    /// # What to do
+    ///
+    /// When a hold begins, the terminal contains exactly the frame the
+    /// program wants left on screen. Nothing after the start of the hold has
+    /// been processed yet, even if more bytes follow in the same
+    /// [`Terminal::vt_write`] call. Capture that frame by calling
+    /// [`RenderState::update`](crate::RenderState::update) from within the
+    /// callback, then stop updating the render state until the hold ends. You
+    /// can keep drawing the render state in the meantime. It won't change.
+    ///
+    /// <div class="warning">
+    ///
+    /// The callback runs inside an `extern "C"` function, so a panic in it
+    /// aborts the process. If the callback updates the render state, don't
+    /// keep the render state borrowed (e.g. through a
+    /// [`Snapshot`](crate::render::Snapshot) or a
+    /// [`RefMut`](std::cell::RefMut)) across [`Terminal::vt_write`],
+    /// [`Terminal::reset`] or [`Terminal::resize`], since any of them can
+    /// invoke the callback. Use a non-panicking borrow such as
+    /// [`RefCell::try_borrow_mut`](std::cell::RefCell::try_borrow_mut)
+    /// inside the callback.
+    ///
+    /// </div>
+    ///
+    /// ```rust
+    /// use std::cell::{Cell, RefCell};
+    /// use std::time::{Duration, Instant};
+    /// use libghostty_vt::{RenderState, Terminal, terminal::Mode};
+    ///
+    /// struct Renderer {
+    ///     render_state: RefCell<RenderState<'static>>,
+    ///     held: Cell<bool>,
+    ///     hold_started: Cell<Instant>,
+    /// }
+    ///
+    /// fn draw(r: &Renderer, terminal: &mut Terminal<'static, '_>) -> libghostty_vt::error::Result<()> {
+    ///     // Give up on a program that holds the screen for too long.
+    ///     if r.held.get() && r.hold_started.get().elapsed() >= Duration::from_secs(1) {
+    ///         terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
+    ///         r.held.set(false);
+    ///     }
+    ///
+    ///     // During a hold, skip the update and draw the captured frame.
+    ///     if !r.held.get() {
+    ///         r.render_state.borrow_mut().update(terminal)?;
+    ///     }
+    ///     // draw_render_state(&r.render_state);
+    ///     Ok(())
+    /// }
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let renderer = Renderer {
+    ///     render_state: RefCell::new(RenderState::new()?),
+    ///     held: Cell::new(false),
+    ///     hold_started: Cell::new(Instant::now()),
+    /// };
+    ///
+    /// let mut terminal = Terminal::new(80, 24)?;
+    /// terminal.on_render_hold(|term, held| {
+    ///     if held {
+    ///         // Capture the frame the program wants left on screen. Don't
+    ///         // panic if that fails, e.g. because the render state is
+    ///         // borrowed elsewhere; keep drawing the previous frame instead.
+    ///         let _ = renderer
+    ///             .render_state
+    ///             .try_borrow_mut()
+    ///             .map(|mut state| state.update(term).map(|_| ()));
+    ///         renderer.hold_started.set(Instant::now());
+    ///     }
+    ///     renderer.held.set(held);
+    /// })?;
+    ///
+    /// terminal.vt_write(b"\x1b[?2026h");
+    /// assert!(renderer.held.get());
+    /// draw(&renderer, &mut terminal)?;
+    ///
+    /// terminal.vt_write(b"\x1b[?2026l");
+    /// assert!(!renderer.held.get());
+    /// draw(&renderer, &mut terminal)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Timeouts
+    ///
+    /// The terminal has no clock, so it never ends a hold on its own. A
+    /// program that crashes or forgets to release its hold would freeze the
+    /// screen forever, so you need a timeout like the one above. One second
+    /// is a common choice. When it expires, reset the mode yourself and go
+    /// back to updating normally. Because setting the mode again during a
+    /// hold does nothing, a program can't keep pushing your deadline back.
+    ///
+    /// # Why a callback
+    ///
+    /// You could instead check [`Mode::SYNC_OUTPUT`] before each draw and
+    /// skip the update when it is set. That is simpler, but it has two
+    /// problems. First, the frame left on screen is whatever you happened to
+    /// draw last, which can be older than what the program intended or even
+    /// a half-drawn frame. Second, if the program releases a hold and starts
+    /// the next one between two of your draws, you never see the mode turn
+    /// off and the finished frame in between is lost. A program that draws
+    /// continuously can then appear frozen. Capturing the frame when each
+    /// hold begins avoids both.
+    ///
+    /// # Other notes
+    ///
+    /// You are free to ignore a hold whenever showing live content matters
+    /// more, such as when the user scrolls or starts a selection.
+    ///
+    /// Like every callback, this runs on the thread that called
+    /// [`Terminal::vt_write`], [`Terminal::reset`] or [`Terminal::resize`].
+    /// Since neither a terminal nor a render state can be sent to another
+    /// thread, the update in the callback needs no locking.
+    pub fn on_render_hold(
+        &mut self,
+        tag = RENDER_HOLD,
+        from = TerminalRenderHoldFn(held: bool),
+        to = RenderHoldFn(bool),
+    ) |term, func| {
+        func(term, held);
     }
 
     /// Call the given function when the terminal receives
@@ -2177,6 +2344,143 @@ mod tests {
     use crate::render::CursorVisualStyle;
     use std::cell::{Cell, RefCell};
     use std::mem::ManuallyDrop;
+
+    #[test]
+    fn render_hold_reports_start_and_end_in_pairs() {
+        // Mirrors upstream's "set render_hold callback" test in
+        // src/terminal/c/terminal.zig.
+        let events = RefCell::new(Vec::new());
+        let take = || std::mem::take(&mut *events.borrow_mut());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_render_hold(|_term, held| events.borrow_mut().push(held))
+            .expect("callback should register");
+
+        // A set during a hold and a reset without a hold are ignored.
+        terminal.vt_write(b"\x1b[?2026h\x1b[?2026hA\x1b[?2026l\x1b[?2026l");
+        assert_eq!(take(), [true, false]);
+
+        // Neither a reset nor a resize reports anything without a hold.
+        terminal.reset();
+        terminal
+            .resize(100, 30, 8, 16)
+            .expect("resize should succeed");
+        assert_eq!(take(), []);
+
+        // Reset and resize end an active hold, and so does a resize that
+        // keeps the dimensions: upstream turns synchronized output off
+        // before it checks whether the grid size changed.
+        terminal.vt_write(b"\x1b[?2026h");
+        terminal.reset();
+        terminal.reset();
+        terminal.vt_write(b"\x1b[?2026h");
+        terminal
+            .resize(80, 24, 8, 16)
+            .expect("resize should succeed");
+        terminal.vt_write(b"\x1b[?2026h");
+        terminal
+            .resize(80, 24, 8, 16)
+            .expect("resize should succeed");
+        assert_eq!(take(), [true, false, true, false, true, false]);
+        assert!(!terminal.mode(Mode::SYNC_OUTPUT).unwrap());
+
+        // A resize that fails leaves the mode, and so the hold, in place.
+        terminal.vt_write(b"\x1b[?2026h");
+        assert!(terminal.resize(0, 24, 8, 16).is_err());
+        assert!(terminal.mode(Mode::SYNC_OUTPUT).unwrap());
+        terminal.vt_write(b"\x1b[?2026l");
+        assert_eq!(take(), [true, false]);
+
+        // Changing the mode ourselves, e.g. when a hold times out, is never
+        // reported in either direction. The hold is simply over, so the
+        // callback sees `true` without a matching `false`.
+        terminal.vt_write(b"\x1b[?2026h");
+        terminal
+            .set_mode(Mode::SYNC_OUTPUT, false)
+            .expect("mode should be settable");
+        assert!(!terminal.mode(Mode::SYNC_OUTPUT).unwrap());
+        terminal
+            .set_mode(Mode::SYNC_OUTPUT, true)
+            .expect("mode should be settable")
+            .set_mode(Mode::SYNC_OUTPUT, false)
+            .expect("mode should be settable");
+        assert_eq!(take(), [true]);
+        // ...and the program can start a new hold afterwards.
+        terminal.vt_write(b"\x1b[?2026h");
+        assert_eq!(take(), [true]);
+    }
+
+    /// Read the text of the first row of a render state snapshot.
+    fn first_row_text(snapshot: &crate::render::Snapshot<'_, '_>) -> Result<String> {
+        let mut rows = crate::render::RowIterator::new()?;
+        let mut cells = crate::render::CellIterator::new()?;
+        let mut row_iter = rows.update(snapshot)?;
+        let Some(row) = row_iter.next() else {
+            return Ok(String::new());
+        };
+        let mut cell_iter = cells.update(row)?;
+        let mut text = String::new();
+        while let Some(cell) = cell_iter.next() {
+            text.extend(cell.graphemes()?);
+        }
+        Ok(text)
+    }
+
+    #[test]
+    fn render_hold_captures_frame_before_hold() {
+        // A renderer that refreshes its render state whenever a hold starts
+        // or ends, recording the first row it captured each time. Failures
+        // are recorded as `None` instead of panicking, since a panic here
+        // would abort the whole test binary.
+        let render_state =
+            RefCell::new(RenderState::new().expect("render state should initialize"));
+        let frames = RefCell::new(Vec::new());
+        let take = || std::mem::take(&mut *frames.borrow_mut());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_render_hold(|term, held| {
+                let text = render_state.try_borrow_mut().ok().and_then(|mut state| {
+                    let snapshot = state.update(term).ok()?;
+                    first_row_text(&snapshot).ok()
+                });
+                frames.borrow_mut().push((held, text));
+            })
+            .expect("callback should register");
+
+        // The hold starts before `B` is processed, even though it's in the
+        // same write, so the captured frame only has `A`.
+        terminal.vt_write(b"A\x1b[?2026hB");
+        assert_eq!(take(), [(true, Some("A".to_owned()))]);
+        // The terminal itself has moved on, though.
+        {
+            let mut state = render_state.borrow_mut();
+            let snapshot = state.update(&terminal).expect("render state should update");
+            assert_eq!(first_row_text(&snapshot).unwrap(), "AB");
+        }
+        terminal.vt_write(b"\x1b[?2026l");
+        assert_eq!(take(), [(false, Some("AB".to_owned()))]);
+
+        // Updating the render state also works when the hold ends from
+        // `resize` and `reset`, which invoke the callback while the outer
+        // call holds `&mut Terminal`.
+        terminal.vt_write(b"\x1b[?2026hC");
+        terminal
+            .resize(100, 30, 8, 16)
+            .expect("resize should succeed");
+        assert_eq!(
+            take(),
+            [
+                (true, Some("AB".to_owned())),
+                (false, Some("ABC".to_owned()))
+            ]
+        );
+        terminal.vt_write(b"\x1b[?2026hD");
+        terminal.reset();
+        assert_eq!(
+            take(),
+            [(true, Some("ABC".to_owned())), (false, Some(String::new()))]
+        );
+    }
 
     #[inline(never)]
     fn build_terminal<'cb>(callback_count: &'cb RefCell<usize>) -> Terminal<'static, 'cb> {
