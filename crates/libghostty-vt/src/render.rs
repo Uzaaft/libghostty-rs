@@ -537,10 +537,23 @@ impl<'alloc> RowIterator<'alloc> {
 
     /// Update the row iterator for a snapshot of the render state,
     /// returning a new row iteration.
-    pub fn update(
-        &mut self,
-        snapshot: &'_ Snapshot<'alloc, '_>,
-    ) -> Result<RowIteration<'alloc, '_>> {
+    ///
+    /// The iteration borrows the snapshot, so it cannot outlive it:
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{Terminal, RenderState, render::RowIterator};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut iteration = rows.update(&snapshot).unwrap();
+    /// drop(snapshot); // Iteration still borrows its owning snapshot.
+    /// iteration.next();
+    /// ```
+    pub fn update<'s>(
+        &'s mut self,
+        snapshot: &'s Snapshot<'alloc, '_>,
+    ) -> Result<RowIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -658,10 +671,29 @@ impl<'alloc> CellIterator<'alloc> {
 
     /// Update the cell iterator for a new row iteration,
     /// returning a new cell iteration.
-    pub fn update(
-        &mut self,
-        row: &'_ RowIteration<'alloc, '_>,
-    ) -> Result<CellIteration<'alloc, '_>> {
+    ///
+    /// The iteration borrows the row, so it cannot outlive it:
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{
+    ///     RenderState, Terminal,
+    ///     render::{CellIterator, RowIterator},
+    /// };
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut row = rows.update(&snapshot).unwrap();
+    /// row.next();
+    /// let mut cells = CellIterator::new().unwrap();
+    /// let mut iteration = cells.update(&row).unwrap();
+    /// drop(row); // Iteration still borrows its owning row.
+    /// iteration.next();
+    /// ```
+    pub fn update<'s>(
+        &'s mut self,
+        row: &'s RowIteration<'alloc, '_>,
+    ) -> Result<CellIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
