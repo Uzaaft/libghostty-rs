@@ -4,7 +4,7 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master]
+    branches: [master, "stack/ghostty-*"]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
