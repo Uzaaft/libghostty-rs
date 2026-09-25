@@ -983,6 +983,30 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 
+    /// Set whether a resize may pull rows out of scrollback back into the
+    /// active area.
+    ///
+    /// When true, growing rows reveals scrollback if the cursor is on the
+    /// bottom row, and a column reflow that needs fewer rows reveals
+    /// scrollback as well. When false, growing rows always appends blank rows
+    /// at the bottom and a column reflow keeps the top of the active area on
+    /// the same content, so a line that is fully in scrollback stays there. A
+    /// soft-wrapped line with at least one row still in the active area may
+    /// still unwrap back into view.
+    ///
+    /// Set this to false when the pty keeps its own screen buffer without
+    /// scrollback, since it cannot pull rows back and will otherwise disagree
+    /// with the terminal about the screen contents after a resize. Windows
+    /// `ConPTY` is the motivating case.
+    ///
+    /// This is preserved across a full reset (RIS).
+    ///
+    /// Passing `None` resets to the built-in default of `true`.
+    pub fn set_resize_pull_scrollback(&mut self, v: Option<bool>) -> Result<&mut Self> {
+        self.set_optional(Opt::RESIZE_PULL_SCROLLBACK, v.as_ref())?;
+        Ok(self)
+    }
+
     /// The current 256-color palette.
     pub fn color_palette(&self) -> Result<Palette> {
         self.get::<RawPalette>(Data::COLOR_PALETTE)
@@ -2362,6 +2386,62 @@ mod tests {
     use crate::render::CursorVisualStyle;
     use std::cell::{Cell, RefCell};
     use std::mem::ManuallyDrop;
+
+    #[test]
+    fn resize_pull_scrollback_controls_growing_rows() {
+        // Apply `configure`, fill a 5-row terminal past its height so rows
+        // land in scrollback and the cursor sits on the bottom row, then grow
+        // it to 8 rows and report where the cursor ended up.
+        fn cursor_row_after_growing(
+            configure: impl FnOnce(&mut Terminal<'static, 'static>),
+        ) -> u16 {
+            let mut terminal = Terminal::new(10, 5).expect("terminal should initialize");
+            configure(&mut terminal);
+            terminal.vt_write(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8");
+            assert_eq!(terminal.cursor_y().unwrap(), 4);
+            terminal
+                .resize(10, 8, 8, 16)
+                .expect("resize should succeed");
+            terminal.cursor_y().unwrap()
+        }
+        fn set(terminal: &mut Terminal<'static, 'static>, pull: Option<bool>) {
+            terminal
+                .set_resize_pull_scrollback(pull)
+                .expect("option should be settable");
+        }
+
+        // Pulling scrollback back in moves the cursor's line down with it.
+        // That is the default, both when never set and when set explicitly.
+        assert_eq!(cursor_row_after_growing(|_| {}), 7);
+        assert_eq!(cursor_row_after_growing(|t| set(t, Some(true))), 7);
+        // Otherwise blank rows are appended below and the cursor stays put.
+        assert_eq!(cursor_row_after_growing(|t| set(t, Some(false))), 4);
+        // `None` has to actively restore the default, not just leave the
+        // previous value in place.
+        assert_eq!(
+            cursor_row_after_growing(|t| {
+                set(t, Some(false));
+                set(t, None);
+            }),
+            7
+        );
+        // The setting survives a full reset, whether the program sends RIS
+        // or the embedder resets the terminal.
+        assert_eq!(
+            cursor_row_after_growing(|t| {
+                set(t, Some(false));
+                t.vt_write(b"\x1bc");
+            }),
+            4
+        );
+        assert_eq!(
+            cursor_row_after_growing(|t| {
+                set(t, Some(false));
+                t.reset();
+            }),
+            4
+        );
+    }
 
     #[test]
     fn render_hold_reports_start_and_end_in_pairs() {
