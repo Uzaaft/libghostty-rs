@@ -83,7 +83,6 @@ use std::{
     io::{Read, Write},
     marker::PhantomData,
     mem::MaybeUninit,
-    ptr::NonNull,
 };
 
 use crate::{
@@ -154,9 +153,9 @@ impl Terminal<'_, '_> {
         };
 
         let out = from_optional_result(result, out)?;
-        Ok(out
-            .and_then(NonNull::new)
-            .map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
+        // SAFETY: On success, libghostty hands over `out_len` bytes allocated
+        // with `alloc`, or NULL for empty output.
+        Ok(out.map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
     }
 
     /// Encode a complete terminal snapshot to a caller-provided buffer.

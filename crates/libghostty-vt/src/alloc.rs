@@ -112,6 +112,13 @@ impl<'alloc> Bytes<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator, len: usize) -> Result<Self> {
+        // `ghostty_alloc` returns NULL for a zero-length request, which
+        // must not be mistaken for an allocation failure.
+        if len == 0 {
+            // SAFETY: NULL with a zero length is the empty buffer.
+            return Ok(unsafe { Self::from_raw_parts(std::ptr::null_mut(), 0, alloc) });
+        }
+
         let raw = unsafe { ffi::ghostty_alloc(alloc, len) };
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         // Neither Zig allocators nor `std::alloc::alloc` initialize memory,
@@ -121,14 +128,30 @@ impl<'alloc> Bytes<'alloc> {
         //
         // SAFETY: `ghostty_alloc` returned a non-null allocation of `len` bytes.
         unsafe { ptr.as_ptr().write_bytes(0, len) };
-        Ok(unsafe { Self::from_raw_parts(ptr, len, alloc) })
+        Ok(unsafe { Self::from_raw_parts(ptr.as_ptr(), len, alloc) })
     }
 
+    /// Take ownership of a buffer allocated by libghostty.
+    ///
+    /// libghostty reports empty output as a NULL pointer with a zero length,
+    /// so NULL is accepted and yields an empty buffer that owns no memory.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must either be NULL, or point to `len` initialized bytes
+    /// allocated with `alloc`, whose ownership is transferred to the result.
     pub(crate) unsafe fn from_raw_parts(
-        ptr: NonNull<u8>,
+        ptr: *mut u8,
         len: usize,
         alloc: *const ffi::Allocator,
     ) -> Self {
+        // `slice::from_raw_parts` needs a non-null pointer even for empty
+        // slices, so substitute a dangling one. The length is forced to zero
+        // so that a NULL pointer can never be read from, whatever `len` says.
+        let (ptr, len) = match NonNull::new(ptr) {
+            Some(ptr) => (ptr, len),
+            None => (NonNull::dangling(), 0),
+        };
         Self {
             ptr,
             len,
@@ -139,6 +162,12 @@ impl<'alloc> Bytes<'alloc> {
 }
 impl Drop for Bytes<'_> {
     fn drop(&mut self) {
+        // Empty buffers own no memory: either libghostty handed us NULL, or
+        // the pointer is dangling. Zig never allocates for zero-length
+        // buffers either, so there is nothing to free.
+        if self.len == 0 {
+            return;
+        }
         // SAFETY: The lifetime dictates that the allocator must
         // remain valid through here. We retain ownership of the bytes
         // memory itself so it should not be freed beforehand.
@@ -458,5 +487,20 @@ mod tests {
             assert_eq!(bytes.len(), len);
             assert!(bytes.iter().all(|&b| b == 0));
         }
+    }
+
+    // libghostty reports empty output as NULL with a zero length. That must
+    // come back as an empty buffer, not be mistaken for an allocation failure.
+    #[test]
+    #[cfg_attr(miri, ignore = "calls into libghostty")]
+    fn empty_output_is_an_empty_buffer() {
+        let terminal = crate::Terminal::new(10, 5).expect("terminal");
+        let mut formatter =
+            crate::fmt::Formatter::new(&terminal, crate::fmt::FormatterOptions::new())
+                .expect("formatter");
+        let bytes = formatter
+            .format_alloc(None)
+            .expect("empty output is not an error");
+        assert!(bytes.is_empty());
     }
 }
