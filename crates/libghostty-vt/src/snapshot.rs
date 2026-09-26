@@ -279,8 +279,15 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// through FINISH. It may only be called before decoding starts. Bytes
     /// following FINISH are left unread. On success this returns a
     /// caller-owned terminal with its persistent VT stream restored.
-    /// Continuation tracking on the returned terminal is disabled and
-    /// [`Terminal::continuation_max_bytes`] returns zero.
+    /// Continuation tracking on the returned terminal is disabled by default.
+    /// When [`Self::set_retain_continuation`] is enabled, the decoder's
+    /// maximum continuation size is applied to the terminal, and the terminal
+    /// continuation APIs export the exact current continuation when that limit
+    /// is nonzero. Tracking remains enabled even if the exported continuation
+    /// is empty. Callers that do not need ongoing tracking must call
+    /// [`Terminal::set_continuation_max_bytes`] with zero after export and
+    /// before writing any post-snapshot bytes, because later input may change
+    /// it.
     ///
     /// A decoding, I/O, or allocation error after input consumption begins
     /// poisons the decoder, after which it must be dropped. An invalid
@@ -300,10 +307,17 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// The terminal is immediately usable for rendering and live input.
     /// Older scrollback remains to be restored with [`IncrementalDecoder::next`].
     ///
-    /// The restored parser state may be unfinished, but terminal continuation
-    /// tracking is disabled; [`Terminal::continuation_max_bytes`]
-    /// returns zero. The decoder's continuation option is an input limit,
-    /// not terminal runtime policy.
+    /// The restored parser state may be unfinished. By default, terminal
+    /// continuation tracking is disabled and
+    /// [`Terminal::continuation_max_bytes`] returns zero.
+    /// When [`Self::set_retain_continuation`] is enabled, the decoder's
+    /// maximum continuation size is applied to the terminal, and the terminal
+    /// continuation APIs export the exact current continuation when that limit
+    /// is nonzero. Tracking remains enabled even if the exported continuation
+    /// is empty. Callers that do not need ongoing tracking must call
+    /// [`Terminal::set_continuation_max_bytes`] with zero after export and
+    /// before writing any post-snapshot bytes, because later input may change
+    /// it.
     ///
     /// A decoding, I/O, or allocation error after input consumption begins
     /// poisons the decoder, after which it must be dropped. An invalid
@@ -359,10 +373,38 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// state. The decoder default matches the largest built-in APC protocol
     /// buffer limit, currently 65 MiB.
     ///
-    /// This is an input validation limit only. It does not configure continuation
-    /// tracking on a terminal returned by the decoder.
+    /// This is primarily an input validation limit. When
+    /// [`Self::set_retain_continuation`] is enabled, the same value also
+    /// becomes the continuation tracking limit on the returned terminal.
     pub fn set_max_continuation_bytes(&mut self, v: usize) -> Result<&mut Self> {
         self.set(Opt::MAX_CONTINUATION_BYTES, &v)?;
+        Ok(self)
+    }
+
+    /// Whether decoded continuation tracking is retained on returned
+    /// terminals.
+    ///
+    /// This value is available in every non-failed decoder state.
+    pub fn retain_continuation(&self) -> Result<bool> {
+        self.get(Data::RETAIN_CONTINUATION)
+    }
+
+    /// Retain the decoded continuation on the returned terminal.
+    ///
+    /// When true, terminals returned by [`Self::ready`] and [`Self::decode`]
+    /// use [`Self::max_continuation_bytes`] as their continuation tracking
+    /// limit. The existing continuation APIs such as
+    /// [`Terminal::continuation_buf`] can then export the exact unfinished VT
+    /// or UTF-8 input restored from the snapshot.
+    ///
+    /// This is false by default. A maximum continuation size of zero leaves
+    /// tracking disabled. With a nonzero maximum, tracking remains enabled
+    /// even when the decoded continuation is empty. Exporting an empty
+    /// continuation does not disable it. Callers that do not need ongoing
+    /// tracking must still call [`Terminal::set_continuation_max_bytes`] with
+    /// zero after export and before writing post-snapshot input.
+    pub fn set_retain_continuation(&mut self, value: bool) -> Result<&mut Self> {
+        self.set(Opt::RETAIN_CONTINUATION, &value)?;
         Ok(self)
     }
 
@@ -489,5 +531,94 @@ impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
     /// Get a reference to the underlying decoder.
     pub fn as_decoder(self) -> &'d Decoder<'alloc, 'r> {
         self.decoder
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::*;
+
+    /// A snapshot of a terminal stopped in the middle of `ESC [31`.
+    fn unfinished_snapshot() -> Vec<u8> {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal.set_continuation_max_bytes(1024).unwrap();
+        terminal.vt_write(b"\x1b[31");
+        let mut bytes = Vec::new();
+        terminal.encode_snapshot(&mut bytes).unwrap();
+        bytes
+    }
+
+    fn continuation(terminal: &Terminal<'_, '_>) -> Option<Vec<u8>> {
+        let mut buf = [0; 16];
+        let len = terminal.continuation_buf(&mut buf).unwrap()?;
+        Some(buf[..len].to_vec())
+    }
+
+    #[test]
+    fn decoded_continuation_is_not_retained_by_default() {
+        let bytes = unfinished_snapshot();
+        let decoder = Decoder::new_buf(&bytes).unwrap();
+        assert!(!decoder.retain_continuation().unwrap());
+        let restored = decoder.decode().unwrap();
+        assert_eq!(restored.continuation_max_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn decoded_continuation_can_be_exported_and_resumed() {
+        let bytes = unfinished_snapshot();
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        decoder
+            .set_max_continuation_bytes(1024)
+            .unwrap()
+            .set_retain_continuation(true)
+            .unwrap();
+        assert!(decoder.retain_continuation().unwrap());
+
+        let mut restored = decoder.decode().unwrap();
+        assert_eq!(restored.continuation_max_bytes().unwrap(), 1024);
+        assert_eq!(continuation(&restored).as_deref(), Some(&b"\x1b[31"[..]));
+
+        // Tracking isn't needed after the export, so turn it off before
+        // writing post-snapshot input. The parser state is still restored.
+        restored.set_continuation_max_bytes(0).unwrap();
+        restored.vt_write(b"mX");
+        assert!(restored.vt_ground().unwrap());
+        assert_eq!(restored.cursor_x().unwrap(), 1);
+    }
+
+    #[test]
+    fn ready_retains_continuation_before_history_is_restored() {
+        let bytes = unfinished_snapshot();
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        decoder.set_retain_continuation(true).unwrap();
+        let mut incremental = decoder.ready().unwrap();
+        // The tracking limit is the decoder default, not the encoder's.
+        assert_eq!(
+            incremental.terminal().continuation_max_bytes().unwrap(),
+            65 * 1024 * 1024
+        );
+        assert_eq!(
+            continuation(incremental.terminal()).as_deref(),
+            Some(&b"\x1b[31"[..])
+        );
+        while incremental.next().unwrap().is_some() {}
+    }
+
+    #[test]
+    fn zero_limit_leaves_tracking_disabled() {
+        // Only snapshots at ground are accepted with a zero limit.
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal.vt_write(b"hi");
+        let mut bytes = Vec::new();
+        terminal.encode_snapshot(&mut bytes).unwrap();
+
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        decoder
+            .set_max_continuation_bytes(0)
+            .unwrap()
+            .set_retain_continuation(true)
+            .unwrap();
+        let restored = decoder.decode().unwrap();
+        assert_eq!(restored.continuation_max_bytes().unwrap(), 0);
     }
 }
