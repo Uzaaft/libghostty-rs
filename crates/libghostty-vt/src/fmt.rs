@@ -179,6 +179,37 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         })
     }
 
+    /// Run the formatter and stream output to a writer.
+    ///
+    /// Each call formats the current terminal state and invokes the writer
+    /// synchronously as output becomes available, so the complete output is
+    /// never buffered. The writer may be called more than once.
+    ///
+    /// If an error occurs, the writer may already contain a partial formatted
+    /// output. The operation cannot be resumed from that partial output. This
+    /// function does not flush or make the writer's destination durable.
+    ///
+    /// <div class="warning">
+    ///
+    /// The writer must not call formatter or terminal APIs using this
+    /// formatter or its terminal. The borrow checker cannot prevent this,
+    /// since the formatter only borrows its terminal immutably.
+    ///
+    /// The writer runs inside a call into libghostty, so a panic in it aborts
+    /// the process.
+    ///
+    /// </div>
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::IoError`] if the writer rejects output, and
+    /// [`Error::LimitExceeded`] if output accounting overflows.
+    pub fn format<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
+        let writer = crate::io::to_writer(writer);
+        // SAFETY: The writer outlives this synchronous call.
+        from_result(unsafe { ffi::ghostty_formatter_format(self.inner.as_raw(), writer) })
+    }
+
     /// Run the formatter and return an allocated buffer with the output.
     ///
     /// Each call formats the current terminal state. The buffer is allocated
@@ -268,4 +299,89 @@ pub enum Format {
     Vt = ffi::FormatterFormat::VT,
     /// HTML with inline styles.
     Html = ffi::FormatterFormat::HTML,
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::*;
+
+    /// A writer that accepts at most one byte per write, counting calls.
+    struct ByteAtATime {
+        bytes: Vec<u8>,
+        writes: usize,
+    }
+
+    impl std::io::Write for ByteAtATime {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.writes += 1;
+            self.bytes.extend_from_slice(&buf[..1]);
+            Ok(1)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// A writer that rejects everything.
+    struct Reject;
+
+    impl std::io::Write for Reject {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("rejected"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn format_buf(formatter: &mut Formatter<'_, '_, '_>) -> Vec<u8> {
+        let mut buf = vec![0; formatter.format_len().unwrap()];
+        let len = formatter.format_buf(&mut buf).unwrap();
+        buf.truncate(len);
+        buf
+    }
+
+    #[test]
+    fn writer_output_matches_buffer_output_in_every_format() {
+        let mut terminal = Terminal::new(20, 3).unwrap();
+        terminal.vt_write(b"plain \x1b[1;31mbold red\x1b[0m\r\nsecond line");
+        for format in [Format::Plain, Format::Vt, Format::Html] {
+            let options = FormatterOptions::new().with_format(format);
+            let mut formatter = Formatter::new(&terminal, options).unwrap();
+            let expected = format_buf(&mut formatter);
+            assert!(!expected.is_empty(), "{format:?}");
+
+            let mut actual = Vec::new();
+            formatter.format(&mut actual).unwrap();
+            assert_eq!(actual, expected, "{format:?}");
+        }
+    }
+
+    #[test]
+    fn partial_writes_are_retried_until_complete() {
+        let mut terminal = Terminal::new(20, 3).unwrap();
+        terminal.vt_write(b"hello\r\nworld");
+        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        let expected = format_buf(&mut formatter);
+
+        let mut writer = ByteAtATime {
+            bytes: Vec::new(),
+            writes: 0,
+        };
+        formatter.format(&mut writer).unwrap();
+        assert_eq!(writer.bytes, expected);
+        assert_eq!(writer.writes, expected.len());
+    }
+
+    #[test]
+    fn writer_failure_is_an_io_error() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal.vt_write(b"hello");
+        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        assert!(matches!(formatter.format(&mut Reject), Err(Error::IoError)));
+        // The formatter stays usable afterwards.
+        let mut output = Vec::new();
+        formatter.format(&mut output).unwrap();
+        assert_eq!(output, b"hello");
+    }
 }
