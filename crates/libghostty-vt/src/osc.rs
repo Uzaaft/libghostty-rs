@@ -1,6 +1,10 @@
 //! Handling OSC (Operating System Command) escape sequences.
 
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::{
+    ffi::{CStr, c_char},
+    marker::PhantomData,
+    mem::MaybeUninit,
+};
 
 use crate::{
     alloc::{Allocator, Object},
@@ -117,9 +121,20 @@ impl<'p> Command<'p, '_> {
 
         let raw_type = unsafe { ffi::ghostty_osc_command_type(self.inner.as_raw()) };
         Some(match raw_type {
-            Type::CHANGE_WINDOW_TITLE => CommandType::ChangeWindowTitle {
-                title: self.get(Data::CHANGE_WINDOW_TITLE_STR)?,
-            },
+            Type::CHANGE_WINDOW_TITLE => {
+                // The data is a pointer to a NUL-terminated string, not a
+                // Rust string slice.
+                let title = self.get::<*const c_char>(Data::CHANGE_WINDOW_TITLE_STR)?;
+                if title.is_null() {
+                    return None;
+                }
+                CommandType::ChangeWindowTitle {
+                    // SAFETY: The string is owned by the parser and valid until
+                    // the next call on it, which the `'p` borrow of the parser
+                    // rules out.
+                    title: unsafe { CStr::from_ptr(title) },
+                }
+            }
             Type::CHANGE_WINDOW_ICON => CommandType::ChangeWindowIcon,
             Type::SEMANTIC_PROMPT => CommandType::SemanticPrompt,
             Type::CLIPBOARD_CONTENTS => CommandType::ClipboardContents,
@@ -143,6 +158,10 @@ impl<'p> Command<'p, '_> {
             Type::CONEMU_XTERM_EMULATION => CommandType::ConemuXtermEmulation,
             Type::CONEMU_COMMENT => CommandType::ConemuComment,
             Type::KITTY_TEXT_SIZING => CommandType::KittyTextSizing,
+            Type::KITTY_CLIPBOARD_PROTOCOL => CommandType::KittyClipboardProtocol,
+            Type::KITTY_DND_PROTOCOL => CommandType::KittyDndProtocol,
+            Type::CONTEXT_SIGNAL => CommandType::ContextSignal,
+            Type::KITTY_DESKTOP_NOTIFICATION => CommandType::KittyDesktopNotification,
 
             _ => return None,
         })
@@ -164,15 +183,18 @@ impl<'p> Command<'p, '_> {
 }
 
 /// Type of an OSC command.
-#[repr(i32)]
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 #[expect(missing_docs, reason = "missing upstream docs")]
 pub enum CommandType<'p> {
     #[default]
     Invalid,
     ChangeWindowTitle {
         /// Window title string data.
-        title: &'p str,
+        ///
+        /// The title comes straight from the running program, so it is not
+        /// guaranteed to be valid UTF-8.
+        title: &'p CStr,
     },
     ChangeWindowIcon,
     SemanticPrompt,
@@ -195,4 +217,60 @@ pub enum CommandType<'p> {
     ConemuXtermEmulation,
     ConemuComment,
     KittyTextSizing,
+    KittyClipboardProtocol,
+    KittyDndProtocol,
+    ContextSignal,
+    KittyDesktopNotification,
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::*;
+
+    /// Parse the contents of one OSC sequence terminated by BEL.
+    fn parse(parser: &mut Parser<'_>, osc: &[u8]) -> String {
+        parser.reset();
+        for &byte in osc {
+            parser.next_byte(byte);
+        }
+        format!("{:?}", parser.end(0x07).command_type())
+    }
+
+    #[test]
+    fn window_title_is_extracted() {
+        let mut parser = Parser::new().unwrap();
+        for byte in *b"2;hello" {
+            parser.next_byte(byte);
+        }
+        let CommandType::ChangeWindowTitle { title } = parser.end(0x07).command_type() else {
+            panic!("expected a window title command");
+        };
+        assert_eq!(title, c"hello");
+
+        // OSC 0 sets the title too.
+        assert_eq!(
+            parse(&mut parser, b"0;other"),
+            r#"ChangeWindowTitle { title: "other" }"#
+        );
+    }
+
+    #[test]
+    fn newer_protocol_commands_are_recognized() {
+        // Payloads taken from upstream's parser tests.
+        let mut parser = Parser::new().unwrap();
+        let cases: [(&[u8], &str); 4] = [
+            (b"5522;type=read;dGV4dC9wbGFpbg==", "KittyClipboardProtocol"),
+            (b"72;t=a:i=5;text/plain text/uri-list", "KittyDndProtocol"),
+            (b"3008;start=abc123", "ContextSignal"),
+            (b"99;;bobr", "KittyDesktopNotification"),
+        ];
+        for (osc, expected) in cases {
+            assert_eq!(
+                parse(&mut parser, osc),
+                expected,
+                "{}",
+                String::from_utf8_lossy(osc)
+            );
+        }
+    }
 }
