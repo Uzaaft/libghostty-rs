@@ -156,12 +156,16 @@
         checks = {
           default = application;
 
+          # No workspace member enables the optional `png` feature, so the
+          # checks below that compile the safe crate turn it on explicitly;
+          # otherwise the PNG decoder is never type-checked, linted,
+          # doc-checked or tested in CI.
           cargo-check = craneLib.mkCargoDerivation (
             commonArgs
             // {
               inherit cargoArtifacts;
               pnameSuffix = "-check";
-              buildPhaseCargoCommand = "cargoWithProfile check ${commonArgs.cargoExtraArgs} --workspace --all-targets";
+              buildPhaseCargoCommand = "cargoWithProfile check ${commonArgs.cargoExtraArgs} --workspace --all-targets --features libghostty-vt/png";
             }
           );
 
@@ -169,7 +173,7 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--workspace --all-targets";
+              cargoClippyExtraArgs = "--workspace --all-targets --features libghostty-vt/png";
             }
           );
 
@@ -177,7 +181,7 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoDocExtraArgs = "--workspace --no-deps";
+              cargoDocExtraArgs = "--workspace --no-deps --features libghostty-vt/png";
               RUSTDOCFLAGS = "-D warnings";
             }
           );
@@ -188,9 +192,6 @@
             inherit src;
           };
 
-          # No workspace member enables the optional `png` feature, so turn it
-          # on explicitly; otherwise the PNG decoder and its tests are never
-          # compiled in CI.
           cargo-test = craneLib.cargoTest (
             commonArgs
             // {
