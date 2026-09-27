@@ -198,7 +198,10 @@
           bindings-fresh = craneCheckLib.mkCargoDerivation (
             commonArgs
             // {
-              inherit cargoArtifacts;
+              # The shared deps are built without the bindgen-tool feature and in
+              # the release profile, so they would be unpacked and then ignored.
+              # A dev build of just the generator is quicker than a release one.
+              cargoArtifacts = null;
               pnameSuffix = "-bindings";
               GHOSTTY_INCLUDE_DIR = "${ghostty}/include";
               LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
