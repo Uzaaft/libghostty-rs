@@ -306,7 +306,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// Changes the number of columns and rows in the terminal. The primary
     /// screen will reflow content if wraparound mode is enabled; the alternate
-    /// screen does not reflow. If the dimensions are unchanged, this is a no-op.
+    /// screen does not reflow. If the dimensions are unchanged, the grid is
+    /// left as is, but everything below still applies.
     ///
     /// This also updates the terminal's pixel dimensions (used for image
     /// protocols and size reports), disables synchronized output mode (allowed
@@ -593,8 +594,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Return an allocated copy of the terminal's replay-safe VT continuation.
     ///
     /// The returned bytes are allocated with allocator, or the default allocator
-    /// when allocator is `None`. An empty continuation is a successful zero-length
-    /// allocation. Continuation tracking must have been enabled by callling
+    /// when allocator is `None`. An empty continuation is a successful result
+    /// with empty [`Bytes`]; libghostty does not allocate for it.
+    /// Continuation tracking must have been enabled by calling
     /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
     /// input that produced the continuation was written.
     ///
@@ -636,7 +638,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// stream is at ground. If a non-empty buffer is too small, the function
     /// has the same result and reports the full required size.
     ///
-    /// Continuation tracking must have been enabled by callling
+    /// Continuation tracking must have been enabled by calling
     /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
     /// input that produced the continuation was written.
     ///
@@ -878,9 +880,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
     /// Get the terminal title as set by escape sequences (e.g. OSC 0/2).
     ///
-    /// Returns a borrowed string, valid until the next call to
-    /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
-    /// returned when no title has been set.
+    /// Returns a borrowed string, valid until the next mutating terminal call.
+    /// An empty string is returned when no title has been set.
     pub fn title(&self) -> Result<&str> {
         let str = self.get::<ffi::String>(Data::TITLE)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
@@ -891,9 +892,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     /// Get the current working directory as set by escape sequences (e.g. OSC 7).
     ///
-    /// Returns a borrowed string, valid until the next call to
-    /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
-    /// returned when no title has been set.
+    /// Returns a borrowed string, valid until the next mutating terminal call.
+    /// An empty string is returned when no pwd has been set.
     pub fn pwd(&self) -> Result<&str> {
         let str = self.get::<ffi::String>(Data::PWD)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
@@ -1992,7 +1992,8 @@ macro_rules! handlers {
 
 handlers! {
     /// Call the given function when the terminal needs to write data back
-    /// to the pty (e.g. in response to a DECRQM query or device status report).
+    /// to the pty (e.g. in response to a DECRQM query, device status report,
+    /// or VT-driven mode 2048 enable).
     pub fn on_pty_write(
         &mut self,
         tag = WRITE_PTY,
@@ -2069,7 +2070,9 @@ handlers! {
     }
 
     /// Call the given function in response to XTWINOPS size queries
-    /// (CSI 14/16/18 t).
+    /// (CSI 14/16/18 t) and when VT input enables in-band size reports (mode
+    /// 2048). Return the current terminal geometry, or `None` to suppress the
+    /// report.
     pub fn on_size(
         &mut self,
         tag = SIZE,
@@ -2129,8 +2132,10 @@ handlers! {
     ///
     /// Protocol details such as OSC 52 selectors, base64 encoding, multipart
     /// chunks, aliases, and terminators are normalized before this callback is
-    /// invoked. OSC 52 and iTerm2 OSC 1337 Copy writes therefore use the same
-    /// callback shape.
+    /// invoked. OSC 52, iTerm2 OSC 1337 Copy, and Kitty clipboard (OSC 5522)
+    /// writes therefore use the same callback shape. Without this callback,
+    /// clipboard writes are ignored and Kitty clipboard writes are refused
+    /// with ENOSYS.
     ///
     /// The embedder may ask for permission to write or perform the write
     /// async, but the callback itself is synchronous and
