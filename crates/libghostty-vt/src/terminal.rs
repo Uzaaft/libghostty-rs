@@ -593,8 +593,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Return an allocated copy of the terminal's replay-safe VT continuation.
     ///
     /// The returned bytes are allocated with allocator, or the default allocator
-    /// when allocator is `None`. An empty continuation is a successful zero-length
-    /// allocation. Continuation tracking must have been enabled by callling
+    /// when allocator is `None`. An empty continuation is a successful result
+    /// with empty [`Bytes`]; libghostty does not allocate for it. Continuation tracking must have been enabled by callling
     /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
     /// input that produced the continuation was written.
     ///
@@ -878,9 +878,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
     /// Get the terminal title as set by escape sequences (e.g. OSC 0/2).
     ///
-    /// Returns a borrowed string, valid until the next call to
-    /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
-    /// returned when no title has been set.
+    /// Returns a borrowed string, valid until the next mutating terminal call.
+    /// An empty string is returned when no title has been set.
     pub fn title(&self) -> Result<&str> {
         let str = self.get::<ffi::String>(Data::TITLE)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
@@ -891,9 +890,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     /// Get the current working directory as set by escape sequences (e.g. OSC 7).
     ///
-    /// Returns a borrowed string, valid until the next call to
-    /// [`Terminal::vt_write`] or [`Terminal::reset`]. An empty string is
-    /// returned when no title has been set.
+    /// Returns a borrowed string, valid until the next mutating terminal call.
+    /// An empty string is returned when no pwd has been set.
     pub fn pwd(&self) -> Result<&str> {
         let str = self.get::<ffi::String>(Data::PWD)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
