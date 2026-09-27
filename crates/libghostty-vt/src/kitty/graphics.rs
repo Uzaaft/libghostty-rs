@@ -463,6 +463,11 @@ impl<'t> Image<'t> {
     /// payloads are decoded to RGBA at transmission time, before the image
     /// is stored. Consumers can upload this directly to the GPU without any
     /// decode step.
+    ///
+    /// For an animated image (Kitty graphics animation, actions a=f/a=a) this
+    /// is the pixel data of the current animation frame. The image's
+    /// [generation](Image::generation) changes whenever the current frame
+    /// changes, so generation-keyed caches remain coherent.
     pub fn data(&self) -> Result<Option<&'t [u8]>> {
         let ptr = self.get::<*const u8>(ffi::KittyGraphicsImageData::DATA_PTR)?;
         if ptr.is_null() {
