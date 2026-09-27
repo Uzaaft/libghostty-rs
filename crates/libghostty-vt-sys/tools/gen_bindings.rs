@@ -83,7 +83,6 @@ fn main() {
         .derive_default(true)
         .size_t_is_usize(true)
         .default_enum_style(EnumVariation::ModuleConsts)
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .parse_callbacks(Box::new(Callbacks));
 
     if cfg!(target_os = "linux") {
