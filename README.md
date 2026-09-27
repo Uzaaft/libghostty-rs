@@ -94,6 +94,21 @@ cargo test -p libghostty-vt-sys
 cargo build -p ghostling_rs
 ```
 
+### Regenerating bindings
+
+`crates/libghostty-vt-sys/src/bindings.rs` is checked in and must match the
+Ghostty commit pinned in both `crates/libghostty-vt-sys/build.rs` and
+`flake.nix`; the `bindings-fresh` Nix check fails otherwise. After bumping the
+pin, regenerate the bindings from the dev shell:
+
+```sh
+cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings && cargo fmt -p libghostty-vt-sys
+```
+
+The generator reads the headers from `GHOSTTY_INCLUDE_DIR`, or from
+`GHOSTTY_SOURCE_DIR/include`, and otherwise from the headers the build script
+installs under `target/debug/build`.
+
 ### Miri Verification
 
 Run the Rust-owned soundness checks with:
