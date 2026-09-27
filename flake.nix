@@ -190,6 +190,11 @@
           # they differ from the checked-in ones. GHOSTTY_INCLUDE_DIR is used
           # instead of GHOSTTY_SOURCE_DIR so that the build script keeps linking
           # the prebuilt library rather than building Ghostty from source.
+          #
+          # The headers come from the flake input, but users build against
+          # the commit pinned in build.rs. Nothing else ties the two together,
+          # so check that they agree first; otherwise bumping only one of them
+          # would leave this check green while comparing the wrong headers.
           bindings-fresh = craneCheckLib.mkCargoDerivation (
             commonArgs
             // {
@@ -198,6 +203,13 @@
               GHOSTTY_INCLUDE_DIR = "${ghostty}/include";
               LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
               buildPhaseCargoCommand = ''
+                if ! grep -qF 'const GHOSTTY_COMMIT: &str = "${ghostty.rev}";' \
+                  crates/libghostty-vt-sys/build.rs; then
+                  echo "error: the Ghostty pin in flake.nix (${ghostty.rev}) does not" >&2
+                  echo "match GHOSTTY_COMMIT in crates/libghostty-vt-sys/build.rs." >&2
+                  echo "Bump both to the same commit." >&2
+                  exit 1
+                fi
                 cargo run ${commonArgs.cargoExtraArgs} -p libghostty-vt-sys \
                   --features libghostty-vt-sys/bindgen-tool --bin gen-bindings
                 cargo fmt -p libghostty-vt-sys
