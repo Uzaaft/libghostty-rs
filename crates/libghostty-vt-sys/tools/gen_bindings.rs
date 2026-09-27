@@ -66,8 +66,10 @@ fn main() {
         .allowlist_type("[Gg]hostty.*")
         .allowlist_var("GHOSTTY_.*")
         // Only used to force enums to `int` size. It is defined as `INT_MAX`,
-        // which bindgen can only evaluate when the libc headers resolve, so
-        // keeping it would make the output differ between machines.
+        // and whether bindgen emits a constant for it differs between
+        // environments (the Nix check emits it, but the checked-in bindings
+        // were generated without it), so exclude it to keep the output
+        // reproducible.
         .blocklist_item("GHOSTTY_ENUM_MAX_VALUE")
         .generate_cstr(true)
         .derive_default(true)
