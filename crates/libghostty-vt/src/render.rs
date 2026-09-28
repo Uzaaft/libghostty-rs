@@ -97,6 +97,30 @@ pub use ffi::RenderStateOverscan as Overscan;
 /// access to the terminal. The values then describe the same moment as the
 /// render state.
 ///
+/// # Row identity
+///
+/// Every row has an [id](RowIteration::id) that stays with the row as it
+/// moves. When the viewport scrolls by one row, each row shows up one
+/// position higher or lower in the next update but keeps its id. Ids work
+/// with or without overscan.
+///
+/// Ids let a renderer keep expensive per-row work, such as shaped text or a
+/// prepared texture, in its own cache keyed by id. A cached entry can be
+/// reused when both of these are true:
+///
+///  1. A row with the same id is present in the new update.
+///  2. That row's [dirty flag](RowIteration::dirty) is not set.
+///
+/// The dirty flag is conservative. A row may be marked dirty even though its
+/// content didn't change. For example, every row is currently marked dirty
+/// after the viewport scrolls. Rebuilding a dirty row is always correct.
+///
+/// An id disappears when its row is no longer captured, is removed from
+/// scrollback, or is changed in place by the terminal (for example, when a
+/// program scrolls only part of the screen). Ids are never reused, so an old
+/// id can never match a different row. Cache entries for ids that no longer
+/// appear can be discarded.
+///
 /// # Examples
 ///
 /// ## Creating and updating render state
@@ -227,6 +251,31 @@ pub use ffi::RenderStateOverscan as Overscan;
 /// let mut row_iter = rows.update(&snapshot)?;
 /// while let Some(row) = row_iter.next() {
 ///     draw_row(row, row.viewport_y()? * cell_height - offset_px);
+/// }
+/// # Ok(())}
+/// ```
+///
+/// ## Caching per-row work by id
+///
+/// ```rust
+/// use std::collections::HashMap;
+/// use libghostty_vt::{RenderState, Terminal, render::{RowId, RowIterator}};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # let terminal = Terminal::new(80, 25)?;
+/// # let mut render_state = RenderState::new()?;
+/// # let mut rows = RowIterator::new()?;
+/// # let prepare = |_: &_| ();
+/// // The renderer's own map from row id to prepared row.
+/// let mut cache: HashMap<RowId, ()> = HashMap::new();
+///
+/// let snapshot = render_state.update(&terminal)?;
+/// let mut row_iter = rows.update(&snapshot)?;
+/// while let Some(row) = row_iter.next() {
+///     let id = row.id()?;
+///     if row.dirty()? || !cache.contains_key(&id) {
+///         cache.insert(id, prepare(row));
+///     }
 /// }
 /// # Ok(())}
 /// ```
@@ -846,6 +895,14 @@ impl RowIteration<'_, '_> {
         self.get(ffi::RenderStateRowData::DIRTY)
     }
 
+    /// The row's [identity](RenderState#row-identity) across updates.
+    ///
+    /// This works with or without [overscan](RenderState#overscan).
+    pub fn id(&self) -> Result<RowId> {
+        self.get::<ffi::RenderStateRowId>(ffi::RenderStateRowData::ID)
+            .map(|id| RowId(id.bits))
+    }
+
     /// The row's position relative to the top of the viewport.
     ///
     /// Viewport rows are 0 through [`rows`](Snapshot::rows) - 1.
@@ -1199,6 +1256,15 @@ pub struct Cursor {
     pub visual_style: CursorVisualStyle,
 }
 
+/// The [identity](RenderState#row-identity) of a row across render state
+/// updates, as returned by [`RowIteration::id`].
+///
+/// Treat this value as opaque: two ids are the same row when they are equal,
+/// and no other comparison or interpretation is meaningful. The contents may
+/// change between library versions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RowId([u64; 2]);
+
 /// Render-state color information.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Colors {
@@ -1425,6 +1491,50 @@ mod tests {
             row_positions(&mut rows, &snapshot),
             (vec![0, 1, 2, 3], vec![0, 1, 2, 3])
         );
+    }
+
+    /// Collect the id of every row an iteration visits.
+    fn row_ids<'alloc>(
+        rows: &mut RowIterator<'alloc>,
+        snapshot: &Snapshot<'alloc, '_>,
+    ) -> Vec<RowId> {
+        let mut ids = Vec::new();
+        let mut iteration = rows.update(snapshot).unwrap();
+        while let Some(row) = iteration.next() {
+            ids.push(row.id().unwrap());
+        }
+        ids
+    }
+
+    #[test]
+    fn row_ids_follow_rows_as_the_viewport_scrolls() {
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        for _ in 0..10 {
+            terminal.vt_write(b"x\r\n");
+        }
+        let mut state = RenderState::new().unwrap();
+        let mut rows = RowIterator::new().unwrap();
+
+        let before = row_ids(&mut rows, &state.update(&terminal).unwrap());
+        // Every row has its own id, and it doesn't change without a reason.
+        assert!(before[0] != before[1] && before[1] != before[2] && before[0] != before[2]);
+        assert_eq!(
+            row_ids(&mut rows, &state.update(&terminal).unwrap()),
+            before
+        );
+
+        // Scrolling up by one moves each row one position down, keeping its id.
+        terminal.scroll_viewport(crate::terminal::ScrollViewport::Delta(-1));
+        let after = row_ids(&mut rows, &state.update(&terminal).unwrap());
+        assert_eq!(after[1..], before[..2]);
+        assert!(!before.contains(&after[0]));
+
+        // With overscan, the row scrolled out below is still captured under
+        // the same id.
+        state.set_overscan(Overscan { above: 0, below: 1 }).unwrap();
+        let overscanned = row_ids(&mut rows, &state.update(&terminal).unwrap());
+        assert_eq!(overscanned[..3], after);
+        assert_eq!(overscanned[3], before[2]);
     }
 
     #[test]
