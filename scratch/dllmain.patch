@@ -1,0 +1,93 @@
+diff --git a/src/build/GhosttyLibVt.zig b/src/build/GhosttyLibVt.zig
+index 690f864c5..181352eda 100644
+--- a/src/build/GhosttyLibVt.zig
++++ b/src/build/GhosttyLibVt.zig
+@@ -270,6 +270,40 @@ fn initLib(
+         }
+     }
+ 
++    if (target.result.os.tag == .windows and
++        target.result.abi == .msvc and
++        kind == .shared)
++    {
++        // The CRT initialization code in msvcrt.lib calls __vcrt_initialize
++        // and __acrt_initialize, which are in the static CRT libraries.
++        lib.root_module.linkSystemLibrary("libvcruntime", .{});
++
++        // ucrt.lib is in the Windows SDK 'ucrt' dir. Detect the SDK
++        // installation and add the UCRT library path.
++        const arch = target.result.cpu.arch;
++        const sdk = std.zig.WindowsSdk.find(b.allocator, b.graph.io, arch, &b.graph.environ_map) catch null;
++        if (sdk) |s| {
++            if (s.windows10sdk) |w10| {
++                const arch_str: []const u8 = switch (arch) {
++                    .x86_64 => "x64",
++                    .x86 => "x86",
++                    .aarch64 => "arm64",
++                    else => "x64",
++                };
++                const ucrt_lib_path = std.fmt.allocPrint(
++                    b.allocator,
++                    "{s}\\Lib\\{s}\\ucrt\\{s}",
++                    .{ w10.path, w10.version, arch_str },
++                ) catch null;
++
++                if (ucrt_lib_path) |path| {
++                    lib.root_module.addLibraryPath(.{ .cwd_relative = path });
++                }
++            }
++        }
++        lib.root_module.linkSystemLibrary("libucrt", .{});
++    }
++
+     if (lib.rootModuleTarget().abi.isAndroid()) {
+         // Support 16kb page sizes, required for Android 15+.
+         lib.link_z_max_page_size = 16384; // 16kb
+diff --git a/src/lib_vt.zig b/src/lib_vt.zig
+index a0227aef7..99f215ef4 100644
+--- a/src/lib_vt.zig
++++ b/src/lib_vt.zig
+@@ -164,6 +164,43 @@ pub const unicode = struct {
+     pub const graphemeWidth = unicode_pkg.graphemeWidth;
+ };
+ 
++// Experiment: the same DllMain as main_c.zig.
++const windows_os = @import("os/windows.zig");
++pub const DllMain = if (builtin.os.tag == .windows) struct {
++    const BOOL = windows_os.BOOL;
++    const HINSTANCE = windows_os.HINSTANCE;
++    const DWORD = windows_os.DWORD;
++    const LPVOID = windows_os.LPVOID;
++    const TRUE = windows_os.TRUE;
++    const FALSE = windows_os.FALSE;
++
++    const DLL_PROCESS_ATTACH: DWORD = 1;
++    const DLL_PROCESS_DETACH: DWORD = 0;
++
++    const __vcrt_initialize = @extern(*const fn () callconv(.c) c_int, .{ .name = "__vcrt_initialize" });
++    const __vcrt_uninitialize = @extern(*const fn (c_int) callconv(.c) c_int, .{ .name = "__vcrt_uninitialize" });
++    const __acrt_initialize = @extern(*const fn () callconv(.c) c_int, .{ .name = "__acrt_initialize" });
++    const __acrt_uninitialize = @extern(*const fn (c_int) callconv(.c) c_int, .{ .name = "__acrt_uninitialize" });
++
++    pub fn handler(_: HINSTANCE, fdwReason: DWORD, _: LPVOID) callconv(.winapi) BOOL {
++        // Only MSVC needs to bootstrap the CRT; MinGW handles it via dllcrt2.obj.
++        if (builtin.abi != .msvc) return TRUE;
++        switch (fdwReason) {
++            DLL_PROCESS_ATTACH => {
++                if (__vcrt_initialize() < 0) return FALSE;
++                if (__acrt_initialize() < 0) return FALSE;
++                return TRUE;
++            },
++            DLL_PROCESS_DETACH => {
++                _ = __acrt_uninitialize(1);
++                _ = __vcrt_uninitialize(1);
++                return TRUE;
++            },
++            else => return TRUE,
++        }
++    }
++}.handler else void;
++
+ /// Used for MSVC builds (see below)
+ var msvc_fltused: c_int = 1;
+ 

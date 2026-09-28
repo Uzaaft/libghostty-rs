@@ -1,0 +1,57 @@
+name: Scratch DLL entry
+
+on:
+  push:
+    branches: ["scratch/**"]
+
+jobs:
+  effects:
+    name: ${{ matrix.variant }} ${{ matrix.abi }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [upstream, dllmain, crt-entry]
+        abi: [msvc, gnu]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+          cache-key: ${{ matrix.variant }}-${{ matrix.abi }}
+
+      - name: Fetch Ghostty
+        shell: bash
+        run: |
+          git clone --config core.longpaths=true --config core.autocrlf=false --filter=blob:none --no-checkout https://github.com/ghostty-org/ghostty.git ghostty
+          git -C ghostty checkout 4406075a09c8ca0d83f30e8aaa710b9315ec428a
+
+      - name: Apply variant
+        if: matrix.variant != 'upstream'
+        shell: bash
+        run: tr -d '\r' < "scratch/${{ matrix.variant }}.patch" | git -C ghostty apply -
+
+      # The example builds the dependency for the host unless told otherwise.
+      - name: Forward the target to Ghostty
+        shell: bash
+        run: sed -i 's/b.lazyDependency("ghostty", .{/b.lazyDependency("ghostty", .{ .target = target, .optimize = optimize,/' ghostty/example/c-vt-effects/build.zig
+
+      - name: Build c-vt-effects
+        shell: bash
+        working-directory: ghostty/example/c-vt-effects
+        run: |
+          zig build -Dtarget=x86_64-windows-${{ matrix.abi }}
+          # `zig build run` only puts the DLL on PATH for its own child.
+          find "$ZIG_LOCAL_CACHE_DIR" -name ghostty-vt.dll -newer build.zig -exec cp {} zig-out/bin/ \;
+          ls zig-out/bin
+
+      # PowerShell reports the full NTSTATUS; Git Bash truncates it to 8 bits.
+      - name: Run c-vt-effects
+        shell: pwsh
+        working-directory: ghostty/example/c-vt-effects
+        run: |
+          ./zig-out/bin/c_vt_effects.exe
+          $code = $LASTEXITCODE
+          "exit code: 0x{0:X8}" -f $code
+          exit $code

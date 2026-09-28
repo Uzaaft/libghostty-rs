@@ -2,7 +2,7 @@ name: Windows CI
 
 on:
   push:
-    branches: [master, "release/**"]
+    branches: [master, "release/**", "scratch/**"]
   pull_request:
     branches: [master, "release/**", "stack/ghostty-*"]
 
@@ -60,4 +60,8 @@ jobs:
       # dynamic path too. Cargo puts the build script's link-search dirs on
       # PATH, so the test binaries find ghostty-vt.dll at runtime.
       - name: Test libghostty-vt (link-dynamic)
-        run: cargo test -p libghostty-vt --lib --features link-dynamic --target ${{ matrix.target }}
+        run: cargo test -p libghostty-vt --lib --features link-dynamic --target ${{ matrix.target }} -- --skip clipboard_write_decodes_base64
+
+      - name: "Scratch: base64 decode alone (link-dynamic)"
+        if: always()
+        run: cargo test -p libghostty-vt --lib --features link-dynamic --target ${{ matrix.target }} -- --exact terminal::tests::clipboard_write_decodes_base64
