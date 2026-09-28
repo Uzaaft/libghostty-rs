@@ -618,7 +618,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let str = self.get::<ffi::String>(Data::TITLE)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
         // while we uphold that no mutation could happen during its lifetime.
-        let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
+        let str = unsafe { str.to_bytes() };
         std::str::from_utf8(str).map_err(|_| Error::InvalidValue)
     }
 
@@ -631,7 +631,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let str = self.get::<ffi::String>(Data::PWD)?;
         // SAFETY: We trust libghostty to return a valid borrowed string,
         // while we uphold that no mutation could happen during its lifetime.
-        let str = unsafe { std::slice::from_raw_parts(str.ptr, str.len) };
+        let str = unsafe { str.to_bytes() };
         std::str::from_utf8(str).map_err(|_| Error::InvalidValue)
     }
     /// The total number of rows in the active screen including scrollback.
@@ -1264,12 +1264,25 @@ impl<'t> ClipboardWrite<'t> {
             .unwrap_or(ClipboardLocation::Standard)
     }
     /// Get an iterator into a borrowed array of MIME representations.
+    ///
+    /// The iterator is empty for a write carrying no representations, which
+    /// requests that the destination be cleared (e.g. OSC 52 with an empty
+    /// payload).
     pub fn contents(&self) -> ClipboardContents<'t> {
-        // SAFETY: We trust libghostty to give us a valid pointer and length
+        // SAFETY: We trust libghostty to give us a valid pointer
         // within the lifetime of the callback.
-        ClipboardContents(unsafe {
-            std::slice::from_raw_parts((*self.ptr).contents, (*self.ptr).contents_len).iter()
-        })
+        let raw = unsafe { *self.ptr };
+        // The C API declares `contents` optional and sends null for a write
+        // carrying no representations (the "clear the clipboard" shape);
+        // `from_raw_parts` requires a non-null pointer even at length zero.
+        let contents: &'t [ffi::ClipboardContent] = if raw.contents.is_null() {
+            &[]
+        } else {
+            // SAFETY: We trust libghostty to give us a valid pointer and
+            // length within the lifetime of the callback.
+            unsafe { std::slice::from_raw_parts(raw.contents, raw.contents_len) }
+        };
+        ClipboardContents(contents.iter())
     }
 }
 
@@ -1308,7 +1321,12 @@ impl std::iter::FusedIterator for ClipboardContents<'_> {}
 pub struct ClipboardContent<'t> {
     /// MIME type of the representation.
     pub mime: &'t str,
-    /// Decoded, binary-safe representation data.
+    /// Decoded representation data.
+    ///
+    /// The C API delivers binary-safe bytes, but this field is `&str` for
+    /// compatibility within 0.2.x, so data that is not valid UTF-8 (e.g. an
+    /// `image/png` representation) is exposed as an empty string. 0.3.0
+    /// changes this field to `&[u8]`.
     pub data: &'t str,
 }
 impl<'t> ClipboardContent<'t> {
@@ -1320,8 +1338,16 @@ impl<'t> ClipboardContent<'t> {
         // SAFETY: Upheld by caller
         unsafe {
             Self {
-                mime: value.mime.to_str(),
-                data: value.data.to_str(),
+                // Ghostty currently only emits ASCII mime types, but the C
+                // API does not guarantee UTF-8, so validate rather than
+                // trust; fall back to the opaque-bytes mime type.
+                mime: std::str::from_utf8(value.mime.to_bytes())
+                    .unwrap_or("application/octet-stream"),
+                // The data is binary-safe per the C API, so it must be
+                // validated before being exposed as `str`. Changing the field
+                // to `&[u8]` would break 0.2.x, so non-UTF-8 data degrades to
+                // an empty string instead of producing an invalid `&str`.
+                data: std::str::from_utf8(value.data.to_bytes()).unwrap_or(""),
             }
         }
     }
@@ -2041,5 +2067,91 @@ mod tests {
                 .expect("grid ref should be representable in active space"),
             original
         );
+    }
+}
+
+/// Soundness regression tests for
+/// <https://github.com/Uzaaft/libghostty-rs/issues/74>.
+///
+/// These tests are gated on `cfg(miri)` because they construct the exact
+/// shapes the C API produces and feed them into the safe wrappers, which was
+/// UB before the wrappers stopped building slices and `&str` from unvalidated
+/// FFI input. Run with:
+///
+/// ```sh
+/// cargo +nightly miri test -p libghostty-vt miri_soundness
+/// ```
+#[cfg(all(test, miri))]
+mod miri_soundness {
+    use super::*;
+
+    /// The C trampoline declares `contents: ?[*]const ClipboardContent` and
+    /// sends `contents = NULL, contents_len = 0` for a write carrying no
+    /// representations (e.g. OSC 52 with an empty payload, the documented
+    /// "clear the clipboard" shape). `slice::from_raw_parts` requires a
+    /// non-null pointer even at length zero, so `contents()` used to be UB
+    /// here; it must yield an empty iterator so hosts can observe "clear".
+    #[test]
+    fn clipboard_write_with_no_representations() {
+        let raw = ffi::ClipboardWrite {
+            size: std::mem::size_of::<ffi::ClipboardWrite>(),
+            location: ffi::ClipboardLocation::STANDARD,
+            contents: std::ptr::null(),
+            contents_len: 0,
+        };
+        // SAFETY: `raw` outlives the borrow, matching the callback contract.
+        let write = unsafe { ClipboardWrite::from_raw(&raw) };
+        assert_eq!(write.contents().count(), 0);
+    }
+
+    /// OSC 52 payloads are base64-decoded arbitrary bytes ("binary-safe" per
+    /// the C header), but `ClipboardContent` used to expose them as `&str`
+    /// built with `str::from_utf8_unchecked` in the sys crate, so decoding
+    /// the invalid `&str` entered unreachable code in std's UTF-8 decoder.
+    /// Within 0.2.x the field stays `&str`, so invalid UTF-8 must degrade
+    /// to an empty string rather than an invalid `&str`.
+    #[test]
+    fn clipboard_content_with_non_utf8_data() {
+        // OSC 52 payload "//4=" base64-decodes to FF FE, which is not UTF-8.
+        let data = [0xFF_u8, 0xFE];
+        let raw = ffi::ClipboardContent {
+            mime: ffi::String::from("text/plain"),
+            data: ffi::String {
+                ptr: data.as_ptr(),
+                len: data.len(),
+            },
+        };
+        // SAFETY: `data` outlives the borrow, matching the callback contract.
+        let content = unsafe { ClipboardContent::from_raw(&raw) };
+        assert_eq!(content.mime, "text/plain");
+        assert_eq!(content.data, "");
+        // Decoding the invalid `&str` is what Miri used to flag; keep
+        // exercising it. `next()` is deliberate: `Chars::count()` is
+        // specialized to count byte patterns and never decodes.
+        assert_eq!(content.data.chars().next(), None);
+    }
+
+    /// `mime` stays `&str`, so it must be validated rather than trusted:
+    /// a non-UTF-8 mime string falls back to the opaque-bytes mime type
+    /// instead of producing an invalid `&str`.
+    #[test]
+    fn clipboard_content_with_non_utf8_mime() {
+        let mime = [0xFF_u8, 0xFE];
+        let data = *b"hello";
+        let raw = ffi::ClipboardContent {
+            mime: ffi::String {
+                ptr: mime.as_ptr(),
+                len: mime.len(),
+            },
+            data: ffi::String {
+                ptr: data.as_ptr(),
+                len: data.len(),
+            },
+        };
+        // SAFETY: `mime` and `data` outlive the borrow, matching the
+        // callback contract.
+        let content = unsafe { ClipboardContent::from_raw(&raw) };
+        assert_eq!(content.mime, "application/octet-stream");
+        assert_eq!(content.data, "hello");
     }
 }
