@@ -9,7 +9,7 @@ use crate::{
         from_optional_result_with_len, from_result, from_result_with_len,
     },
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
-    key,
+    key, mouse,
     screen::{GridRef, Screen, TrackedGridRef},
     style::{self, Palette, RawPalette, RgbColor},
 };
@@ -836,6 +836,16 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn cursor_style(&self) -> Result<style::Style> {
         self.get::<ffi::Style>(Data::CURSOR_STYLE)
             .and_then(std::convert::TryInto::try_into)
+    }
+    /// The mouse pointer shape requested by the application through OSC 22.
+    ///
+    /// Initially [`mouse::Shape::Text`]. An empty OSC 22 resets it to that,
+    /// and a name libghostty doesn't know leaves it unchanged. Excludes host
+    /// hover overrides.
+    pub fn mouse_shape(&self) -> Result<mouse::Shape> {
+        self.get::<ffi::MouseShape::Type>(Data::MOUSE_SHAPE)?
+            .try_into()
+            .map_err(|_| Error::InvalidValue)
     }
     /// Get the current Kitty keyboard protocol flags.
     pub fn kitty_keyboard_flags(&self) -> Result<key::KittyKeyFlags> {
@@ -2776,6 +2786,20 @@ mod tests {
             .codepoint()
             .unwrap();
         assert_eq!(codepoint, 0xe9);
+    }
+
+    #[test]
+    fn mouse_shape_follows_osc_22() {
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        assert_eq!(terminal.mouse_shape().unwrap(), mouse::Shape::Text);
+        // OSC 22 names the shape with its W3C cursor name.
+        terminal.vt_write(b"\x1b]22;pointer\x07");
+        assert_eq!(terminal.mouse_shape().unwrap(), mouse::Shape::Pointer);
+        terminal.vt_write(b"\x1b]22;nwse-resize\x1b\\");
+        assert_eq!(terminal.mouse_shape().unwrap(), mouse::Shape::NwseResize);
+        // An empty name gives the pointer back.
+        terminal.vt_write(b"\x1b]22;\x1b\\");
+        assert_eq!(terminal.mouse_shape().unwrap(), mouse::Shape::Text);
     }
 
     fn tiny_terminal() -> Terminal<'static, 'static> {
