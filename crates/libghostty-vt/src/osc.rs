@@ -44,6 +44,37 @@ impl<'alloc> Parser<'alloc> {
         Ok(Self(Object::new(raw)?))
     }
 
+    /// Set the most bytes to keep from each OSC sequence whose number the
+    /// parser does not implement.
+    ///
+    /// Zero, the default, discards these sequences and they produce
+    /// [`CommandType::Invalid`]. Any other value makes them produce
+    /// [`CommandType::Unknown`].
+    ///
+    /// A sequence longer than the limit is still reported. Its content holds
+    /// the first bytes up to the limit, and `truncated` is true.
+    ///
+    /// Limits up to 2048 bytes use a buffer the parser already owns and never
+    /// allocate memory. Larger limits allocate memory from the parser's
+    /// allocator for each unknown sequence.
+    ///
+    /// The limit stays set across [`Self::reset`]. You can change it at any
+    /// time, but a sequence that is already being parsed may keep the old
+    /// setting. It is simplest to set it before the first sequence.
+    pub fn set_unknown_max_bytes(&mut self, max: usize) -> Result<&mut Self> {
+        // SAFETY: `max` is the `size_t` the option expects, and libghostty
+        // only reads it during the call.
+        let result = unsafe {
+            ffi::ghostty_osc_set(
+                self.0.as_raw(),
+                ffi::OscOption::UNKNOWN_MAX_BYTES,
+                std::ptr::from_ref(&max).cast(),
+            )
+        };
+        from_result(result)?;
+        Ok(self)
+    }
+
     /// Reset an OSC parser instance to its initial state.
     ///
     /// Resets the parser state, clearing any partially parsed OSC sequences
@@ -183,6 +214,22 @@ impl<'p> Command<'p, '_> {
             Type::KITTY_DND_PROTOCOL => CommandType::KittyDndProtocol,
             Type::CONTEXT_SIGNAL => CommandType::ContextSignal,
             Type::KITTY_DESKTOP_NOTIFICATION => CommandType::KittyDesktopNotification,
+            Type::UNKNOWN => {
+                let content = self.get::<ffi::String>(Data::UNKNOWN_CONTENT)?;
+                CommandType::Unknown {
+                    // SAFETY: The bytes are owned by the parser and valid until
+                    // the next call on it, which the `'p` borrow of the parser
+                    // rules out.
+                    content: unsafe { content.to_bytes() },
+                    truncated: self.get(Data::UNKNOWN_TRUNCATED)?,
+                    // Upstream answers anything but BEL with ST, so a
+                    // terminator added later is best answered the same way.
+                    terminator: self
+                        .get::<ffi::OscTerminator::Type>(Data::UNKNOWN_TERMINATOR)?
+                        .try_into()
+                        .unwrap_or(Terminator::St),
+                }
+            }
 
             _ => return None,
         })
@@ -247,6 +294,27 @@ pub enum CommandType<'p> {
     KittyDndProtocol,
     ContextSignal,
     KittyDesktopNotification,
+    /// An OSC sequence whose number the parser does not implement.
+    ///
+    /// Only produced when [`Parser::set_unknown_max_bytes`] is nonzero.
+    /// Otherwise these sequences are [`CommandType::Invalid`].
+    Unknown {
+        /// The raw bytes of the sequence: everything that was passed to
+        /// [`Parser::next_byte`], including the number at the start. For
+        /// example, the sequence `ESC ] 7400;status=busy BEL` gives
+        /// `7400;status=busy`. The bytes are valid until the next call on the
+        /// [`Parser`] they came from.
+        content: &'p [u8],
+        /// True if the sequence was longer than
+        /// [`Parser::set_unknown_max_bytes`], or memory ran out while reading
+        /// it. In that case the content holds only the beginning of the
+        /// sequence.
+        truncated: bool,
+        /// How the sequence was ended, based on the terminator passed to
+        /// [`Parser::end`]. If you reply to the sequence, end the reply the
+        /// same way.
+        terminator: Terminator,
+    },
 }
 
 /// How an OSC sequence was ended.
@@ -275,6 +343,52 @@ mod tests {
             parser.next_byte(byte);
         }
         format!("{:?}", parser.end(0x07).command_type())
+    }
+
+    #[test]
+    fn unknown_commands_are_reported_once_enabled() {
+        let mut parser = Parser::new().unwrap();
+        let end = |parser: &mut Parser<'_>, osc: &[u8], terminator: u8| {
+            parser.reset();
+            for &byte in osc {
+                parser.next_byte(byte);
+            }
+            match parser.end(terminator).command_type() {
+                CommandType::Unknown {
+                    content,
+                    truncated,
+                    terminator,
+                } => Some((content.to_vec(), truncated, terminator)),
+                CommandType::Invalid => None,
+                other => panic!("expected an unknown or invalid command, got {other:?}"),
+            }
+        };
+
+        // By default, an OSC number the parser doesn't implement is invalid.
+        assert_eq!(end(&mut parser, b"7400;status=busy", 0x07), None);
+
+        parser.set_unknown_max_bytes(1024).unwrap();
+        assert_eq!(
+            end(&mut parser, b"7400;status=busy", 0x07),
+            Some((b"7400;status=busy".to_vec(), false, Terminator::Bel))
+        );
+        // The ST terminator is the backslash after ESC.
+        assert_eq!(
+            end(&mut parser, b"7400;status=busy", 0x5c),
+            Some((b"7400;status=busy".to_vec(), false, Terminator::St))
+        );
+        // The limit stays set across resets, and longer sequences are cut
+        // short.
+        parser.set_unknown_max_bytes(4).unwrap();
+        assert_eq!(
+            end(&mut parser, b"7400;status=busy", 0x07),
+            Some((b"7400".to_vec(), true, Terminator::Bel))
+        );
+        // Numbers the parser implements are never unknown.
+        assert_eq!(
+            parse(&mut parser, b"2;hello"),
+            r#"ChangeWindowTitle { title: "hello" }"#
+        );
     }
 
     #[test]
