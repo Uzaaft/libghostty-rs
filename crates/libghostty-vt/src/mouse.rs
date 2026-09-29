@@ -390,3 +390,48 @@ pub enum Button {
     Ten = ffi::MouseButton::TEN,
     Eleven = ffi::MouseButton::ELEVEN,
 }
+
+/// Mouse pointer shapes based on the W3C cursor names.
+///
+/// Hosts map these values to their native pointer shapes; not every platform
+/// supports every shape. These are pointer shapes, not terminal text cursors.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+#[expect(missing_docs, reason = "missing upstream docs")]
+pub enum Shape {
+    Default = ffi::MouseShape::DEFAULT,
+    ContextMenu = ffi::MouseShape::CONTEXT_MENU,
+    Help = ffi::MouseShape::HELP,
+    Pointer = ffi::MouseShape::POINTER,
+    Progress = ffi::MouseShape::PROGRESS,
+    Wait = ffi::MouseShape::WAIT,
+    Cell = ffi::MouseShape::CELL,
+    Crosshair = ffi::MouseShape::CROSSHAIR,
+    Text = ffi::MouseShape::TEXT,
+    VerticalText = ffi::MouseShape::VERTICAL_TEXT,
+    Alias = ffi::MouseShape::ALIAS,
+    Copy = ffi::MouseShape::COPY,
+    Move = ffi::MouseShape::MOVE,
+    NoDrop = ffi::MouseShape::NO_DROP,
+    NotAllowed = ffi::MouseShape::NOT_ALLOWED,
+    Grab = ffi::MouseShape::GRAB,
+    Grabbing = ffi::MouseShape::GRABBING,
+    AllScroll = ffi::MouseShape::ALL_SCROLL,
+    ColResize = ffi::MouseShape::COL_RESIZE,
+    RowResize = ffi::MouseShape::ROW_RESIZE,
+    NResize = ffi::MouseShape::N_RESIZE,
+    EResize = ffi::MouseShape::E_RESIZE,
+    SResize = ffi::MouseShape::S_RESIZE,
+    WResize = ffi::MouseShape::W_RESIZE,
+    NeResize = ffi::MouseShape::NE_RESIZE,
+    NwResize = ffi::MouseShape::NW_RESIZE,
+    SeResize = ffi::MouseShape::SE_RESIZE,
+    SwResize = ffi::MouseShape::SW_RESIZE,
+    EwResize = ffi::MouseShape::EW_RESIZE,
+    NsResize = ffi::MouseShape::NS_RESIZE,
+    NeswResize = ffi::MouseShape::NESW_RESIZE,
+    NwseResize = ffi::MouseShape::NWSE_RESIZE,
+    ZoomIn = ffi::MouseShape::ZOOM_IN,
+    ZoomOut = ffi::MouseShape::ZOOM_OUT,
+}
