@@ -43,7 +43,10 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// tracking which rows in a partially dirty frame have changed.
 ///
 /// The user of the render state API is expected to unset both of these.
-/// The update call does not unset dirty state, it only updates it.
+/// The update call does not unset dirty state, it only updates it. After
+/// successfully rendering a complete frame, use [`Snapshot::clean`] to unset
+/// both layers in one call. The granular setters remain available for
+/// callers that only consume part of a frame.
 ///
 /// An extremely important detail: **setting one dirty state doesn't unset
 /// the other.** For example, setting the global dirty state to false does
@@ -510,6 +513,18 @@ impl Snapshot<'_, '_> {
                 .try_into()
                 .map_err(|_| Error::InvalidValue)?,
         })
+    }
+
+    /// Mark all dirty render-state data as consumed.
+    ///
+    /// This sets the global [dirty state](Self::dirty) to [`Dirty::Clean`] and
+    /// clears every per-row dirty flag. It is idempotent and does not modify
+    /// cell contents or dirty state owned by the terminal. Call this only
+    /// after a complete frame has been rendered successfully; partial
+    /// consumers should use [`Self::set_dirty`] and [`RowIteration::set_dirty`]
+    /// instead.
+    pub fn clean(&self) -> Result<()> {
+        from_result(unsafe { ffi::ghostty_render_state_clean(self.0.0.as_raw()) })
     }
 
     /// Get the current color information from a render state.
