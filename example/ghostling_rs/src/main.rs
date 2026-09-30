@@ -51,6 +51,10 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 /// HiDPI / Retina displays.
 const FONT_SIZE: u16 = 10;
 
+/// The terminfo entry the shell runs with, which the terminal also reports
+/// for XTGETTCAP `TN` queries.
+const TERM: &str = "xterm-256color";
+
 /// Small padding from window edges
 const PADDING: f32 = 6.0;
 
@@ -102,7 +106,9 @@ async fn main() -> Result<()> {
     // lines of scrollback.  This holds all the parsed screen state (cells,
     // cursor, styles, modes) but knows nothing about the pty or the window.
     let mut terminal = Terminal::new(cols, rows)?;
-    terminal.set_scrollback_max_lines(Some(1000))?;
+    terminal
+        .set_scrollback_max_lines(Some(1000))?
+        .set_terminfo_name(TERM)?;
 
     // The terminal options don't include cell pixel dimensions, so
     // issue an initial resize to set them.  Without this, Kitty
@@ -1293,7 +1299,7 @@ mod pty {
 
                     // Replace the child process with the user's shell via `exec`.
                     _ = Command::new(&shell)
-                        .env("TERM", "xterm-256color")
+                        .env("TERM", crate::TERM)
                         .arg0(arg0)
                         .exec();
 
