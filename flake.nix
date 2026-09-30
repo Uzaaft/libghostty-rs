@@ -156,12 +156,16 @@
         checks = {
           default = application;
 
+          # No workspace member enables the optional `png` feature, so the
+          # checks below that compile the safe crate turn it on explicitly;
+          # otherwise the PNG decoder is never type-checked, linted,
+          # doc-checked or tested in CI.
           cargo-check = craneLib.mkCargoDerivation (
             commonArgs
             // {
               inherit cargoArtifacts;
               pnameSuffix = "-check";
-              buildPhaseCargoCommand = "cargoWithProfile check ${commonArgs.cargoExtraArgs} --workspace --all-targets";
+              buildPhaseCargoCommand = "cargoWithProfile check ${commonArgs.cargoExtraArgs} --workspace --all-targets --features libghostty-vt/png";
             }
           );
 
@@ -169,7 +173,7 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoClippyExtraArgs = "--workspace --all-targets";
+              cargoClippyExtraArgs = "--workspace --all-targets --features libghostty-vt/png";
             }
           );
 
@@ -177,7 +181,7 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoDocExtraArgs = "--workspace --no-deps";
+              cargoDocExtraArgs = "--workspace --no-deps --features libghostty-vt/png";
               RUSTDOCFLAGS = "-D warnings";
             }
           );
@@ -192,7 +196,19 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              cargoTestExtraArgs = "--workspace --all-targets";
+              cargoTestExtraArgs = "--workspace --all-targets --features libghostty-vt/png";
+            }
+          );
+
+          # `--all-targets` does not include doctests, so run them separately.
+          # Only for the safe crate: the -sys bindings carry C header comments
+          # that rustdoc would otherwise try to compile as Rust.
+          cargo-doctest = craneLib.cargoTest (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              pnameSuffix = "-doctest";
+              cargoTestExtraArgs = "-p libghostty-vt --doc --features libghostty-vt/png";
             }
           );
 
