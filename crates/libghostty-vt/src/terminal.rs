@@ -860,6 +860,15 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn cursor_y(&self) -> Result<u16> {
         self.get(Data::CURSOR_Y)
     }
+    /// Whether the cursor is currently at a semantic shell prompt or input
+    /// area.
+    ///
+    /// This depends on semantic prompt markers such as OSC 133. Returns false
+    /// when semantic prompt information is unavailable or the alternate
+    /// screen is active.
+    pub fn is_cursor_at_prompt(&self) -> Result<bool> {
+        self.get(Data::CURSOR_AT_PROMPT)
+    }
     /// Get whether the cursor has a pending wrap (next print will soft-wrap).
     pub fn is_cursor_pending_wrap(&self) -> Result<bool> {
         self.get(Data::CURSOR_PENDING_WRAP)
@@ -2862,6 +2871,17 @@ mod tests {
             Some(2)
         );
         assert_eq!(terminal.cursor_x().unwrap(), 1);
+    }
+
+    #[test]
+    fn cursor_at_prompt_follows_semantic_prompts() {
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        assert!(!terminal.is_cursor_at_prompt().unwrap());
+        terminal.vt_write(b"\x1b]133;A\x1b\\");
+        assert!(terminal.is_cursor_at_prompt().unwrap());
+        // The alternate screen never counts as a prompt.
+        terminal.vt_write(b"\x1b[?1049h");
+        assert!(!terminal.is_cursor_at_prompt().unwrap());
     }
 
     #[test]
