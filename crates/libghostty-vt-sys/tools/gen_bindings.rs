@@ -27,8 +27,13 @@ fn main() {
             .expect("workspace root must exist")
             .to_path_buf();
 
+        // Cargo gives every feature set its own build script output, so there
+        // may be several installs here, and ones left over from before a pin
+        // bump still hold the old headers. Running this tool rebuilds its own
+        // output first, so the most recently installed headers are the ones
+        // for the current pin.
         let build_dir = workspace_root.join("target").join("debug").join("build");
-        let mut found = None;
+        let mut found: Option<(std::time::SystemTime, PathBuf)> = None;
         if let Ok(entries) = std::fs::read_dir(&build_dir) {
             for entry in entries.flatten() {
                 let name = entry.file_name();
@@ -39,14 +44,18 @@ fn main() {
                         .join("out")
                         .join("ghostty-install")
                         .join("include");
-                    if candidate.join("ghostty").join("vt.h").exists() {
-                        found = Some(candidate);
-                        break;
+                    let Ok(modified) = std::fs::metadata(candidate.join("ghostty").join("vt.h"))
+                        .and_then(|m| m.modified())
+                    else {
+                        continue;
+                    };
+                    if found.as_ref().is_none_or(|(newest, _)| modified > *newest) {
+                        found = Some((modified, candidate));
                     }
                 }
             }
         }
-        found.unwrap_or_else(|| {
+        found.map(|(_, dir)| dir).unwrap_or_else(|| {
             panic!(
                 "could not find ghostty headers; run `cargo build -p libghostty-vt-sys` first, \
                  or set GHOSTTY_INCLUDE_DIR or GHOSTTY_SOURCE_DIR"
@@ -65,11 +74,15 @@ fn main() {
         .allowlist_function("[Gg]hostty.*")
         .allowlist_type("[Gg]hostty.*")
         .allowlist_var("GHOSTTY_.*")
+        // Only used to force enums to `int` size. It is defined as `INT_MAX`,
+        // and whether bindgen can evaluate that depends on which `limits.h`
+        // clang resolves, which differs between environments. Exclude it so
+        // the output is the same everywhere.
+        .blocklist_item("GHOSTTY_ENUM_MAX_VALUE")
         .generate_cstr(true)
         .derive_default(true)
         .size_t_is_usize(true)
         .default_enum_style(EnumVariation::ModuleConsts)
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .parse_callbacks(Box::new(Callbacks));
 
     if cfg!(target_os = "linux") {
