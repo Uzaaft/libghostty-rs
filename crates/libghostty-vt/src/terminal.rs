@@ -305,6 +305,44 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         unsafe { ffi::ghostty_terminal_vt_write(self.inner.as_raw(), data.as_ptr(), data.len()) }
     }
 
+    /// Write VT-encoded data, but only the shortest prefix needed to reach
+    /// ground.
+    ///
+    /// Ground is when the stream isn't in the middle of any type of sequence:
+    /// UTF-8, ESC, CSI, OSC, etc. It is the stateless point of the stream.
+    ///
+    /// This is useful to know because it is a point at which you can safely
+    /// insert out-of-band VT sequences. For example, while reading from a pty
+    /// if you want to make your own changes, you can wait until the pty input
+    /// reaches ground, then write yours.
+    ///
+    /// If the stream is already at ground then this consumes nothing and
+    /// returns `Some(0)`. Otherwise it returns `Some(n)` with the number of
+    /// bytes consumed before reaching ground, including the byte that reaches
+    /// it, or `None` if the full slice was consumed without reaching ground.
+    ///
+    /// Like [`Self::vt_write`], the input is assumed to be untrusted.
+    pub fn vt_write_until_ground(&mut self, data: &[u8]) -> Result<Option<usize>> {
+        let mut consumed = 0;
+        let result = unsafe {
+            ffi::ghostty_terminal_vt_write_until_ground(
+                self.inner.as_raw(),
+                data.as_ptr(),
+                data.len(),
+                &raw mut consumed,
+            )
+        };
+        from_optional_result_with_len(result, consumed)
+    }
+
+    /// Whether VT processing is at ground.
+    ///
+    /// See [`Self::vt_write_until_ground`] for what ground means and why it
+    /// is useful.
+    pub fn is_vt_ground(&self) -> Result<bool> {
+        self.get(Data::VT_GROUND)
+    }
+
     /// Resize the terminal to the given dimensions.
     ///
     /// Changes the number of columns and rows in the terminal. The primary
@@ -2828,6 +2866,33 @@ mod tests {
         });
         let grants: Vec<_> = seen.iter().map(|s| (s.can_remember, s.granted)).collect();
         assert_eq!(grants, [(true, false), (true, true)]);
+    }
+
+    #[test]
+    fn vt_write_until_ground_stops_at_ground() {
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        // Already at ground: nothing is consumed.
+        assert!(terminal.is_vt_ground().unwrap());
+        assert_eq!(terminal.vt_write_until_ground(b"hello").unwrap(), Some(0));
+        assert_eq!(terminal.cursor_x().unwrap(), 0);
+
+        // An incomplete CSI sequence is only finished, not followed.
+        terminal.vt_write(b"\x1b[");
+        assert!(!terminal.is_vt_ground().unwrap());
+        assert_eq!(terminal.vt_write_until_ground(b"31").unwrap(), None);
+        // The count includes the byte that reaches ground.
+        assert_eq!(terminal.vt_write_until_ground(b"mhello").unwrap(), Some(1));
+        assert!(terminal.is_vt_ground().unwrap());
+        assert_eq!(terminal.cursor_x().unwrap(), 0);
+
+        // The same applies to an incomplete UTF-8 sequence ("€" is E2 82 AC).
+        terminal.vt_write(b"\xe2");
+        assert!(!terminal.is_vt_ground().unwrap());
+        assert_eq!(
+            terminal.vt_write_until_ground(b"\x82\xac!").unwrap(),
+            Some(2)
+        );
+        assert_eq!(terminal.cursor_x().unwrap(), 1);
     }
 
     #[test]
