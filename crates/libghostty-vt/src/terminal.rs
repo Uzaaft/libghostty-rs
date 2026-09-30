@@ -1089,6 +1089,21 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 
+    /// Set the name of the terminfo entry this terminal runs as, reported in
+    /// response to an XTGETTCAP query for `TN` (e.g. `xterm-256color`).
+    ///
+    /// The name is copied into the terminal. An empty name clears it. A name
+    /// longer than 128 bytes returns `Err(Error::InvalidValue)` and leaves the
+    /// previous name unchanged.
+    ///
+    /// If this is unset then nothing is reported for an XTGETTCAP `TN` query,
+    /// because libghostty doesn't know what the embedding terminal advertises
+    /// itself as.
+    pub fn set_terminfo_name(&mut self, name: &str) -> Result<&mut Self> {
+        self.set(Opt::TERMINFO_NAME, &ffi::String::from(name))?;
+        Ok(self)
+    }
+
     /// Enable or disable Glyph Protocol APC handling.
     ///
     /// Disabling the protocol makes the terminal ignore Glyph Protocol APC
@@ -2846,6 +2861,20 @@ mod tests {
         assert_eq!(grants, [(true, false), (true, true)]);
     }
 
+    /// Feed `input` to a terminal configured by `setup`, returning what it
+    /// wrote back to the pty.
+    fn pty_output(setup: impl FnOnce(&mut Terminal<'_, '_>), input: &[u8]) -> Vec<u8> {
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .expect("callback should register");
+        setup(&mut terminal);
+        terminal.vt_write(input);
+        drop(terminal);
+        output.into_inner()
+    }
+
     #[test]
     fn vt_write_until_ground_stops_at_ground() {
         let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
@@ -2882,6 +2911,41 @@ mod tests {
         // The alternate screen never counts as a prompt.
         terminal.vt_write(b"\x1b[?1049h");
         assert!(!terminal.is_cursor_at_prompt().unwrap());
+    }
+
+    #[test]
+    fn terminfo_name_answers_xtgettcap() {
+        // XTGETTCAP query for "TN" (hex 544e).
+        let query = b"\x1bP+q544e\x1b\\";
+        // Unset names are not reported at all.
+        assert_eq!(pty_output(|_| {}, query), b"");
+        assert_eq!(
+            pty_output(
+                |terminal| {
+                    terminal.set_terminfo_name("xterm-256color").unwrap();
+                },
+                query
+            ),
+            // "xterm-256color" in hex.
+            b"\x1bP1+r544E=787465726D2D323536636F6C6F72\x1b\\"
+        );
+        // An empty name clears it again.
+        assert_eq!(
+            pty_output(
+                |terminal| {
+                    terminal.set_terminfo_name("xterm-256color").unwrap();
+                    terminal.set_terminfo_name("").unwrap();
+                },
+                query
+            ),
+            b""
+        );
+
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        assert!(matches!(
+            terminal.set_terminfo_name(&"x".repeat(129)),
+            Err(Error::InvalidValue)
+        ));
     }
 
     #[test]
