@@ -623,6 +623,24 @@ impl Drop for RowIterator<'_> {
 }
 
 impl RowIteration<'_, '_> {
+    /// Move a row iteration to the next row requiring a redraw.
+    ///
+    /// If the global dirty state is [`Dirty::Clean`], this returns `None`. If
+    /// it is [`Dirty::Partial`], clean rows are skipped. If it is
+    /// [`Dirty::Full`], every remaining row is returned regardless of its
+    /// per-row dirty flag. Rows are returned in ascending viewport order,
+    /// together with their viewport y coordinate. This does not clear any
+    /// dirty state.
+    pub fn next_dirty(&mut self) -> Option<(u16, &Self)> {
+        let mut y = 0;
+        // The receiver is evaluated before the arguments, so `y` is read only
+        // after libghostty has written it.
+        unsafe {
+            ffi::ghostty_render_state_row_iterator_next_dirty(self.iter.0.as_raw(), &raw mut y)
+        }
+        .then_some((y, self))
+    }
+
     /// Move a row iteration to the next row.
     ///
     /// Returns `Some(row)` if the iteration moved successfully and row
@@ -1125,5 +1143,46 @@ mod tests {
         let cursor = snapshot.cursor().unwrap();
         assert_eq!(cursor, cursor_from_getters(&snapshot));
         assert_eq!(cursor.viewport, None);
+    }
+
+    /// Collect the viewport rows returned by `next_dirty`.
+    fn dirty_rows<'alloc>(
+        rows: &mut RowIterator<'alloc>,
+        snapshot: &Snapshot<'alloc, '_>,
+    ) -> Vec<u16> {
+        let mut iteration = rows.update(snapshot).unwrap();
+        let mut ys = Vec::new();
+        while let Some((y, _)) = iteration.next_dirty() {
+            ys.push(y);
+        }
+        ys
+    }
+
+    #[test]
+    fn next_dirty_follows_global_and_row_dirty_state() {
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        // Park the cursor on the row we write to below: moving the cursor
+        // also dirties the row it leaves.
+        terminal.vt_write(b"\x1b[2;1H");
+        let mut state = RenderState::new().unwrap();
+        let mut rows = RowIterator::new().unwrap();
+
+        // The first update is fully dirty, so every row is returned.
+        let snapshot = state.update(&terminal).unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Full);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [0, 1, 2]);
+
+        // Once clean, nothing is returned.
+        snapshot.clean().unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Clean);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [] as [u16; 0]);
+        // Cleaning is idempotent.
+        snapshot.clean().unwrap();
+
+        // Changing one row only makes that row dirty.
+        terminal.vt_write(b"x");
+        let snapshot = state.update(&terminal).unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Partial);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [1]);
     }
 }
