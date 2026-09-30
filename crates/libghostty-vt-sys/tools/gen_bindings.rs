@@ -7,51 +7,28 @@ use bindgen::callbacks::{EnumVariantValue, IntKind, ItemInfo, ItemKind, ParseCal
 use heck::ToShoutySnakeCase;
 
 fn main() {
-    // The include directory is produced by build.rs. After a successful
-    // `cargo build -p libghostty-vt-sys`, the headers live in:
-    //   target/<profile>/build/libghostty-vt-sys-<hash>/out/ghostty-install/include
-    //
-    // For convenience, also allow GHOSTTY_SOURCE_DIR/include or
-    // an explicit GHOSTTY_INCLUDE_DIR override.
+    // The headers this crate's build script installed for this very build,
+    // so they always match the pin and the enabled features. GHOSTTY_SOURCE_DIR
+    // or an explicit GHOSTTY_INCLUDE_DIR override them.
     let include_dir = if let Ok(dir) = env::var("GHOSTTY_INCLUDE_DIR") {
         PathBuf::from(dir)
     } else if let Ok(src) = env::var("GHOSTTY_SOURCE_DIR") {
         PathBuf::from(src).join("include")
     } else {
-        // Walk target/debug/build/ to find the libghostty-vt-sys output.
-        let manifest_dir =
-            PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
-        let workspace_root = manifest_dir
-            .parent()
-            .and_then(std::path::Path::parent)
-            .expect("workspace root must exist")
-            .to_path_buf();
-
-        let build_dir = workspace_root.join("target").join("debug").join("build");
-        let mut found = None;
-        if let Ok(entries) = std::fs::read_dir(&build_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                if name_str.starts_with("libghostty-vt-sys-") {
-                    let candidate = entry
-                        .path()
-                        .join("out")
-                        .join("ghostty-install")
-                        .join("include");
-                    if candidate.join("ghostty").join("vt.h").exists() {
-                        found = Some(candidate);
-                        break;
-                    }
-                }
-            }
-        }
-        found.unwrap_or_else(|| {
-            panic!(
-                "could not find ghostty headers; run `cargo build -p libghostty-vt-sys` first, \
-                 or set GHOSTTY_INCLUDE_DIR or GHOSTTY_SOURCE_DIR"
-            )
-        })
+        let dir = PathBuf::from(option_env!("LIBGHOSTTY_VT_SYS_INCLUDE_DIR").unwrap_or_else(
+            || {
+                panic!(
+                    "the build script installed no ghostty headers (pkg-config build?); \
+                 set GHOSTTY_INCLUDE_DIR or GHOSTTY_SOURCE_DIR"
+                )
+            },
+        ));
+        assert!(
+            dir.join("ghostty").join("vt.h").exists(),
+            "no ghostty headers in {}; set GHOSTTY_INCLUDE_DIR or GHOSTTY_SOURCE_DIR",
+            dir.display()
+        );
+        dir
     };
 
     let header = include_dir.join("ghostty").join("vt.h");
