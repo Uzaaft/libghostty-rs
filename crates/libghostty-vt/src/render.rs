@@ -479,6 +479,37 @@ impl Snapshot<'_, '_> {
         }
     }
 
+    /// All cursor state in one call.
+    ///
+    /// This is equivalent to the individual `cursor_*` getters, but needs a
+    /// single query instead of one per property.
+    pub fn cursor(&self) -> Result<Cursor> {
+        let mut raw = ffi::sized!(ffi::RenderStateCursor);
+        from_result(unsafe {
+            ffi::ghostty_render_state_get(
+                self.0.0.as_raw(),
+                ffi::RenderStateData::CURSOR,
+                (&raw mut raw).cast(),
+            )
+        })?;
+        Ok(Cursor {
+            // The viewport fields are undefined unless `viewport_has_value`
+            // is set, so they must not be read otherwise.
+            viewport: raw.viewport_has_value.then_some(CursorViewport {
+                x: raw.viewport_x,
+                y: raw.viewport_y,
+                at_wide_tail: raw.wide_tail,
+            }),
+            visible: raw.visible,
+            blinking: raw.blinking,
+            password_input: raw.password_input,
+            visual_style: raw
+                .visual_style
+                .try_into()
+                .map_err(|_| Error::InvalidValue)?,
+        })
+    }
+
     /// Get the current color information from a render state.
     pub fn colors(&self) -> Result<Colors> {
         let mut colors = ffi::sized!(ffi::RenderStateColors);
@@ -948,6 +979,21 @@ pub struct CursorViewport {
     pub at_wide_tail: bool,
 }
 
+/// Render-state cursor information, as returned by [`Snapshot::cursor`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cursor {
+    /// The cursor position if the cursor is visible within the viewport.
+    pub viewport: Option<CursorViewport>,
+    /// Whether the cursor is visible based on terminal modes.
+    pub visible: bool,
+    /// Whether the cursor should blink based on terminal modes.
+    pub blinking: bool,
+    /// Whether the cursor is at a password input field.
+    pub password_input: bool,
+    /// The visual style of the cursor.
+    pub visual_style: CursorVisualStyle,
+}
+
 /// Render-state color information.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Colors {
@@ -1011,4 +1057,60 @@ mod tests {
 
         assert!(state.update(&terminal).unwrap().dirty().is_ok());
     }
+
+    /// Build the expected bulk cursor from the individual getters.
+    fn cursor_from_getters(snapshot: &Snapshot<'_, '_>) -> Cursor {
+        Cursor {
+            viewport: snapshot.cursor_viewport().unwrap(),
+            visible: snapshot.cursor_visible().unwrap(),
+            blinking: snapshot.cursor_blinking().unwrap(),
+            password_input: snapshot.cursor_password_input().unwrap(),
+            visual_style: snapshot.cursor_visual_style().unwrap(),
+        }
+    }
+
+    #[test]
+    fn bulk_cursor_matches_individual_getters() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        let mut state = RenderState::new().unwrap();
+
+        // Default cursor after writing a narrow character.
+        terminal.vt_write(b"hi");
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert_eq!(
+            cursor.viewport,
+            Some(CursorViewport {
+                x: 2,
+                y: 0,
+                at_wide_tail: false
+            })
+        );
+
+        // Hidden blinking bar cursor on the tail of a wide character.
+        terminal.vt_write("\x1b[?25l\x1b[5 q\r\n中\x1b[2G".as_bytes());
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert!(!cursor.visible);
+        assert_eq!(cursor.visual_style, CursorVisualStyle::Bar);
+        assert_eq!(
+            cursor.viewport,
+            Some(CursorViewport {
+                x: 1,
+                y: 1,
+                at_wide_tail: true
+            })
+        );
+
+        // Scrolling the cursor out of the viewport leaves no position.
+        terminal.vt_write(b"\r\n\r\n\r\n");
+        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert_eq!(cursor.viewport, None);
+    }
+
 }
