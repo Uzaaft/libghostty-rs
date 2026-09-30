@@ -27,7 +27,7 @@ use libghostty_vt::{
     key::{self, Key},
     kitty::graphics::{self, DecodePng, DecodedImage, Graphics, Layer, PlacementIterator},
     mouse,
-    render::{CellIterator, Dirty, RenderState, RowIterator},
+    render::{CellIterator, RenderState, RowIterator},
     selection::gesture::{DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     style::RgbColor,
     terminal::{
@@ -459,8 +459,6 @@ impl<'alloc> Renderer<'alloc> {
                 continue;
             }
 
-            // Clear per-row dirty flag after rendering it.
-            row.set_dirty(false)?;
             y += dims.cell_height;
         }
 
@@ -480,8 +478,9 @@ impl<'alloc> Renderer<'alloc> {
         }
 
         // Draw the cursor if visible.
-        if snapshot.cursor_visible()?
-            && let Some(vp) = snapshot.cursor_viewport()?
+        let cursor = snapshot.cursor()?;
+        if cursor.visible
+            && let Some(vp) = cursor.viewport
         {
             // Draw the cursor using the foreground color (or explicit cursor
             // color if the terminal set one).
@@ -507,8 +506,9 @@ impl<'alloc> Renderer<'alloc> {
             )?
         }
 
-        // Reset global dirty state so the next update reports changes accurately.
-        snapshot.set_dirty(Dirty::Clean)?;
+        // The whole frame is drawn, so mark all of it clean at once so the
+        // next update reports changes accurately.
+        snapshot.clean()?;
         Ok(())
     }
 
