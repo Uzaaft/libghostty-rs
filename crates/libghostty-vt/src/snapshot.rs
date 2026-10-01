@@ -1,11 +1,11 @@
 //! Encode and restore the complete state of a terminal via a binary format.
 //!
-//! A snapshot is an ordered, authenticated record stream. Its READY checkpoint
-//! contains enough state to render and resume the terminal, including any
+//! A snapshot is an ordered, CRC-protected record stream. Its READY marker
+//! follows enough state to render and resume the terminal, including any
 //! unfinished VT parser input. Older scrollback pages follow READY and the
-//! FINISH checkpoint authenticates the complete snapshot.
+//! FINISH marker terminates the complete snapshot.
 //!
-//! End-of-file before an operation's required READY or FINISH checkpoint is
+//! End-of-file before an operation's required READY or FINISH marker is
 //! malformed, truncated snapshot data and returns [`Error::InvalidValue`].
 //! [`Error::IoError`] is reserved for reader errors.
 //!
@@ -56,22 +56,22 @@
 //! +------------- CONTINUATION ---------------+
 //! | unfinished VT/UTF-8 input, or ground     |
 //! +------------------ READY -----------------+
-//! | BLAKE3-256 of every preceding byte       |  ready() returns here
+//! | empty renderable-state marker            |  ready() returns here
 //! +----------------- HISTORY ----------------+  repeated per screen
 //! | scrollback manifest                      |
 //! +------------------ PAGE ------------------+  next() consumes one page
 //! | older screen rows                        |
 //! +------------------ FINISH ----------------+
-//! | BLAKE3-256 of every preceding byte       |  next() returns NO_VALUE
+//! | empty end-of-snapshot marker             |  next() returns NO_VALUE
 //! +------------------------------------------+
 //! | trailing transport bytes (not consumed) |
 //! +------------------------------------------+
 //! ```
 //!
-//! READY authenticates the renderable prefix through CONTINUATION. FINISH
-//! authenticates READY and every history record as well as the earlier prefix.
-//! Thus record CRC32C detects local corruption while the BLAKE3 checkpoints
-//! also bind the ordering and completeness of the record stream.
+//! READY separates the renderable prefix through CONTINUATION from history.
+//! FINISH terminates the record sequence. Both are empty records protected by
+//! CRC32C, like every other record. Declared record counts, tags, and strict
+//! decoding enforce the stream's ordering and completeness.
 //!
 //! Snapshot format version 1 is a work in progress and does not yet carry a
 //! binary-compatibility guarantee.
@@ -83,7 +83,6 @@ use std::{
     io::{Read, Write},
     marker::PhantomData,
     mem::MaybeUninit,
-    ptr::NonNull,
 };
 
 use crate::{
@@ -108,12 +107,12 @@ impl Terminal<'_, '_> {
     /// terminal handle. A terminal can be encoded with tracking disabled when
     /// its VT parser and UTF-8 decoder are both at ground. If either is
     /// unfinished, tracking must have been enabled before the input that
-    ///produced that state was written; otherwise this returns
+    /// produced that state was written; otherwise this returns
     /// [`Error::InvalidValue`].
     ///
     /// Encoding begins at the writer's current position. If an error occurs,
     /// the writer may contain a partial snapshot without a valid FINISH
-    /// checkpoint. Calls to the writer are synchronous; this function does not
+    /// marker. Calls to the writer are synchronous; this function does not
     /// flush or make the caller's destination durable.
     ///
     /// # Errors
@@ -154,9 +153,9 @@ impl Terminal<'_, '_> {
         };
 
         let out = from_optional_result(result, out)?;
-        Ok(out
-            .and_then(NonNull::new)
-            .map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
+        // SAFETY: On success, libghostty hands over `out_len` bytes allocated
+        // with `alloc`, or NULL for empty output.
+        Ok(out.map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
     }
 
     /// Encode a complete terminal snapshot to a caller-provided buffer.
@@ -199,7 +198,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// Reads are synchronous and occur only during ready, next, or decode calls.
     /// A zero-byte successful read is permanent end-of-file, not temporary
     /// starvation; nonblocking sources must wait outside the decoder or block
-    /// in their callback. Reading zero bytes before a required checkpoint
+    /// in their callback. Reading zero bytes before a required marker
     /// reports truncated snapshot data as [`Error::InvalidValue`].
     pub fn new<R: Read>(r: &'r mut R) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
@@ -213,7 +212,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// A zero-byte successful read is permanent end-of-file, not temporary
     /// starvation; nonblocking sources must wait outside the decoder or block
     /// in their callback. The read callback must not call APIs on or drop the
-    /// decoder that owns it. Reading zero bytes before a required checkpoint
+    /// decoder that owns it. Reading zero bytes before a required marker
     /// reports truncated snapshot data as [`Error::InvalidValue`].
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
@@ -274,7 +273,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
         })
     }
 
-    /// Decode and authenticate one complete snapshot.
+    /// Decode and validate one complete snapshot.
     ///
     /// This is the one-shot form of READY followed by all history pages
     /// through FINISH. It may only be called before decoding starts. Bytes
@@ -294,7 +293,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
         unsafe { Terminal::from_raw(raw) }
     }
 
-    /// Decode and authenticate the renderable snapshot prefix through READY.
+    /// Decode and validate the renderable snapshot prefix through READY.
     ///
     /// On success, terminal receives a caller-owned terminal with its
     /// persistent VT stream already restored from the snapshot continuation.
@@ -421,7 +420,7 @@ pub struct IncrementalDecoder<'alloc, 'r, 'cb> {
 impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
     /// Decode one history page into the terminal returned by READY.
     ///
-    /// Each `Ok(Some(progress))` result consumes and authenticates one PAGE
+    /// Each `Ok(Some(progress))` result consumes and validates one PAGE
     /// record. Query the values on the returned `progress` before
     /// calling [`IncrementalDecoder::next`] again.
     ///
@@ -430,7 +429,7 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
     ///
     /// The terminal may be rendered, resized, and fed live PTY input between
     /// calls. If a history page can no longer be applied safely, it is still
-    /// consumed and authenticated and progress reports zero rows. The decoder
+    /// consumed and validated and progress reports zero rows. The decoder
     /// applies history to the terminal produced by its READY operation.
     ///
     /// A decoding error invalidates the decoder's source position. The terminal
@@ -475,7 +474,7 @@ impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
     }
     /// Rows prepended by the most recently decoded history page.
     ///
-    /// Zero means the page was consumed and authenticated but could not be
+    /// Zero means the page was consumed and validated but could not be
     /// applied to the live terminal.
     pub fn rows(&self) -> Result<usize> {
         self.decoder.get(Data::PROGRESS_ROWS)
@@ -490,5 +489,68 @@ impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
     /// Get a reference to the underlying decoder.
     pub fn as_decoder(self) -> &'d Decoder<'alloc, 'r> {
         self.decoder
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Length of a record header: u16 tag, u32 payload length, u32 CRC32C.
+    const RECORD_HEADER_LEN: usize = 10;
+
+    fn encoded_snapshot() -> Vec<u8> {
+        let mut terminal = Terminal::new(20, 5).expect("terminal should initialize");
+        terminal.vt_write(b"hello\r\nworld");
+        let bytes = terminal
+            .encode_snapshot_alloc(None)
+            .expect("snapshot should encode")
+            .expect("snapshot should not be empty");
+        bytes.to_vec()
+    }
+
+    #[test]
+    fn finish_is_an_empty_marker_record() {
+        let bytes = encoded_snapshot();
+
+        // The envelope is "GHOSTSNP" followed by the u16 format version.
+        assert_eq!(&bytes[..8], b"GHOSTSNP");
+        assert_eq!(u16::from_le_bytes([bytes[8], bytes[9]]), 1);
+
+        // FINISH is the final record and carries no payload, so the stream
+        // ends with its bare header. Its declared payload length is zero.
+        let finish = &bytes[bytes.len() - RECORD_HEADER_LEN..];
+        assert_eq!(&finish[2..6], &0u32.to_le_bytes());
+
+        assert!(Decoder::new_buf(&bytes).unwrap().decode().is_ok());
+    }
+
+    #[test]
+    fn truncated_snapshot_is_invalid_value() {
+        let bytes = encoded_snapshot();
+
+        // Dropping FINISH means end-of-file before the required marker, which
+        // the snapshot contract documents as `Error::InvalidValue`.
+        let truncated = &bytes[..bytes.len() - RECORD_HEADER_LEN];
+        let result = Decoder::new_buf(truncated).unwrap().decode();
+        assert!(matches!(result, Err(Error::InvalidValue)));
+    }
+
+    #[test]
+    fn corrupted_record_fails_to_decode() {
+        let mut bytes = encoded_snapshot();
+
+        // Every record, including the empty FINISH marker, is protected by
+        // CRC32C. Flipping a bit in FINISH's checksum must be detected.
+        let mut finish_crc = bytes.clone();
+        let last = finish_crc.len() - 1;
+        finish_crc[last] ^= 0x01;
+        assert!(Decoder::new_buf(&finish_crc).unwrap().decode().is_err());
+
+        // Likewise for a payload byte of the first (TERMINAL) record, which
+        // starts right after the ten-byte envelope and its record header.
+        let payload = 10 + RECORD_HEADER_LEN;
+        bytes[payload] ^= 0x01;
+        assert!(Decoder::new_buf(&bytes).unwrap().decode().is_err());
     }
 }

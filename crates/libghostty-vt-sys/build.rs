@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "22d13172cde98a0a4dda05d3d6a3fcb0dd8ed018";
+const GHOSTTY_COMMIT: &str = "0081d4530929317364d3bfec5309e55238e4cd90";
 
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
@@ -427,8 +427,12 @@ fn fetch_ghostty(out_dir: &Path) -> PathBuf {
     eprintln!("Fetching ghostty {GHOSTTY_COMMIT} ...");
 
     let mut clone = Command::new("git");
+    // Cargo's nested OUT_DIR plus Ghostty's fuzz corpus names can exceed
+    // Windows MAX_PATH. Scope long-path support to this fetched repository.
     clone
         .arg("clone")
+        .arg("--config")
+        .arg("core.longpaths=true")
         .arg("--filter=blob:none")
         .arg("--no-checkout")
         .arg(GHOSTTY_REPO)
