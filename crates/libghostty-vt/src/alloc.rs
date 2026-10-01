@@ -407,9 +407,7 @@ unsafe fn get_allocator<'a, A: alloc::Allocator>(ptr: *mut c_void) -> Option<&'a
 /// libghostty allocates.
 #[cfg(all(test, not(miri)))]
 pub(crate) mod testing {
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
-    use std::cell::Cell;
-    use std::ffi::c_void;
+    use std::{cell::Cell, ffi::c_void};
 
     use super::Allocator;
     use crate::ffi;
@@ -427,7 +425,6 @@ pub(crate) mod testing {
         unsafe { Allocator::from_raw(&raw const raw) }
     }
 
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
     fn layout(len: usize, alignment: u8) -> std::alloc::Layout {
         std::alloc::Layout::from_size_align(len, 1 << alignment).expect("valid layout")
     }
@@ -508,7 +505,63 @@ pub(crate) mod testing {
         unsafe { std::alloc::alloc(layout(len, alignment)).cast() }
     }
 
-    #[cfg(all(feature = "kitty-graphics", feature = "png"))]
+    /// Tracks how many bytes libghostty holds through the allocator.
+    #[derive(Default)]
+    pub(crate) struct Counting {
+        live: Cell<usize>,
+    }
+
+    impl Counting {
+        pub(crate) fn allocator(&self) -> Allocator<'_> {
+            static VTABLE: ffi::AllocatorVtable = ffi::AllocatorVtable {
+                alloc: Some(counting_alloc),
+                resize: Some(no_resize),
+                remap: Some(no_remap),
+                free: Some(counting_free),
+            };
+            allocator(self, &VTABLE)
+        }
+
+        /// The number of bytes currently allocated and not yet freed.
+        pub(crate) fn live(&self) -> usize {
+            self.live.get()
+        }
+    }
+
+    unsafe extern "C" fn counting_alloc(
+        ctx: *mut c_void,
+        len: usize,
+        alignment: u8,
+        _ret_addr: usize,
+    ) -> *mut c_void {
+        // SAFETY: `ctx` is the `Counting` the allocator borrows.
+        let this = unsafe { &*ctx.cast::<Counting>() };
+        // SAFETY: `len` is never zero: Zig's allocator interface handles
+        // zero-length requests without calling into the vtable.
+        let mem = unsafe { std::alloc::alloc(layout(len, alignment)) };
+        if !mem.is_null() {
+            this.live.set(this.live.get() + len);
+        }
+        mem.cast()
+    }
+
+    unsafe extern "C" fn counting_free(
+        ctx: *mut c_void,
+        mem: *mut c_void,
+        len: usize,
+        alignment: u8,
+        ret_addr: usize,
+    ) {
+        // SAFETY: `ctx` is the `Counting` the allocator borrows.
+        let this = unsafe { &*ctx.cast::<Counting>() };
+        let live = this.live.get().checked_sub(len);
+        this.live
+            .set(live.expect("freed more than was allocated - this is a bug!"));
+        // SAFETY: Forwarded from libghostty, which allocated `mem` through
+        // `counting_alloc` from the global heap.
+        unsafe { heap_free(ctx, mem, len, alignment, ret_addr) };
+    }
+
     unsafe extern "C" fn heap_free(
         _ctx: *mut c_void,
         mem: *mut c_void,
