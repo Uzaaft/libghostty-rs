@@ -13,6 +13,13 @@ use crate::{
 
 pub use ffi::RenderStateRowSelection as RowSelection;
 
+/// A number of rows above and below the viewport.
+///
+/// This is used both to [request](RenderState::set_overscan) overscan and to
+/// [report](Snapshot::overscan) how many rows an update captured. See
+/// [Overscan](RenderState#overscan) for how the extra rows are used.
+pub use ffi::RenderStateOverscan as Overscan;
+
 /// Represents the state required to render a visible screen (a viewport) of
 /// a terminal instance.
 ///
@@ -43,12 +50,76 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// tracking which rows in a partially dirty frame have changed.
 ///
 /// The user of the render state API is expected to unset both of these.
-/// The update call does not unset dirty state, it only updates it.
+/// The update call does not unset dirty state, it only updates it. After
+/// successfully rendering a complete frame, use [`Snapshot::clean`] to unset
+/// both layers in one call. The granular setters remain available for
+/// callers that only consume part of a frame.
 ///
 /// An extremely important detail: **setting one dirty state doesn't unset
 /// the other.** For example, setting the global dirty state to false does
 /// not reset the row-level dirty flags. So, the caller of the render state
 /// API must be careful to manage both layers of dirty state correctly.
+///
+/// # Overscan
+///
+/// By default, the render state captures exactly the rows visible in the
+/// viewport. That is all a renderer needs when it draws whole rows.
+///
+/// Some renderers draw the grid shifted by a fraction of a row, most commonly
+/// to scroll smoothly. While the grid is shifted, part of a row just outside
+/// the viewport becomes visible at one edge, and the renderer needs that
+/// row's content to draw it. Overscan asks the render state to capture extra
+/// rows above and below the viewport for this purpose.
+///
+/// Request overscan with [`RenderState::set_overscan`]. The request applies to
+/// every update after it is set. [Row iterations](RowIteration) then visit
+/// the extra rows along with the viewport, from top to bottom: the rows above
+/// the viewport, the viewport rows, and then the rows below it.
+/// [`RowIteration::viewport_y`] tells you where each row belongs. Rows above
+/// the viewport have negative values, viewport rows are 0 through
+/// [`rows`](Snapshot::rows) - 1, and rows below the viewport start at
+/// [`rows`](Snapshot::rows).
+///
+/// Extra rows are only captured when they exist. There is nothing above the
+/// first line of scrollback, and there is nothing below the viewport while it
+/// is scrolled to the bottom, which is the usual case. After an update,
+/// [`Snapshot::overscan`] reports how many rows were actually captured on
+/// each side. Don't shift the grid toward a side where nothing was captured.
+///
+/// Extra rows carry the same data as viewport rows, including cells, styles,
+/// dirty flags, and selection. The cursor is only reported when it is inside
+/// the viewport.
+///
+/// The render state doesn't store the scroll position. If you need it, read
+/// [`Terminal::scrollbar`](crate::Terminal::scrollbar) or
+/// [`Terminal::viewport_active`](crate::Terminal::viewport_active) at the same
+/// time as you call [`RenderState::begin_update`], while you have exclusive
+/// access to the terminal. The values then describe the same moment as the
+/// render state.
+///
+/// # Row identity
+///
+/// Every row has an [id](RowIteration::id) that stays with the row as it
+/// moves. When the viewport scrolls by one row, each row shows up one
+/// position higher or lower in the next update but keeps its id. Ids work
+/// with or without overscan.
+///
+/// Ids let a renderer keep expensive per-row work, such as shaped text or a
+/// prepared texture, in its own cache keyed by id. A cached entry can be
+/// reused when both of these are true:
+///
+///  1. A row with the same id is present in the new update.
+///  2. That row's [dirty flag](RowIteration::dirty) is not set.
+///
+/// The dirty flag is conservative. A row may be marked dirty even though its
+/// content didn't change. For example, every row is currently marked dirty
+/// after the viewport scrolls. Rebuilding a dirty row is always correct.
+///
+/// An id disappears when its row is no longer captured, is removed from
+/// scrollback, or is changed in place by the terminal (for example, when a
+/// program scrolls only part of the screen). Ids are never reused, so an old
+/// id can never match a different row. Cache entries for ids that no longer
+/// appear can be discarded.
 ///
 /// # Examples
 ///
@@ -149,6 +220,66 @@ pub use ffi::RenderStateRowSelection as RowSelection;
 /// }
 /// ```
 ///
+/// ## Scrolling smoothly with overscan
+///
+/// ```rust
+/// // Draw one frame of a smooth scroll. `offset_px` comes from the renderer's
+/// // own scroll animation: how far the grid is shifted up, from zero up to
+/// // but not including one row height.
+/// use libghostty_vt::{RenderState, Terminal, render::{Overscan, RowIterator}};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # let terminal = Terminal::new(80, 25)?;
+/// # let cell_height = 16;
+/// # let mut offset_px = 4;
+/// # let mut draw_row = |_: &_, _: i32| {};
+/// let mut render_state = RenderState::new()?;
+/// let mut rows = RowIterator::new()?;
+///
+/// // Once, when setting up the render state. One row below the viewport is
+/// // enough to draw the partially visible row at the bottom edge.
+/// render_state.set_overscan(Overscan { above: 0, below: 1 })?;
+///
+/// // Each frame.
+/// let snapshot = render_state.update(&terminal)?;
+///
+/// // With no row below the viewport, there is nothing to scroll into.
+/// if snapshot.overscan()?.below == 0 {
+///     offset_px = 0;
+/// }
+///
+/// let mut row_iter = rows.update(&snapshot)?;
+/// while let Some(row) = row_iter.next() {
+///     draw_row(row, row.viewport_y()? * cell_height - offset_px);
+/// }
+/// # Ok(())}
+/// ```
+///
+/// ## Caching per-row work by id
+///
+/// ```rust
+/// use std::collections::HashMap;
+/// use libghostty_vt::{RenderState, Terminal, render::{RowId, RowIterator}};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # let terminal = Terminal::new(80, 25)?;
+/// # let mut render_state = RenderState::new()?;
+/// # let mut rows = RowIterator::new()?;
+/// # let prepare = |_: &_| ();
+/// // The renderer's own map from row id to prepared row.
+/// let mut cache: HashMap<RowId, ()> = HashMap::new();
+///
+/// let snapshot = render_state.update(&terminal)?;
+/// let mut row_iter = rows.update(&snapshot)?;
+/// while let Some(row) = row_iter.next() {
+///     let id = row.id()?;
+///     if row.dirty()? || !cache.contains_key(&id) {
+///         cache.insert(id, prepare(row));
+///     }
+/// }
+/// # Ok(())}
+/// ```
+///
 /// ## Iterating rows and cells
 ///
 /// ```rust
@@ -247,6 +378,10 @@ pub struct Update<'alloc, 's> {
 /// The row iterator must be [updated](RowIterator::update) from a snapshot of
 /// the render state in order to function, as most data is only accessible
 /// per [iteration](RowIteration).
+///
+/// The iteration visits every row the last update captured, from top to
+/// bottom. This is exactly the viewport unless
+/// [overscan](RenderState#overscan) was requested.
 #[derive(Debug)]
 pub struct RowIterator<'alloc>(Object<'alloc, ffi::RenderStateRowIteratorImpl>);
 
@@ -363,6 +498,43 @@ impl<'alloc> RenderState<'alloc> {
         from_result(result)?;
         Ok(Update { state: Some(self) })
     }
+
+    fn get<T>(&self, tag: ffi::RenderStateData::Type) -> Result<T> {
+        let mut value = MaybeUninit::<T>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_render_state_get(self.0.as_raw(), tag, value.as_mut_ptr().cast())
+        };
+        // Since we manually model every possible query, this should never fail.
+        from_result(result)?;
+        // SAFETY: Value should be initialized after successful call.
+        Ok(unsafe { value.assume_init() })
+    }
+
+    fn set<T>(&self, tag: ffi::RenderStateOption::Type, value: &T) -> Result<()> {
+        let result = unsafe {
+            ffi::ghostty_render_state_set(self.0.as_raw(), tag, std::ptr::from_ref(value).cast())
+        };
+        // Since we manually model every possible query, this should never fail.
+        from_result(result)
+    }
+
+    /// Request [overscan](Self#overscan) rows above and below the viewport.
+    ///
+    /// The request takes effect on the next update and stays in effect until
+    /// it is changed. Both sides are zero by default, which captures only the
+    /// viewport. Expect a full redraw on the update after a change.
+    pub fn set_overscan(&mut self, request: Overscan) -> Result<&mut Self> {
+        self.set(ffi::RenderStateOption::OVERSCAN, &request)?;
+        Ok(self)
+    }
+
+    /// The overscan request most recently set with [`Self::set_overscan`].
+    ///
+    /// The next update uses this request. Both sides are zero if it was never
+    /// set.
+    pub fn overscan_request(&self) -> Result<Overscan> {
+        self.get(ffi::RenderStateData::OVERSCAN_REQUEST)
+    }
 }
 
 impl Drop for RenderState<'_> {
@@ -397,22 +569,11 @@ impl Drop for Update<'_, '_> {
 
 impl Snapshot<'_, '_> {
     fn get<T>(&self, tag: ffi::RenderStateData::Type) -> Result<T> {
-        let mut value = MaybeUninit::<T>::zeroed();
-        let result = unsafe {
-            ffi::ghostty_render_state_get(self.0.0.as_raw(), tag, value.as_mut_ptr().cast())
-        };
-        // Since we manually model every possible query, this should never fail.
-        from_result(result)?;
-        // SAFETY: Value should be initialized after successful call.
-        Ok(unsafe { value.assume_init() })
+        self.0.get(tag)
     }
 
     fn set<T>(&self, tag: ffi::RenderStateOption::Type, value: &T) -> Result<()> {
-        let result = unsafe {
-            ffi::ghostty_render_state_set(self.0.0.as_raw(), tag, std::ptr::from_ref(value).cast())
-        };
-        // Since we manually model every possible query, this should never fail.
-        from_result(result)
+        self.0.set(tag, value)
     }
 
     /// Get the current dirty state.
@@ -427,8 +588,21 @@ impl Snapshot<'_, '_> {
     }
 
     /// Get the viewport height.
+    ///
+    /// This does not include [overscan](RenderState#overscan) rows.
     pub fn rows(&self) -> Result<u16> {
         self.get(ffi::RenderStateData::ROWS)
+    }
+
+    /// How many [overscan](RenderState#overscan) rows this update captured on
+    /// each side.
+    ///
+    /// This is never more than the [request](RenderState::overscan_request).
+    /// It is less when those rows don't exist: `above` is smaller near the top
+    /// of the scrollback, and `below` is zero while the viewport is scrolled
+    /// to the bottom.
+    pub fn overscan(&self) -> Result<Overscan> {
+        self.get(ffi::RenderStateData::OVERSCAN)
     }
 
     /// Get the cursor color that may have been explicitly set by the terminal state.
@@ -477,6 +651,49 @@ impl Snapshot<'_, '_> {
         } else {
             Ok(None)
         }
+    }
+
+    /// All cursor state in one call.
+    ///
+    /// This is equivalent to the individual `cursor_*` getters, but needs a
+    /// single query instead of one per property.
+    pub fn cursor(&self) -> Result<Cursor> {
+        let mut raw = ffi::sized!(ffi::RenderStateCursor);
+        from_result(unsafe {
+            ffi::ghostty_render_state_get(
+                self.0.0.as_raw(),
+                ffi::RenderStateData::CURSOR,
+                (&raw mut raw).cast(),
+            )
+        })?;
+        Ok(Cursor {
+            // The viewport fields are undefined unless `viewport_has_value`
+            // is set, so they must not be read otherwise.
+            viewport: raw.viewport_has_value.then_some(CursorViewport {
+                x: raw.viewport_x,
+                y: raw.viewport_y,
+                at_wide_tail: raw.wide_tail,
+            }),
+            visible: raw.visible,
+            blinking: raw.blinking,
+            password_input: raw.password_input,
+            visual_style: raw
+                .visual_style
+                .try_into()
+                .map_err(|_| Error::InvalidValue)?,
+        })
+    }
+
+    /// Mark all dirty render-state data as consumed.
+    ///
+    /// This sets the global [dirty state](Self::dirty) to [`Dirty::Clean`] and
+    /// clears every per-row dirty flag. It is idempotent and does not modify
+    /// cell contents or dirty state owned by the terminal. Call this only
+    /// after a complete frame has been rendered successfully; partial
+    /// consumers should use [`Self::set_dirty`] and [`RowIteration::set_dirty`]
+    /// instead.
+    pub fn clean(&self) -> Result<()> {
+        from_result(unsafe { ffi::ghostty_render_state_clean(self.0.0.as_raw()) })
     }
 
     /// Get the current color information from a render state.
@@ -537,10 +754,23 @@ impl<'alloc> RowIterator<'alloc> {
 
     /// Update the row iterator for a snapshot of the render state,
     /// returning a new row iteration.
-    pub fn update(
-        &mut self,
-        snapshot: &'_ Snapshot<'alloc, '_>,
-    ) -> Result<RowIteration<'alloc, '_>> {
+    ///
+    /// The iteration borrows the snapshot, so it cannot outlive it:
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{Terminal, RenderState, render::RowIterator};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut iteration = rows.update(&snapshot).unwrap();
+    /// drop(snapshot); // Iteration still borrows its owning snapshot.
+    /// iteration.next();
+    /// ```
+    pub fn update<'s>(
+        &'s mut self,
+        snapshot: &'s Snapshot<'alloc, '_>,
+    ) -> Result<RowIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -563,7 +793,65 @@ impl Drop for RowIterator<'_> {
     }
 }
 
+impl<'s> RowIteration<'_, 's> {
+    /// The raw cell values for the current row, one per column.
+    ///
+    /// This is identical to querying [`CellIteration::raw_cell`] for each
+    /// cell, and is the bulk alternative to iterating cells one at a time.
+    ///
+    /// The values are only valid as long as the underlying render state is
+    /// not updated, so they borrow the snapshot rather than this row: the
+    /// iteration may keep advancing while they are in use.
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{RenderState, Terminal, render::RowIterator};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut iteration = rows.update(&snapshot).unwrap();
+    /// let cells = iteration.next().unwrap().cells_raw().unwrap();
+    /// drop(snapshot); // The cells still borrow the snapshot.
+    /// cells.count();
+    /// ```
+    pub fn cells_raw(&self) -> Result<impl ExactSizeIterator<Item = Cell> + 's> {
+        let view: ffi::CellsView = self.get(ffi::RenderStateRowData::CELLS_RAW)?;
+        let cells: &'s [ffi::Cell] = if view.len == 0 {
+            &[]
+        } else {
+            // SAFETY: libghostty keeps the view valid until the render state
+            // is updated, which the snapshot borrow `'s` rules out. The only
+            // writes possible meanwhile are to dirty flags (`set_dirty`,
+            // `clean`), which live outside the cells.
+            unsafe { std::slice::from_raw_parts(view.ptr, view.len) }
+        };
+        Ok(cells.iter().copied().map(Cell))
+    }
+}
+
 impl RowIteration<'_, '_> {
+    /// Move a row iteration to the next row requiring a redraw.
+    ///
+    /// If the global dirty state is [`Dirty::Clean`], this returns `None`. If
+    /// it is [`Dirty::Partial`], clean rows are skipped. If it is
+    /// [`Dirty::Full`], every remaining row is returned regardless of its
+    /// per-row dirty flag. Rows are returned in ascending viewport order,
+    /// together with their position in the iteration. This does not clear any
+    /// dirty state.
+    ///
+    /// Without [overscan](RenderState#overscan), the position is the viewport
+    /// y. With overscan, it counts from the highest captured row, so use
+    /// [`Self::viewport_y`] to place the row.
+    pub fn next_dirty(&mut self) -> Option<(u16, &Self)> {
+        let mut y = 0;
+        // The receiver is evaluated before the arguments, so `y` is read only
+        // after libghostty has written it.
+        unsafe {
+            ffi::ghostty_render_state_row_iterator_next_dirty(self.iter.0.as_raw(), &raw mut y)
+        }
+        .then_some((y, self))
+    }
+
     /// Move a row iteration to the next row.
     ///
     /// Returns `Some(row)` if the iteration moved successfully and row
@@ -605,6 +893,24 @@ impl RowIteration<'_, '_> {
     /// Whether the current row is dirty.
     pub fn dirty(&self) -> Result<bool> {
         self.get(ffi::RenderStateRowData::DIRTY)
+    }
+
+    /// The row's [identity](RenderState#row-identity) across updates.
+    ///
+    /// This works with or without [overscan](RenderState#overscan).
+    pub fn id(&self) -> Result<RowId> {
+        self.get::<ffi::RenderStateRowId>(ffi::RenderStateRowData::ID)
+            .map(|id| RowId(id.bits))
+    }
+
+    /// The row's position relative to the top of the viewport.
+    ///
+    /// Viewport rows are 0 through [`rows`](Snapshot::rows) - 1.
+    /// [Overscan](RenderState#overscan) rows above the viewport are negative,
+    /// and overscan rows below it start at [`rows`](Snapshot::rows). Without
+    /// overscan, this equals the position reported by [`Self::next_dirty`].
+    pub fn viewport_y(&self) -> Result<i32> {
+        self.get(ffi::RenderStateRowData::VIEWPORT_Y)
     }
 
     /// The raw row value.
@@ -658,10 +964,29 @@ impl<'alloc> CellIterator<'alloc> {
 
     /// Update the cell iterator for a new row iteration,
     /// returning a new cell iteration.
-    pub fn update(
-        &mut self,
-        row: &'_ RowIteration<'alloc, '_>,
-    ) -> Result<CellIteration<'alloc, '_>> {
+    ///
+    /// The iteration borrows the row, so it cannot outlive it:
+    ///
+    /// ```compile_fail,E0505
+    /// use libghostty_vt::{
+    ///     RenderState, Terminal,
+    ///     render::{CellIterator, RowIterator},
+    /// };
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut state = RenderState::new().unwrap();
+    /// let snapshot = state.update(&terminal).unwrap();
+    /// let mut rows = RowIterator::new().unwrap();
+    /// let mut row = rows.update(&snapshot).unwrap();
+    /// row.next();
+    /// let mut cells = CellIterator::new().unwrap();
+    /// let mut iteration = cells.update(&row).unwrap();
+    /// drop(row); // Iteration still borrows its owning row.
+    /// iteration.next();
+    /// ```
+    pub fn update<'s>(
+        &'s mut self,
+        row: &'s RowIteration<'alloc, '_>,
+    ) -> Result<CellIteration<'alloc, 's>> {
         let result = unsafe {
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
@@ -916,6 +1241,30 @@ pub struct CursorViewport {
     pub at_wide_tail: bool,
 }
 
+/// Render-state cursor information, as returned by [`Snapshot::cursor`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cursor {
+    /// The cursor position if the cursor is visible within the viewport.
+    pub viewport: Option<CursorViewport>,
+    /// Whether the cursor is visible based on terminal modes.
+    pub visible: bool,
+    /// Whether the cursor should blink based on terminal modes.
+    pub blinking: bool,
+    /// Whether the cursor is at a password input field.
+    pub password_input: bool,
+    /// The visual style of the cursor.
+    pub visual_style: CursorVisualStyle,
+}
+
+/// The [identity](RenderState#row-identity) of a row across render state
+/// updates, as returned by [`RowIteration::id`].
+///
+/// Treat this value as opaque: two ids are the same row when they are equal,
+/// and no other comparison or interpretation is meaningful. The contents may
+/// change between library versions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct RowId([u64; 2]);
+
 /// Render-state color information.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Colors {
@@ -978,5 +1327,245 @@ mod tests {
             .unwrap();
 
         assert!(state.update(&terminal).unwrap().dirty().is_ok());
+    }
+
+    /// Build the expected bulk cursor from the individual getters.
+    fn cursor_from_getters(snapshot: &Snapshot<'_, '_>) -> Cursor {
+        Cursor {
+            viewport: snapshot.cursor_viewport().unwrap(),
+            visible: snapshot.cursor_visible().unwrap(),
+            blinking: snapshot.cursor_blinking().unwrap(),
+            password_input: snapshot.cursor_password_input().unwrap(),
+            visual_style: snapshot.cursor_visual_style().unwrap(),
+        }
+    }
+
+    #[test]
+    fn bulk_cursor_matches_individual_getters() {
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        let mut state = RenderState::new().unwrap();
+
+        // Default cursor after writing a narrow character.
+        terminal.vt_write(b"hi");
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert_eq!(
+            cursor.viewport,
+            Some(CursorViewport {
+                x: 2,
+                y: 0,
+                at_wide_tail: false
+            })
+        );
+
+        // Hidden blinking bar cursor on the tail of a wide character.
+        terminal.vt_write("\x1b[?25l\x1b[5 q\r\n中\x1b[2G".as_bytes());
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert!(!cursor.visible);
+        assert_eq!(cursor.visual_style, CursorVisualStyle::Bar);
+        assert_eq!(
+            cursor.viewport,
+            Some(CursorViewport {
+                x: 1,
+                y: 1,
+                at_wide_tail: true
+            })
+        );
+
+        // Scrolling the cursor out of the viewport leaves no position.
+        terminal.vt_write(b"\r\n\r\n\r\n");
+        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        let snapshot = state.update(&terminal).unwrap();
+        let cursor = snapshot.cursor().unwrap();
+        assert_eq!(cursor, cursor_from_getters(&snapshot));
+        assert_eq!(cursor.viewport, None);
+    }
+
+    /// Collect the viewport rows returned by `next_dirty`.
+    fn dirty_rows<'alloc>(
+        rows: &mut RowIterator<'alloc>,
+        snapshot: &Snapshot<'alloc, '_>,
+    ) -> Vec<u16> {
+        let mut iteration = rows.update(snapshot).unwrap();
+        let mut ys = Vec::new();
+        while let Some((y, _)) = iteration.next_dirty() {
+            ys.push(y);
+        }
+        ys
+    }
+
+    #[test]
+    fn next_dirty_follows_global_and_row_dirty_state() {
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        // Park the cursor on the row we write to below: moving the cursor
+        // also dirties the row it leaves.
+        terminal.vt_write(b"\x1b[2;1H");
+        let mut state = RenderState::new().unwrap();
+        let mut rows = RowIterator::new().unwrap();
+
+        // The first update is fully dirty, so every row is returned.
+        let snapshot = state.update(&terminal).unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Full);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [0, 1, 2]);
+
+        // Once clean, nothing is returned.
+        snapshot.clean().unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Clean);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [] as [u16; 0]);
+        // Cleaning is idempotent.
+        snapshot.clean().unwrap();
+
+        // Changing one row only makes that row dirty.
+        terminal.vt_write(b"x");
+        let snapshot = state.update(&terminal).unwrap();
+        assert_eq!(snapshot.dirty().unwrap(), Dirty::Partial);
+        assert_eq!(dirty_rows(&mut rows, &snapshot), [1]);
+    }
+
+    /// Collect the viewport y of every row an iteration visits, along with
+    /// the positions `next_dirty` reports for them.
+    fn row_positions<'alloc>(
+        rows: &mut RowIterator<'alloc>,
+        snapshot: &Snapshot<'alloc, '_>,
+    ) -> (Vec<i32>, Vec<u16>) {
+        let mut viewport_ys = Vec::new();
+        let mut iteration = rows.update(snapshot).unwrap();
+        while let Some(row) = iteration.next() {
+            viewport_ys.push(row.viewport_y().unwrap());
+        }
+        (viewport_ys, dirty_rows(rows, snapshot))
+    }
+
+    /// An overscan as `(above, below)`, since the FFI struct can't be compared.
+    fn sides(overscan: Overscan) -> (u16, u16) {
+        (overscan.above, overscan.below)
+    }
+
+    #[test]
+    fn overscan_request_defaults_to_none_and_round_trips() {
+        let mut state = RenderState::new().unwrap();
+        assert_eq!(sides(state.overscan_request().unwrap()), (0, 0));
+
+        let request = Overscan { above: 2, below: 1 };
+        state.set_overscan(request).unwrap();
+        assert_eq!(sides(state.overscan_request().unwrap()), (2, 1));
+    }
+
+    #[test]
+    fn overscan_captures_only_rows_that_exist() {
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        for _ in 0..10 {
+            terminal.vt_write(b"x\r\n");
+        }
+        let mut state = RenderState::new().unwrap();
+        let mut rows = RowIterator::new().unwrap();
+
+        // Without overscan, only the viewport is visited, and the position
+        // from `next_dirty` is the viewport y.
+        let snapshot = state.update(&terminal).unwrap();
+        assert_eq!(sides(snapshot.overscan().unwrap()), (0, 0));
+        assert_eq!(
+            row_positions(&mut rows, &snapshot),
+            (vec![0, 1, 2], vec![0, 1, 2])
+        );
+
+        // At the bottom, there is nothing below the viewport to capture.
+        state.set_overscan(Overscan { above: 1, below: 1 }).unwrap();
+        let snapshot = state.update(&terminal).unwrap();
+        assert_eq!(snapshot.rows().unwrap(), 3);
+        assert_eq!(sides(snapshot.overscan().unwrap()), (1, 0));
+        // `next_dirty` counts from the highest captured row instead.
+        assert_eq!(
+            row_positions(&mut rows, &snapshot),
+            (vec![-1, 0, 1, 2], vec![0, 1, 2, 3])
+        );
+
+        // At the top, there is nothing above it.
+        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        let snapshot = state.update(&terminal).unwrap();
+        assert_eq!(sides(snapshot.overscan().unwrap()), (0, 1));
+        assert_eq!(
+            row_positions(&mut rows, &snapshot),
+            (vec![0, 1, 2, 3], vec![0, 1, 2, 3])
+        );
+    }
+
+    /// Collect the id of every row an iteration visits.
+    fn row_ids<'alloc>(
+        rows: &mut RowIterator<'alloc>,
+        snapshot: &Snapshot<'alloc, '_>,
+    ) -> Vec<RowId> {
+        let mut ids = Vec::new();
+        let mut iteration = rows.update(snapshot).unwrap();
+        while let Some(row) = iteration.next() {
+            ids.push(row.id().unwrap());
+        }
+        ids
+    }
+
+    #[test]
+    fn row_ids_follow_rows_as_the_viewport_scrolls() {
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        for _ in 0..10 {
+            terminal.vt_write(b"x\r\n");
+        }
+        let mut state = RenderState::new().unwrap();
+        let mut rows = RowIterator::new().unwrap();
+
+        let before = row_ids(&mut rows, &state.update(&terminal).unwrap());
+        // Every row has its own id, and it doesn't change without a reason.
+        assert!(before[0] != before[1] && before[1] != before[2] && before[0] != before[2]);
+        assert_eq!(
+            row_ids(&mut rows, &state.update(&terminal).unwrap()),
+            before
+        );
+
+        // Scrolling up by one moves each row one position down, keeping its id.
+        terminal.scroll_viewport(crate::terminal::ScrollViewport::Delta(-1));
+        let after = row_ids(&mut rows, &state.update(&terminal).unwrap());
+        assert_eq!(after[1..], before[..2]);
+        assert!(!before.contains(&after[0]));
+
+        // With overscan, the row scrolled out below is still captured under
+        // the same id.
+        state.set_overscan(Overscan { above: 0, below: 1 }).unwrap();
+        let overscanned = row_ids(&mut rows, &state.update(&terminal).unwrap());
+        assert_eq!(overscanned[..3], after);
+        assert_eq!(overscanned[3], before[2]);
+    }
+
+    #[test]
+    fn cells_raw_matches_cell_iteration_and_outlives_the_row() {
+        let mut terminal = Terminal::new(4, 2).unwrap();
+        terminal.vt_write(b"ab\r\ncd");
+        let mut state = RenderState::new().unwrap();
+        let snapshot = state.update(&terminal).unwrap();
+        let mut rows = RowIterator::new().unwrap();
+        let mut cells = CellIterator::new().unwrap();
+        let mut iteration = rows.update(&snapshot).unwrap();
+
+        let row = iteration.next().unwrap();
+        let first_row = row.cells_raw().unwrap();
+        assert_eq!(first_row.len(), 4);
+        let mut expected = Vec::new();
+        let mut cell_iteration = cells.update(row).unwrap();
+        while let Some(cell) = cell_iteration.next() {
+            expected.push(cell.raw_cell().unwrap());
+        }
+
+        // The raw cells stay usable after advancing to the next row.
+        let second_row = iteration.next().unwrap().cells_raw().unwrap();
+        let first_row: Vec<_> = first_row.collect();
+        assert_eq!(first_row, expected);
+        let codepoints =
+            |cells: &[Cell]| -> Vec<u32> { cells.iter().map(|c| c.codepoint().unwrap()).collect() };
+        assert_eq!(codepoints(&first_row), [0x61, 0x62, 0, 0]);
+        assert_eq!(
+            codepoints(&second_row.collect::<Vec<_>>()),
+            [0x63, 0x64, 0, 0]
+        );
     }
 }
