@@ -272,7 +272,8 @@ impl Terminal<'_, '_> {
     ///   [`Options::with_allow_unsafe`] is not set.
     /// - [`Error::InvalidValue`](crate::Error::InvalidValue) if no pty write callback is installed.
     /// - [`Error::IoError`](crate::Error::IoError) if the reader failed, or if there is no secure
-    ///   entropy source to mint a paste event password.
+    ///   entropy source to mint a paste event password (see
+    ///   [`set_secure_random_source`](crate::sys::set_secure_random_source)).
     /// - [`Error::OutOfMemory`](crate::Error::OutOfMemory), including when the
     ///   writer refused a write, which only happens when it can't allocate.
     pub fn paste<F>(
