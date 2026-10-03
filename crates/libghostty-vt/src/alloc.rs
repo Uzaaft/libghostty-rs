@@ -306,8 +306,7 @@ unsafe extern "C" fn _alloc<A: alloc::Allocator>(
 
     unsafe { get_allocator::<A>(allocator) }
         .and_then(|alloc| alloc.allocate(layout?).ok())
-        .map(|p| p.as_ptr().cast::<c_void>())
-        .unwrap_or(std::ptr::null_mut())
+        .map_or(std::ptr::null_mut(), |p| p.as_ptr().cast::<c_void>())
 }
 
 #[cfg(feature = "allocator_api")]
@@ -371,8 +370,7 @@ unsafe extern "C" fn _remap<A: alloc::Allocator>(
                 unsafe { alloc.grow(mem?, old_layout?, new_layout?) }.ok()
             }
         })
-        .map(|p| p.as_ptr().cast::<c_void>())
-        .unwrap_or(std::ptr::null_mut())
+        .map_or(std::ptr::null_mut(), |p| p.as_ptr().cast::<c_void>())
 }
 
 /// Get the allocator back from a vtable function.
@@ -386,7 +384,7 @@ unsafe extern "C" fn _remap<A: alloc::Allocator>(
 /// Undefined Behavior.
 ///
 /// The returned allocator must **never** be smuggled outside the lifetime of the caller.
-#[inline(always)]
+#[inline]
 #[cfg(feature = "allocator_api")]
 unsafe fn get_allocator<'a, A: alloc::Allocator>(ptr: *mut c_void) -> Option<&'a A> {
     unsafe { ptr.cast::<A>().as_ref() }
@@ -504,6 +502,10 @@ pub(crate) mod testing {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::used_underscore_items,
+    reason = "the underscore-named vtable functions are what is under test"
+)]
 mod tests {
     /// A stateful allocator must stay reachable through the libghostty
     /// allocator. Adapting it by value used to leave libghostty with a
@@ -558,7 +560,7 @@ mod tests {
                 len,
                 alignment_log2,
                 0,
-            )
+            );
         };
     }
 
@@ -573,7 +575,7 @@ mod tests {
 
         let initial = unsafe { std::slice::from_raw_parts_mut(mem.as_ptr(), initial_len) };
         for (index, byte) in initial.iter_mut().enumerate() {
-            *byte = index as u8;
+            *byte = u8::try_from(index).unwrap();
         }
 
         let raw = unsafe {
@@ -590,7 +592,7 @@ mod tests {
 
         let grown = unsafe { std::slice::from_raw_parts(mem.as_ptr(), new_len) };
         for (index, byte) in grown[..initial_len].iter().copied().enumerate() {
-            assert_eq!(byte, index as u8);
+            assert_eq!(byte, u8::try_from(index).unwrap());
         }
 
         unsafe {
@@ -600,7 +602,7 @@ mod tests {
                 new_len,
                 alignment_log2,
                 0,
-            )
+            );
         };
     }
 

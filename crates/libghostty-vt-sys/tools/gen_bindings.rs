@@ -147,7 +147,7 @@ impl ParseCallbacks for Callbacks {
 
         // Remove redundant C prefixes
         let prefix = PREFIXES
-            .into_iter()
+            .iter()
             .find(|(v, _)| *v == enum_name)
             .map(|(_, n)| n.to_string())
             .unwrap_or(enum_name.to_shouty_snake_case());

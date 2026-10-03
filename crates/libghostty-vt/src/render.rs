@@ -856,12 +856,11 @@ impl CellIteration<'_, '_> {
                     // When OutOfSpace is returned, the new length is written
                     // to `cbuf.len`, so we reserve additional space for that
                     buf.reserve(cbuf.len - len);
-                    continue;
                 }
-                ffi::Result::NO_VALUE | ffi::Result::INVALID_VALUE | _ => {
+                _ => {
                     break Err(Error::InvalidValue);
                 }
-            };
+            }
         }?;
 
         // Reconstitute the original String

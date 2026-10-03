@@ -359,6 +359,7 @@ impl<'t> Graphics<'t> {
     /// Look up a Kitty graphics image by its image ID.
     ///
     /// Returns `None` if no image with the given ID exists.
+    #[must_use]
     pub fn image(&self, id: u32) -> Option<Image<'t>> {
         let image = unsafe { ffi::ghostty_kitty_graphics_image(self.inner.as_raw(), id) };
 
@@ -538,11 +539,15 @@ impl Drop for PlacementIterator<'_> {
     }
 }
 
-impl<'t, 'alloc> PlacementIteration<'t, 'alloc> {
+impl<'t> PlacementIteration<'t, '_> {
     /// Advance the placement iterator to the next placement.
     ///
     /// If a layer filter has been set via [`PlacementIteration::set_layer`],
     /// only placements matching that layer are returned.
+    #[expect(
+        clippy::should_implement_trait,
+        reason = "a lending iterator: each placement borrows the iteration"
+    )]
     pub fn next(&mut self) -> Option<&Self> {
         if unsafe { ffi::ghostty_kitty_graphics_placement_next(self.0.inner.as_raw()) } {
             Some(self)
