@@ -2,9 +2,10 @@
 //! one libghostty passed in, and libghostty would free it with the wrong
 //! one. The decoder hook is process-global, so this lives in its own test
 //! binary.
-#![cfg(feature = "kitty-graphics")]
+// These call into libghostty, which Miri cannot execute.
+#![cfg(all(feature = "kitty-graphics", not(miri)))]
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, io::Write, rc::Rc};
 
 use libghostty_vt::{
     Terminal,
@@ -16,6 +17,7 @@ use libghostty_vt::{
 /// passed in or with libghostty's default allocator.
 struct OnePixel {
     use_given_allocator: bool,
+    decode_on_drop: bool,
 }
 
 impl DecodePng for OnePixel {
@@ -35,6 +37,16 @@ impl DecodePng for OnePixel {
             height: 1,
             data,
         })
+    }
+}
+
+impl Drop for OnePixel {
+    fn drop(&mut self) {
+        if self.decode_on_drop {
+            // Destruction may use another terminal. The replacement decoder
+            // must already be callable without waiting for this drop to finish.
+            assert!(transmit_png().contains(";OK"));
+        }
     }
 }
 
@@ -61,21 +73,55 @@ fn transmit_png() -> String {
 
 #[test]
 fn decoded_images_must_use_the_given_allocator() {
-    graphics::set_png_decoder(Some(Box::new(OnePixel {
-        use_given_allocator: true,
-    })))
+    // If replaced decoders are ever dropped under the decoder mutex again,
+    // the decode in `OnePixel::drop` deadlocks and this test would hang
+    // forever. Fail it instead. The watchdog never calls into libghostty,
+    // so the `set_png_decoder` safety contract below still holds.
+    std::thread::spawn(|| {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        // Not `eprintln!`: libtest captures that, and exiting skips printing
+        // captured output, so the message would be lost.
+        let _ = writeln!(
+            std::io::stderr(),
+            "png_decoder_allocator: timed out after 30s, likely deadlocked"
+        );
+        std::process::exit(1);
+    });
+
+    // SAFETY: No other thread in this test binary uses libghostty.
+    unsafe {
+        graphics::set_png_decoder(Some(Box::new(OnePixel {
+            use_given_allocator: true,
+            decode_on_drop: true,
+        })))
+    }
     .unwrap();
     assert!(transmit_png().contains(";OK"));
 
+    // Replacing the decoder must allow its destructor to decode PNG input.
+    // SAFETY: As above.
+    unsafe {
+        graphics::set_png_decoder(Some(Box::new(OnePixel {
+            use_given_allocator: true,
+            decode_on_drop: false,
+        })))
+    }
+    .unwrap();
+
     // Freeing this buffer with the terminal's allocator would be a
     // cross-allocator free, so the image must be rejected instead.
-    graphics::set_png_decoder(Some(Box::new(OnePixel {
-        use_given_allocator: false,
-    })))
+    // SAFETY: As above.
+    unsafe {
+        graphics::set_png_decoder(Some(Box::new(OnePixel {
+            use_given_allocator: false,
+            decode_on_drop: false,
+        })))
+    }
     .unwrap();
     let reply = transmit_png();
     assert!(reply.contains("i=1;"), "no reply: {reply:?}");
     assert!(!reply.contains(";OK"), "image was accepted: {reply:?}");
 
-    graphics::set_png_decoder(None).unwrap();
+    // SAFETY: As above.
+    unsafe { graphics::set_png_decoder(None) }.unwrap();
 }
