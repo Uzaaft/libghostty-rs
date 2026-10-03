@@ -61,21 +61,28 @@ fn transmit_png() -> String {
 
 #[test]
 fn decoded_images_must_use_the_given_allocator() {
-    graphics::set_png_decoder(Some(Box::new(OnePixel {
-        use_given_allocator: true,
-    })))
+    // SAFETY: This test binary has no other thread using libghostty.
+    unsafe {
+        graphics::set_png_decoder(Some(Box::new(OnePixel {
+            use_given_allocator: true,
+        })))
+    }
     .unwrap();
     assert!(transmit_png().contains(";OK"));
 
     // Freeing this buffer with the terminal's allocator would be a
     // cross-allocator free, so the image must be rejected instead.
-    graphics::set_png_decoder(Some(Box::new(OnePixel {
-        use_given_allocator: false,
-    })))
+    // SAFETY: As above.
+    unsafe {
+        graphics::set_png_decoder(Some(Box::new(OnePixel {
+            use_given_allocator: false,
+        })))
+    }
     .unwrap();
     let reply = transmit_png();
     assert!(reply.contains("i=1;"), "no reply: {reply:?}");
     assert!(!reply.contains(";OK"), "image was accepted: {reply:?}");
 
-    graphics::set_png_decoder(None).unwrap();
+    // SAFETY: As above.
+    unsafe { graphics::set_png_decoder(None) }.unwrap();
 }
