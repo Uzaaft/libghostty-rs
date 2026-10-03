@@ -501,7 +501,23 @@ impl<'alloc> PlacementIterator<'alloc> {
 
     /// Update the placement iterator with the given graphics storage,
     /// returning a new placement iteration.
-    pub fn update(&mut self, graphics: &Graphics<'_>) -> Result<PlacementIteration<'_, 'alloc>> {
+    ///
+    /// The iteration walks the storage itself, so it borrows `graphics` (and
+    /// through it the terminal) as well as this iterator:
+    ///
+    /// ```compile_fail,E0505
+    /// # use libghostty_vt::{Terminal, kitty::graphics::PlacementIterator};
+    /// let terminal = Terminal::new(80, 24).unwrap();
+    /// let mut iterator = PlacementIterator::new().unwrap();
+    /// let graphics = terminal.kitty_graphics().unwrap();
+    /// let mut placements = iterator.update(&graphics).unwrap();
+    /// drop(terminal);
+    /// placements.next();
+    /// ```
+    pub fn update<'t>(
+        &'t mut self,
+        graphics: &'t Graphics<'_>,
+    ) -> Result<PlacementIteration<'t, 'alloc>> {
         let result = unsafe {
             ffi::ghostty_kitty_graphics_get(
                 graphics.inner.as_raw(),
