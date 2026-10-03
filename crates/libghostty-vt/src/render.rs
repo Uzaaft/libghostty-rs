@@ -1139,43 +1139,29 @@ impl CellIteration<'_, '_> {
         from_result(result)
     }
 
-    /// Encode the current cell's full grapheme cluster as UTF-8 into a
-    /// caller-provided string buffer.
+    /// Replace the contents of `buf` with the current cell's full grapheme
+    /// cluster, encoded as UTF-8.
     ///
     /// The base codepoint is encoded first, followed by any extra grapheme
-    /// codepoints.
+    /// codepoints. A cell without text leaves `buf` empty.
     ///
-    /// May grow the buffer if more space is required.
+    /// `buf`'s allocation is reused and only grows if the cluster does not
+    /// fit, so one buffer can serve every cell of a frame. On error, `buf` is
+    /// left empty.
     pub fn graphemes_utf8(&self, buf: &mut String) -> Result<()> {
-        // SAFETY: String comes with some very stringent safety requirements,
-        // so we'll detail them here. The safety protocol for the C API is
-        // essentially that, in case of an error, no data will be written
-        // to the String's underlying buffer, and the buffer should appear
-        // as if unmodified. As such, we should be fine to operate on the
-        // original buffer directly and not cause any UB or break any
-        // invariants with the String's internal state.
-        //
-        // Since Strings do not have a `set_len` method like Vecs, in the
-        // happy path we have to recombine the entire string from its
-        // constituents, i.e. its pointer, length and capacity. This should
-        // be fine as the pointer indeed came from the original String,
-        // and that we do not attempt to copy the pointer anywhere and
-        // potentially cause aliasing issues. As for the remaining factors,
-        // we have to trust that the API will not cause length and capacity
-        // to have nonsensical values, and that the underlying bytes are
-        // indeed UTF-8.
-        //
-        // TODO: Use `String::into_raw_parts` to make this slightly simpler
-
-        let cbuf = loop {
-            // Save the old length of the String for later
-            let len = buf.len();
+        // libghostty writes from the start of the buffer, so start empty.
+        buf.clear();
+        // SAFETY: The length only ever grows to what libghostty reports
+        // having written on success, and libghostty only writes whole UTF-8
+        // encoded codepoints (it validates every codepoint before writing
+        // any byte), so the string stays valid UTF-8.
+        let bytes = unsafe { buf.as_mut_vec() };
+        loop {
             let mut cbuf = ffi::Buffer {
-                ptr: buf.as_mut_ptr(),
-                cap: buf.capacity(),
-                len,
+                ptr: bytes.as_mut_ptr(),
+                cap: bytes.capacity(),
+                len: 0,
             };
-
             let result = unsafe {
                 ffi::ghostty_render_state_row_cells_get(
                     self.iter.0.as_raw(),
@@ -1184,26 +1170,17 @@ impl CellIteration<'_, '_> {
                 )
             };
             match result {
-                ffi::Result::SUCCESS => break Ok(cbuf),
-                ffi::Result::OUT_OF_MEMORY => break Err(Error::OutOfMemory),
-                ffi::Result::OUT_OF_SPACE => {
-                    // When OutOfSpace is returned, the new length is written
-                    // to `cbuf.len`, so we reserve additional space for that
-                    buf.reserve(cbuf.len - len);
+                ffi::Result::SUCCESS => {
+                    // SAFETY: libghostty wrote `cbuf.len <= cap` bytes.
+                    unsafe { bytes.set_len(cbuf.len) };
+                    return Ok(());
                 }
-                _ => {
-                    break Err(Error::InvalidValue);
-                }
+                // `cbuf.len` is the size needed, and `bytes` is empty.
+                ffi::Result::OUT_OF_SPACE => bytes.reserve(cbuf.len),
+                ffi::Result::OUT_OF_MEMORY => return Err(Error::OutOfMemory),
+                _ => return Err(Error::InvalidValue),
             }
-        }?;
-
-        // Reconstitute the original String
-        // WITHOUT DROPPING THE EXISTING STRING OBJECT (!!)
-        // Otherwise, memory corruption, double frees, etc. WILL happen.
-        unsafe {
-            std::ptr::write(buf, String::from_raw_parts(cbuf.ptr, cbuf.len, cbuf.cap));
         }
-        Ok(())
     }
 
     /// Whether the cell is contained within the current selection.
@@ -1570,5 +1547,27 @@ mod tests {
             codepoints(&second_row.collect::<Vec<_>>()),
             [0x63, 0x64, 0, 0]
         );
+    }
+
+    #[test]
+    fn graphemes_utf8_replaces_the_buffer() {
+        let mut terminal = Terminal::new(4, 1).unwrap();
+        // An "e" with a combining acute accent, then an empty cell.
+        terminal.vt_write("e\u{301}".as_bytes());
+        let mut state = RenderState::new().unwrap();
+        let snapshot = state.update(&terminal).unwrap();
+        let mut rows = RowIterator::new().unwrap();
+        let mut cells = CellIterator::new().unwrap();
+        let mut iteration = rows.update(&snapshot).unwrap();
+        let mut cell_iteration = cells.update(iteration.next().unwrap()).unwrap();
+
+        // Too small for the cluster, and holding leftovers from earlier.
+        let mut text = String::from("x");
+        cell_iteration.next().unwrap();
+        cell_iteration.graphemes_utf8(&mut text).unwrap();
+        assert_eq!(text, "e\u{301}");
+        cell_iteration.next().unwrap();
+        cell_iteration.graphemes_utf8(&mut text).unwrap();
+        assert_eq!(text, "");
     }
 }
