@@ -34,6 +34,12 @@ impl Allocator<'_> {
     pub(crate) fn to_raw(&self) -> *const ffi::Allocator {
         std::ptr::from_ref(&self.inner)
     }
+    /// Copy an allocator that libghostty passed in.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must point to a valid allocator, and the state behind its
+    /// context pointer must outlive the result.
     pub(crate) unsafe fn from_raw(raw: *const ffi::Allocator) -> Self {
         Self {
             inner: unsafe { *raw },
@@ -259,12 +265,18 @@ unsafe extern "C" fn _global_remap(
 //------------------------------------
 
 /// Adapt a Rust Allocator into a libghostty Allocator.
+///
+/// libghostty calls back into the allocator through a pointer to it, so the
+/// allocator is borrowed for `'ctx` rather than moved in: a moved-in value
+/// would live in this function's stack frame and be gone by the first call.
 #[cfg(feature = "allocator_api")]
-impl<'ctx, A: alloc::Allocator + 'ctx> From<A> for Allocator<'ctx> {
-    fn from(value: A) -> Self {
+impl<'ctx, A: alloc::Allocator> From<&'ctx A> for Allocator<'ctx> {
+    fn from(value: &'ctx A) -> Self {
         Self {
             inner: ffi::Allocator {
-                ctx: std::ptr::from_ref(value.by_ref()) as *mut std::ffi::c_void,
+                ctx: std::ptr::from_ref(value)
+                    .cast_mut()
+                    .cast::<std::ffi::c_void>(),
                 vtable: &ffi::AllocatorVtable {
                     alloc: Some(_alloc::<A>),
                     free: Some(_free::<A>),
@@ -376,6 +388,34 @@ unsafe fn get_allocator<'a, A: alloc::Allocator>(ptr: *mut c_void) -> Option<&'a
 
 #[cfg(test)]
 mod tests {
+    /// A stateful allocator must stay reachable through the libghostty
+    /// allocator. Adapting it by value used to leave libghostty with a
+    /// pointer into a dead stack frame.
+    #[cfg(all(feature = "allocator_api", not(miri)))]
+    #[test]
+    fn allocator_api_allocators_keep_their_state() {
+        use std::{alloc::Layout, cell::Cell, ptr::NonNull};
+
+        use allocator_api2::alloc::{AllocError, Global};
+
+        struct Counting(Cell<usize>);
+        unsafe impl allocator_api2::alloc::Allocator for Counting {
+            fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+                self.0.set(self.0.get() + 1);
+                Global.allocate(layout)
+            }
+            unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+                unsafe { Global.deallocate(ptr, layout) };
+            }
+        }
+
+        let counting = Counting(Cell::new(0));
+        let alloc = super::Allocator::from(&counting);
+        let terminal = crate::Terminal::new_with_alloc(&alloc, 80, 24).unwrap();
+        drop(terminal);
+        assert!(counting.0.get() > 0);
+    }
+
     use std::ptr::NonNull;
 
     use super::{_global_alloc, _global_free, _global_remap};
