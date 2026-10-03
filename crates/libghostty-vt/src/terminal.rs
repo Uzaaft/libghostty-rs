@@ -2121,19 +2121,31 @@ impl<'t> DesktopNotification<'t> {
         }
     }
 
-    /// Get the notification title, or an empty string when the protocol omits it.
+    /// Notification title, or empty when the protocol omits it.
+    ///
+    /// The bytes come straight from the program and libghostty does not
+    /// validate them, so they are not guaranteed to be UTF-8.
     #[must_use]
-    pub fn title(self) -> &'t str {
-        // SAFETY: We trust libghostty to give us a valid underlying ptr
-        // AND that the title contains to a valid UTF-8 string.
-        unsafe { (*self.ptr).title.to_str() }
+    pub fn title(self) -> &'t [u8] {
+        // SAFETY: The notification and its strings live for the callback
+        // duration.
+        unsafe {
+            crate::sized_field!(self.ptr, ffi::TerminalDesktopNotification, title)
+                .map_or(&[], |title| title.to_bytes())
+        }
     }
+
     /// Notification body.
+    ///
+    /// Like the title, these are the program's bytes, not necessarily UTF-8.
     #[must_use]
-    pub fn body(self) -> &'t str {
-        // SAFETY: We trust libghostty to give us a valid underlying ptr
-        // AND that the title contains to a valid UTF-8 string.
-        unsafe { (*self.ptr).body.to_str() }
+    pub fn body(self) -> &'t [u8] {
+        // SAFETY: The notification and its strings live for the callback
+        // duration.
+        unsafe {
+            crate::sized_field!(self.ptr, ffi::TerminalDesktopNotification, body)
+                .map_or(&[], |body| body.to_bytes())
+        }
     }
 }
 
@@ -3597,6 +3609,29 @@ mod tests {
         // An empty name gives the pointer back.
         terminal.vt_write(b"\x1b]22;\x1b\\");
         assert_eq!(terminal.mouse_shape().unwrap(), mouse::Shape::Text);
+    }
+
+    /// OSC 9 and OSC 777 carry the program's raw bytes, which libghostty
+    /// passes on unvalidated. They used to be exposed as `&str`.
+    #[test]
+    fn desktop_notifications_are_not_assumed_to_be_utf8() {
+        let seen = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .on_desktop_notification(|_, notification| {
+                seen.borrow_mut()
+                    .push((notification.title().to_vec(), notification.body().to_vec()));
+            })
+            .unwrap();
+        terminal.vt_write(b"\x1b]9;\xff\xfe\x07");
+        terminal.vt_write(b"\x1b]777;notify;\xc3\x28;ok\x07");
+        assert_eq!(
+            *seen.borrow(),
+            [
+                (b"".to_vec(), b"\xff\xfe".to_vec()),
+                (b"\xc3\x28".to_vec(), b"ok".to_vec()),
+            ]
+        );
     }
 
     fn tiny_terminal() -> Terminal<'static, 'static> {
