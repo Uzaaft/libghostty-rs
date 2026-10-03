@@ -53,6 +53,7 @@ impl<'t> Selection<'t> {
     /// When `rectangle` is false, the endpoints describe a linear selection. When
     /// `rectangle` is true, the same endpoints are interpreted as opposite corners
     /// of a rectangular/block selection.
+    #[must_use]
     pub fn new(start: GridRef<'t>, end: GridRef<'t>, rectangle: bool) -> Self {
         // SAFETY: provided by the type system
         unsafe {
@@ -79,6 +80,7 @@ impl<'t> Selection<'t> {
     ///
     /// This may be before start in terminal order. It is an untracked
     /// [`GridRef`] snapshot and follows untracked grid-ref lifetime rules.
+    #[must_use]
     pub fn start(&self) -> GridRef<'t> {
         unsafe { GridRef::from_raw(self.inner.start) }
     }
@@ -86,11 +88,13 @@ impl<'t> Selection<'t> {
     ///
     /// This may be before start in terminal order. It is an untracked
     /// [`GridRef`] snapshot and follows untracked grid-ref lifetime rules.
+    #[must_use]
     pub fn end(&self) -> GridRef<'t> {
         unsafe { GridRef::from_raw(self.inner.end) }
     }
     /// Whether the endpoints are interpreted as a rectangular/block
     /// selection rather than a linear selection.
+    #[must_use]
     pub fn is_rectangle(&self) -> bool {
         self.inner.rectangle
     }
@@ -125,7 +129,7 @@ impl<'t> Selection<'t> {
         let result = unsafe {
             ffi::ghostty_terminal_selection_contains(
                 terminal.inner.as_raw(),
-                &self.inner,
+                &raw const self.inner,
                 point.into(),
                 &raw mut contains,
             )
@@ -146,8 +150,8 @@ impl<'t> Selection<'t> {
         let result = unsafe {
             ffi::ghostty_terminal_selection_equal(
                 terminal.inner.as_raw(),
-                &self.inner,
-                &other.inner,
+                &raw const self.inner,
+                &raw const other.inner,
                 &raw mut equal,
             )
         };
@@ -164,7 +168,7 @@ impl<'t> Selection<'t> {
         let result = unsafe {
             ffi::ghostty_terminal_selection_order(
                 terminal.inner.as_raw(),
-                &self.inner,
+                &raw const self.inner,
                 &raw mut order,
             )
         };
@@ -186,7 +190,7 @@ impl<'t> Selection<'t> {
         let result = unsafe {
             ffi::ghostty_terminal_selection_ordered(
                 terminal.inner.as_raw(),
-                &self.inner,
+                &raw const self.inner,
                 desired.into(),
                 &raw mut selection,
             )
@@ -248,7 +252,11 @@ impl Terminal<'_, '_> {
         let mut value = ffi::sized!(ffi::Selection);
 
         let result = unsafe {
-            ffi::ghostty_terminal_select_line(self.inner.as_raw(), &options.inner, &raw mut value)
+            ffi::ghostty_terminal_select_line(
+                self.inner.as_raw(),
+                &raw const options.inner,
+                &raw mut value,
+            )
         };
 
         let sel = from_optional_result(result, value)?;
@@ -280,7 +288,11 @@ impl Terminal<'_, '_> {
         let mut value = ffi::sized!(ffi::Selection);
 
         let result = unsafe {
-            ffi::ghostty_terminal_select_word(self.inner.as_raw(), &options.inner, &raw mut value)
+            ffi::ghostty_terminal_select_word(
+                self.inner.as_raw(),
+                &raw const options.inner,
+                &raw mut value,
+            )
         };
 
         let sel = from_optional_result(result, value)?;
@@ -354,7 +366,7 @@ impl Terminal<'_, '_> {
         let result = unsafe {
             ffi::ghostty_terminal_select_word_between(
                 self.inner.as_raw(),
-                &options.inner,
+                &raw const options.inner,
                 &raw mut value,
             )
         };
@@ -385,7 +397,7 @@ impl Terminal<'_, '_> {
     ) -> Result<Option<Bytes<'a>>> {
         let mut out = std::ptr::null_mut();
         let mut out_len = 0usize;
-        let alloc = alloc.map_or(std::ptr::null(), |v| v.to_raw());
+        let alloc = alloc.map_or(std::ptr::null(), super::alloc::Allocator::to_raw);
 
         let result = unsafe {
             ffi::ghostty_terminal_selection_format_alloc(
@@ -449,6 +461,7 @@ pub struct SelectLineOptions<'t, 'ws> {
 impl<'t, 'ws> SelectLineOptions<'t, 'ws> {
     /// Create a new set of options for [deriving a line selection](Terminal::select_line),
     /// from the given grid reference.
+    #[must_use]
     pub fn new(grid_ref: GridRef<'t>) -> Self {
         Self {
             inner: ffi::TerminalSelectLineOptions {
@@ -463,6 +476,7 @@ impl<'t, 'ws> SelectLineOptions<'t, 'ws> {
     }
 
     /// Specify the codepoints to trim from the start and end of the line.
+    #[must_use]
     pub fn with_whitespace(mut self, value: &'ws [char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
@@ -473,6 +487,7 @@ impl<'t, 'ws> SelectLineOptions<'t, 'ws> {
 
     /// Specify whether semantic prompt state changes should bound the line
     /// selection.
+    #[must_use]
     pub fn with_semantic_prompt_boundary(mut self, value: bool) -> Self {
         self.inner.semantic_prompt_boundary = value;
         self
@@ -492,6 +507,7 @@ pub struct SelectWordOptions<'t, 'bc> {
 impl<'t, 'bc> SelectWordOptions<'t, 'bc> {
     /// Create a new set of options for [deriving a word selection](Terminal::select_word),
     /// from the given grid reference.
+    #[must_use]
     pub fn new(grid_ref: GridRef<'t>) -> Self {
         Self {
             inner: ffi::TerminalSelectWordOptions {
@@ -503,6 +519,7 @@ impl<'t, 'bc> SelectWordOptions<'t, 'bc> {
     }
 
     /// Specify the word-boundary codepoints.
+    #[must_use]
     pub fn with_boundary_codepoints(mut self, value: &'bc [char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
@@ -526,6 +543,7 @@ impl<'t, 'bc> SelectWordBetweenOptions<'t, 'bc> {
     /// Create a new set of options for
     /// [deriving the nearest word selection](Terminal::select_word_between),
     /// from the two given grid references.
+    #[must_use]
     pub fn new(start: GridRef<'t>, end: GridRef<'t>) -> Self {
         Self {
             inner: ffi::TerminalSelectWordBetweenOptions {
@@ -538,6 +556,7 @@ impl<'t, 'bc> SelectWordBetweenOptions<'t, 'bc> {
     }
 
     /// Specify the word-boundary codepoints.
+    #[must_use]
     pub fn with_boundary_codepoints(mut self, value: &'bc [char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
@@ -555,7 +574,7 @@ impl<'t, 'bc> SelectWordBetweenOptions<'t, 'bc> {
 ///
 /// The selection is formatted from the terminal's active screen using the same
 /// formatting semantics as [`Formatter`](crate::fmt::Formatter).
-/// For copy/clipboard behavior matching Ghostty's Screen.selectionString(),
+/// For copy/clipboard behavior matching Ghostty's `Screen.selectionString()`,
 /// use plain output with unwrap and trim both set to true.
 #[derive(Debug)]
 pub struct FormatOptions<'t, 's> {
@@ -565,6 +584,7 @@ pub struct FormatOptions<'t, 's> {
 impl<'t, 's> FormatOptions<'t, 's> {
     /// Create a new set of options for one-shot formatting of a
     /// terminal selection.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: ffi::TerminalSelectionFormatOptions {
@@ -574,16 +594,19 @@ impl<'t, 's> FormatOptions<'t, 's> {
         }
     }
     /// Specify the output format to emit.
+    #[must_use]
     pub fn with_emit_format(mut self, value: Format) -> Self {
         self.inner.emit = value.into();
         self
     }
     /// Specify whether to unwrap soft-wrapped lines.
+    #[must_use]
     pub fn with_unwrap(mut self, value: bool) -> Self {
         self.inner.unwrap = value;
         self
     }
     /// Specify whether to trim trailing whitespace on non-blank lines.
+    #[must_use]
     pub fn with_trim(mut self, value: bool) -> Self {
         self.inner.trim = value;
         self
@@ -592,8 +615,9 @@ impl<'t, 's> FormatOptions<'t, 's> {
     ///
     /// The selection must be a [valid snapshot selection](Selection#preconditions)
     /// for this terminal.
+    #[must_use]
     pub fn with_selection(mut self, value: &'s Selection<'t>) -> Self {
-        self.inner.selection = &value.inner;
+        self.inner.selection = &raw const value.inner;
         self
     }
 }

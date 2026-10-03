@@ -142,7 +142,7 @@ impl Terminal<'_, '_> {
     ) -> Result<Option<Bytes<'a>>> {
         let mut out = std::ptr::null_mut();
         let mut out_len = 0usize;
-        let alloc = alloc.map_or(std::ptr::null(), |v| v.to_raw());
+        let alloc = alloc.map_or(std::ptr::null(), super::alloc::Allocator::to_raw);
 
         let result = unsafe {
             ffi::ghostty_snapshot_encode_alloc(
@@ -289,7 +289,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// input does not poison it.    
     pub fn decode<'cb>(self) -> Result<Terminal<'alloc, 'cb>> {
         let mut raw: ffi::Terminal = std::ptr::null_mut();
-        let result = unsafe { ffi::ghostty_snapshot_decoder_decode(self.inner.as_raw(), &mut raw) };
+        let result =
+            unsafe { ffi::ghostty_snapshot_decoder_decode(self.inner.as_raw(), &raw mut raw) };
         from_result(result)?;
         unsafe { Terminal::from_raw(raw) }
     }
@@ -312,7 +313,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// input does not poison it.    
     pub fn ready<'cb>(self) -> Result<IncrementalDecoder<'alloc, 'r, 'cb>> {
         let mut raw: ffi::Terminal = std::ptr::null_mut();
-        let result = unsafe { ffi::ghostty_snapshot_decoder_ready(self.inner.as_raw(), &mut raw) };
+        let result =
+            unsafe { ffi::ghostty_snapshot_decoder_ready(self.inner.as_raw(), &raw mut raw) };
         from_result(result)?;
         Ok(IncrementalDecoder {
             decoder: self,
@@ -447,6 +449,7 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
     }
 
     /// Return a shared reference to the terminal being decoded.
+    #[must_use]
     pub fn terminal(&self) -> &Terminal<'alloc, 'cb> {
         &self.terminal
     }
@@ -455,6 +458,7 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
         &mut self.terminal
     }
     /// Stop decoding and obtain the final, fully decoded terminal.
+    #[must_use]
     pub fn into_terminal(self) -> Terminal<'alloc, 'cb> {
         self.terminal
     }
@@ -488,6 +492,7 @@ impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
     }
 
     /// Get a reference to the underlying decoder.
+    #[must_use]
     pub fn as_decoder(self) -> &'d Decoder<'alloc, 'r> {
         self.decoder
     }
