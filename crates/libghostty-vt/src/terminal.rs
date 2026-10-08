@@ -226,9 +226,10 @@ pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
 #[derive(Debug)]
 pub struct Terminal<'alloc: 'cb, 'cb> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
-    // Keep callbacks in a heap allocation so C can store a userdata pointer
-    // to the VTable itself. That pointer remains stable even if Terminal moves.
-    vtable: Box<VTable<'alloc, 'cb>>,
+    // Own the allocation through a raw pointer so moving Terminal does not
+    // retag a Box and invalidate the userdata pointer retained by C. Drop
+    // reconstructs the Box only after freeing the native terminal.
+    vtable: *mut VTable<'alloc, 'cb>,
 }
 
 /// Default visual style used when the cursor style is reset.
@@ -284,7 +285,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub(crate) unsafe fn from_raw(raw: ffi::Terminal) -> Result<Self> {
         Ok(Self {
             inner: Object::new(raw)?,
-            vtable: Box::new(VTable::default()),
+            vtable: Box::into_raw(Box::new(VTable::default())),
         })
     }
 
@@ -1069,6 +1070,10 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 impl Drop for Terminal<'_, '_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_terminal_free(self.inner.as_raw()) }
+        // SAFETY: This terminal owns the allocation from Box::into_raw.
+        // The native handle can no longer use its userdata. Borrowed callback
+        // views are ManuallyDrop and never reach this destructor.
+        unsafe { drop(Box::from_raw(self.vtable)) }
     }
 }
 
@@ -2161,8 +2166,8 @@ macro_rules! handlers {
                     ud: *mut std::ffi::c_void,
                     $($rfname: $rfty),*
                 ) $(-> $rawrty)? {
-                    // SAFETY: USERDATA is set to the boxed VTable pointee
-                    // (derived from a mutable reference for write provenance)
+                    // SAFETY: USERDATA is the owning raw VTable pointer
+                    // returned by Box::into_raw, unchanged by Terminal moves,
                     // before the callback is registered. ghostty invokes
                     // callbacks synchronously from vt_write, reset and
                     // resize. All three take `&mut self`, so the VTable
@@ -2183,34 +2188,27 @@ macro_rules! handlers {
                     let obj = $crate::alloc::Object::new(t).expect("received null terminal ptr in callback - this is a bug!");
                     // Build a temporary borrowed Terminal view for the callback
                     // without taking ownership of the underlying ghostty terminal.
-                    let mut term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
+                    let term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
                         inner: obj,
-                        vtable: ::core::default::Default::default(),
+                        vtable: ud.cast(),
                     });
                     let $t: &$crate::terminal::Terminal = &term;
                     let $func = vtable.$name.as_deref_mut()
                         .expect("no handler set but callback is still called - this is a bug!");
-                    let ret = $block;
-
-                    // SAFETY: The temporary vtable was allocated solely to satisfy
-                    // the Terminal layout expected by the callback signature. Drop
-                    // it explicitly while intentionally leaving the borrowed
-                    // terminal handle itself untouched.
-                    unsafe { ::core::ptr::drop_in_place(&mut term.vtable) };
-
-                    ret
+                    $block
                 }
 
-                self.vtable.$name = Some(::std::boxed::Box::new(f));
+                // SAFETY: Registration has exclusive access to the terminal;
+                // no callback is active and the VTable allocation is live.
+                unsafe { (*self.vtable).$name = Some(::std::boxed::Box::new(f)); }
 
                 // USERDATA is a raw pointer option: pass the heap allocation
                 // itself, not the address of the Box smart pointer field stored
                 // inline in Terminal.
                 //
-                // Derive the pointer from a mutable reference so it carries
-                // write provenance – the callback later reborrows it as &mut.
-                let userdata = std::ptr::from_mut::<VTable<'alloc, 'cb>>(self.vtable.as_mut())
-                    as *const ::std::ffi::c_void;
+                // Reuse the owning pointer, not a pointer derived from a
+                // temporary mutable reference into the VTable.
+                let userdata = self.vtable.cast::<::std::ffi::c_void>().cast_const();
                 self.set_ptr($crate::ffi::TerminalOption::USERDATA, userdata)?;
 
                 // The callback must be coerced into a function *pointer*
@@ -3599,6 +3597,170 @@ mod tests {
 #[cfg(all(test, miri))]
 mod miri_soundness {
     use super::*;
+
+    // Miri cannot run Zig. These shims implement only native handle ownership
+    // and synchronous callback dispatch; the constructor, registration,
+    // trampolines and destructor under test are the actual Rust wrapper.
+    struct MockTerminal {
+        userdata: *mut std::ffi::c_void,
+        write: ffi::TerminalWritePtyFn,
+        read: ffi::TerminalClipboardReadFn,
+    }
+
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn ghostty_terminal_new(
+        _: *const ffi::Allocator,
+        out: *mut ffi::Terminal,
+        _: u16,
+        _: u16,
+    ) -> ffi::Result::Type {
+        let terminal = Box::new(MockTerminal {
+            userdata: std::ptr::null_mut(),
+            write: None,
+            read: None,
+        });
+        // SAFETY: The constructor supplies a writable out parameter.
+        unsafe { *out = Box::into_raw(terminal).cast() };
+        ffi::Result::SUCCESS
+    }
+
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn ghostty_terminal_free(terminal: ffi::Terminal) {
+        // SAFETY: The wrapper frees the handle from new exactly once.
+        unsafe { drop(Box::from_raw(terminal.cast::<MockTerminal>())) };
+    }
+
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn ghostty_terminal_set(
+        terminal: ffi::Terminal,
+        option: ffi::TerminalOption::Type,
+        value: *const std::ffi::c_void,
+    ) -> ffi::Result::Type {
+        // SAFETY: Registration supplies a live handle with exclusive access.
+        let terminal = unsafe { &mut *terminal.cast::<MockTerminal>() };
+        match option {
+            ffi::TerminalOption::USERDATA => terminal.userdata = value.cast_mut(),
+            ffi::TerminalOption::WRITE_PTY => {
+                // SAFETY: The wrapper supplies the matching callback ABI.
+                terminal.write = Some(unsafe { std::mem::transmute(value) });
+            }
+            ffi::TerminalOption::CLIPBOARD_READ => {
+                // SAFETY: The wrapper supplies the matching callback ABI.
+                terminal.read = Some(unsafe { std::mem::transmute(value) });
+            }
+            _ => return ffi::Result::INVALID_VALUE,
+        }
+        ffi::Result::SUCCESS
+    }
+
+    unsafe extern "C" fn reply_to_read(
+        read: *const ffi::ClipboardRead,
+        _: *const ffi::ClipboardReadReply,
+    ) {
+        // SAFETY: The synchronous request stores the live mock handle in ctx.
+        let terminal = unsafe { (*read).ctx.cast_mut().cast::<ffi::TerminalImpl>() };
+        // SAFETY: This models a clipboard reply's nested pty write dispatch.
+        unsafe { ghostty_terminal_vt_write(terminal, b"reply".as_ptr(), 5) };
+    }
+
+    #[unsafe(no_mangle)]
+    unsafe extern "C" fn ghostty_terminal_vt_write(
+        terminal: ffi::Terminal,
+        data: *const u8,
+        len: usize,
+    ) {
+        let (userdata, write, read) = {
+            // SAFETY: The wrapper supplies a live handle. End this borrow
+            // before dispatch, since a clipboard reply can dispatch again.
+            let mock = unsafe { &*terminal.cast::<MockTerminal>() };
+            (mock.userdata, mock.write, mock.read)
+        };
+        // SAFETY: vt_write supplies initialized bytes for this call.
+        if unsafe { std::slice::from_raw_parts(data, len) } == b"clipboard" {
+            let request = ffi::ClipboardRead {
+                ctx: terminal.cast(),
+                reply: Some(reply_to_read),
+                ..ffi::sized!(ffi::ClipboardRead)
+            };
+            // SAFETY: Registration provided this callback and its userdata;
+            // the sized request remains live throughout synchronous dispatch.
+            unsafe { read.unwrap()(terminal, userdata, &raw const request) };
+        } else {
+            // SAFETY: Registration provided this callback and its userdata.
+            unsafe { write.unwrap()(terminal, userdata, data, len) };
+        }
+    }
+
+    #[test]
+    fn moved_terminal_callbacks_and_destruction() {
+        use std::cell::Cell;
+        struct CountDrop<'a>(&'a Cell<usize>);
+        impl Drop for CountDrop<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.0.get() + 1);
+            }
+        }
+        fn dispatch<'alloc: 'cb, 'cb>(
+            mut terminal: Terminal<'alloc, 'cb>,
+        ) -> Terminal<'alloc, 'cb> {
+            terminal.vt_write(b"reply");
+            terminal
+        }
+
+        let drops = Cell::new(0);
+        let calls = Cell::new(0);
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        let first = CountDrop(&drops);
+        let observed = &calls;
+        terminal
+            .on_pty_write(move |_, bytes| {
+                let _guard = &first;
+                assert_eq!(bytes, b"reply");
+                observed.set(observed.get() + 1);
+            })
+            .unwrap();
+        let mut terminal = dispatch(terminal);
+        assert_eq!(calls.get(), 1);
+        assert_eq!(drops.get(), 0);
+
+        let second = CountDrop(&drops);
+        terminal
+            .on_pty_write(move |_, bytes| {
+                let _guard = &second;
+                assert_eq!(bytes, b"reply");
+                observed.set(observed.get() + 10);
+            })
+            .unwrap();
+        assert_eq!(drops.get(), 1);
+        drop(dispatch(terminal));
+        assert_eq!(calls.get(), 11);
+        assert_eq!(drops.get(), 2);
+        drop(Terminal::new(8, 2).unwrap());
+    }
+
+    #[test]
+    fn moved_terminal_nested_clipboard_reply() {
+        let order = std::cell::RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .on_pty_write(|_, bytes| {
+                assert_eq!(bytes, b"reply");
+                order.borrow_mut().push(2);
+            })
+            .unwrap();
+        terminal
+            .on_clipboard_read(|_, request| {
+                order.borrow_mut().push(1);
+                request.reply(Ok(&[]), &[], false);
+                order.borrow_mut().push(3);
+            })
+            .unwrap();
+        fn dispatch(mut terminal: Terminal<'_, '_>) {
+            terminal.vt_write(b"clipboard");
+        }
+        dispatch(terminal);
+        assert_eq!(*order.borrow(), [1, 2, 3]);
+    }
 
     /// The C trampoline declares `contents: ?[*]const ClipboardContent` and
     /// sends `contents = NULL, contents_len = 0` for a write carrying no
