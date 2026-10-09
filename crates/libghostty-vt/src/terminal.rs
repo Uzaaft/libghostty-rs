@@ -230,6 +230,11 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
     // retag a Box and invalidate the userdata pointer retained by C. Drop
     // reconstructs the Box only after freeing the native terminal.
     vtable: *mut VTable<'alloc, 'cb>,
+    // Unique for the life of the process, unlike the handle's address, which
+    // the allocator may hand to a later terminal. The incremental snapshot
+    // decoder uses it to tell whether it still holds the terminal it decodes
+    // into. Zero for the borrowed views passed to callbacks.
+    pub(crate) id: u64,
 }
 
 /// Default visual style used when the cursor style is reset.
@@ -283,9 +288,11 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
 
     pub(crate) unsafe fn from_raw(raw: ffi::Terminal) -> Result<Self> {
+        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Ok(Self {
             inner: Object::new(raw)?,
             vtable: Box::into_raw(Box::new(VTable::default())),
+            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         })
     }
 
@@ -2298,6 +2305,7 @@ macro_rules! handlers {
                     let term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
                         inner: obj,
                         vtable: ud.cast(),
+                        id: 0,
                     });
                     let $t: &$crate::terminal::Terminal = &term;
                     let $func = vtable.$name.as_deref_mut()
