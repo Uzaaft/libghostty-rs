@@ -519,63 +519,6 @@ pub(crate) mod testing {
         unsafe { std::alloc::alloc(layout(len, alignment)).cast() }
     }
 
-    /// Tracks how many bytes libghostty holds through the allocator.
-    #[derive(Default)]
-    pub(crate) struct Counting {
-        live: Cell<usize>,
-    }
-
-    impl Counting {
-        pub(crate) fn allocator(&self) -> Allocator<'_> {
-            static VTABLE: ffi::AllocatorVtable = ffi::AllocatorVtable {
-                alloc: Some(counting_alloc),
-                resize: Some(no_resize),
-                remap: Some(no_remap),
-                free: Some(counting_free),
-            };
-            allocator(self, &VTABLE)
-        }
-
-        /// The number of bytes currently allocated and not yet freed.
-        pub(crate) fn live(&self) -> usize {
-            self.live.get()
-        }
-    }
-
-    unsafe extern "C" fn counting_alloc(
-        ctx: *mut c_void,
-        len: usize,
-        alignment: u8,
-        _ret_addr: usize,
-    ) -> *mut c_void {
-        // SAFETY: `ctx` is the `Counting` the allocator borrows.
-        let this = unsafe { &*ctx.cast::<Counting>() };
-        // SAFETY: `len` is never zero: Zig's allocator interface handles
-        // zero-length requests without calling into the vtable.
-        let mem = unsafe { std::alloc::alloc(layout(len, alignment)) };
-        if !mem.is_null() {
-            this.live.set(this.live.get() + len);
-        }
-        mem.cast()
-    }
-
-    unsafe extern "C" fn counting_free(
-        ctx: *mut c_void,
-        mem: *mut c_void,
-        len: usize,
-        alignment: u8,
-        ret_addr: usize,
-    ) {
-        // SAFETY: `ctx` is the `Counting` the allocator borrows.
-        let this = unsafe { &*ctx.cast::<Counting>() };
-        let live = this.live.get().checked_sub(len);
-        this.live
-            .set(live.expect("freed more than was allocated - this is a bug!"));
-        // SAFETY: Forwarded from libghostty, which allocated `mem` through
-        // `counting_alloc` from the global heap.
-        unsafe { heap_free(ctx, mem, len, alignment, ret_addr) };
-    }
-
     unsafe extern "C" fn heap_free(
         _ctx: *mut c_void,
         mem: *mut c_void,

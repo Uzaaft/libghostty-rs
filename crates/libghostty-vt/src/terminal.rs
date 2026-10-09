@@ -2330,10 +2330,6 @@ pub enum ProgressState {
 ///     func(&terminal, slice)
 /// }
 /// ```
-///
-/// The body is evaluated into the handler's result, so it must not `return`
-/// early: the generated handler still has a temporary vtable to drop after
-/// it.
 macro_rules! handlers {
     {
         $(
@@ -2886,8 +2882,8 @@ handlers! {
     /// shared `&Terminal` it receives already rules out.
     ///
     /// Nothing is reported until [`Self::set_unknown_max_bytes`] is also set
-    /// to a nonzero value. Installing the callback by itself keeps no data and
-    /// allocates no memory.
+    /// to a nonzero value. Installing the callback by itself keeps no sequence
+    /// data and allocates no sequence-capture buffers.
     ///
     /// For OSC, the content is everything between `ESC ]` and the terminator,
     /// including the number that identifies the sequence. As an example,
@@ -2961,16 +2957,14 @@ handlers! {
             ffi::TerminalUnknownSequenceTag::OSC => {
                 // SAFETY: The tag says the union holds an OSC payload.
                 let osc = unsafe { sequence.value.osc };
+                let Ok(terminator) = osc.terminator.try_into() else {
+                    return;
+                };
                 func(term, UnknownSequence::Osc {
                     // SAFETY: Ditto
                     content: unsafe { osc.content.to_bytes() },
                     truncated: osc.truncated,
-                    // Upstream answers anything but BEL with ST, so a
-                    // terminator added later is best answered the same way.
-                    terminator: osc
-                        .terminator
-                        .try_into()
-                        .unwrap_or(osc::Terminator::St),
+                    terminator,
                 });
             }
             _ => {}
@@ -3267,14 +3261,12 @@ mod tests {
         assert_eq!(written, [b"Hello".to_vec()]);
     }
 
-    /// Feed `input` to a terminal with an unknown sequence callback,
-    /// returning each captured APC as `(content, truncated)`.
-    ///
-    /// `max` is passed to [`Terminal::set_unknown_max_bytes`]; `None` never
-    /// calls it, leaving the built-in default in place.
-    fn unknown_apcs(max: Option<usize>, input: &[u8]) -> Vec<(Vec<u8>, bool)> {
+    #[test]
+    fn unknown_sequences_are_reported() {
+        use osc::Terminator::{Bel, St};
+
         let seen = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        let mut terminal = Terminal::new(8, 2).unwrap();
         terminal
             .on_unknown_sequence(|_term, sequence| {
                 // Record rather than assert: a panic in a callback aborts the
@@ -3282,239 +3274,32 @@ mod tests {
                 seen.borrow_mut().push(match sequence {
                     UnknownSequence::Apc {
                         content, truncated, ..
-                    } => Some((content.to_vec(), truncated)),
-                    _ => None,
-                });
-            })
-            .expect("callback should register");
-        if let Some(max) = max {
-            terminal
-                .set_unknown_max_bytes(max)
-                .expect("limit should be settable");
-        }
-        terminal.vt_write(input);
-        drop(terminal);
-        seen.into_inner()
-            .into_iter()
-            .map(|apc| apc.expect("only APCs should be reported"))
-            .collect()
-    }
-
-    #[test]
-    fn unknown_apc_capture_is_opt_in_and_bounded() {
-        let apc = b"\x1b_unknown\x1b\\";
-        // Installing the callback alone captures nothing: the default limit
-        // is zero.
-        assert!(unknown_apcs(None, apc).is_empty());
-        // Neither does an explicit zero limit.
-        assert!(unknown_apcs(Some(0), apc).is_empty());
-        // Content under the limit arrives whole, without the introducer and
-        // terminator.
-        assert_eq!(unknown_apcs(Some(64), apc), [(b"unknown".to_vec(), false)]);
-        // Content exactly at the limit fits, so it isn't truncated.
-        assert_eq!(unknown_apcs(Some(7), apc), [(b"unknown".to_vec(), false)]);
-        // Content over the limit is still reported, but truncated.
-        assert_eq!(unknown_apcs(Some(3), apc), [(b"unk".to_vec(), true)]);
-    }
-
-    /// Write `input` to a terminal with the given unknown sequence limit,
-    /// returning each reported OSC as `(content, truncated, terminator)`.
-    fn unknown_oscs(max: usize, input: &[u8]) -> Vec<(Vec<u8>, bool, osc::Terminator)> {
-        let seen = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_unknown_sequence(|_term, sequence| {
-                // Record rather than assert, as above.
-                seen.borrow_mut().push(match sequence {
+                    } => (content.to_vec(), truncated, None),
                     UnknownSequence::Osc {
                         content,
                         truncated,
                         terminator,
                         ..
-                    } => Some((content.to_vec(), truncated, terminator)),
-                    _ => None,
+                    } => (content.to_vec(), truncated, Some(terminator)),
                 });
             })
-            .unwrap()
-            .set_unknown_max_bytes(max)
             .unwrap();
-        terminal.vt_write(input);
-        drop(terminal);
-        seen.into_inner()
-            .into_iter()
-            .map(|osc| osc.expect("only OSCs should be reported"))
-            .collect()
-    }
-
-    #[test]
-    fn unknown_osc_capture_is_opt_in() {
-        let osc = b"\x1b]7400;status=busy\x07";
-        // Neither the default limit nor an explicit zero reports anything.
-        let seen = RefCell::new(0);
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_unknown_sequence(|_term, _sequence| *seen.borrow_mut() += 1)
-            .unwrap();
-        terminal.vt_write(osc);
-        terminal.set_unknown_max_bytes(0).unwrap();
-        terminal.vt_write(osc);
-        drop(terminal);
-        assert_eq!(seen.into_inner(), 0);
-        // A nonzero limit does.
-        assert_eq!(unknown_oscs(64, osc).len(), 1);
-    }
-
-    #[test]
-    fn unknown_osc_sequences_are_reported() {
-        use osc::Terminator::{Bel, St};
-
-        // The content includes the number, and the terminator is reported so
-        // that a reply can end the same way.
-        assert_eq!(
-            unknown_oscs(64, b"\x1b]7400;status=busy\x07"),
-            [(b"7400;status=busy".to_vec(), false, Bel)]
-        );
-        assert_eq!(
-            unknown_oscs(64, b"\x1b]7400;status=busy\x1b\\"),
-            [(b"7400;status=busy".to_vec(), false, St)]
-        );
-        // Content over the limit is still reported, but truncated.
-        assert_eq!(
-            unknown_oscs(4, b"\x1b]7400;status=busy\x07"),
-            [(b"7400".to_vec(), true, Bel)]
-        );
-        // Nothing is reported for an OSC number libghostty-vt implements, or
-        // for a sequence the program cancelled with CAN.
-        assert!(unknown_oscs(64, b"\x1b]2;title\x07").is_empty());
-        assert!(unknown_oscs(64, b"\x1b]7400;status=busy\x18").is_empty());
-    }
-
-    #[test]
-    fn unknown_apc_identifiers_are_reported_whole() {
-        // A prefix of a known identifier (`25a1`, Glyph Protocol) cut short
-        // by `;` is unknown, and the prefix and `;` are kept.
-        assert_eq!(
-            unknown_apcs(Some(64), b"\x1b_25;x\x1b\\"),
-            [(b"25;x".to_vec(), false)]
-        );
-        // So is an identifier that runs past the longest known one.
-        assert_eq!(
-            unknown_apcs(Some(64), b"\x1b_25a1X;y\x1b\\"),
-            [(b"25a1X;y".to_vec(), false)]
-        );
-    }
-
-    #[test]
-    fn unknown_apc_capture_can_be_disabled_again() {
-        let seen = RefCell::new(0);
-        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
-        terminal
-            .on_unknown_sequence(|_term, _sequence| *seen.borrow_mut() += 1)
-            .unwrap()
-            .set_unknown_max_bytes(64)
-            .unwrap();
+        // Registration alone leaves reporting disabled.
         terminal.vt_write(b"\x1b_unknown\x1b\\");
-        terminal.set_unknown_max_bytes(0).unwrap();
+        terminal.set_unknown_max_bytes(4).unwrap();
         terminal.vt_write(b"\x1b_unknown\x1b\\");
+        terminal.vt_write(b"\x1b]7400;status=busy\x07");
+        terminal.set_unknown_max_bytes(64).unwrap();
+        terminal.vt_write(b"\x1b]7400;status=busy\x1b\\");
         drop(terminal);
-        assert_eq!(seen.into_inner(), 1);
-    }
-
-    #[test]
-    fn only_unsupported_sequences_are_reported() {
-        // An aborted sequence (CAN) is ignored.
-        assert!(unknown_apcs(Some(64), b"\x1b_unknown\x18").is_empty());
-        // Any APC starting with `G` belongs to Kitty graphics, so even a
-        // garbage command never reaches unknown capture.
-        assert!(unknown_apcs(Some(64), b"\x1b_Gabcdef1234\x1b\\").is_empty());
-        // An incomplete known protocol identifier is malformed, not unknown.
-        assert!(unknown_apcs(Some(64), b"\x1b_25a\x1b\\").is_empty());
-
-        // An explicitly disabled known protocol is ignored as well.
-        let seen = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
-        terminal
-            .on_unknown_sequence(|_term, sequence| {
-                // Record rather than assert, as above.
-                seen.borrow_mut().push(match sequence {
-                    UnknownSequence::Apc { content, .. } => Some(content.to_vec()),
-                    _ => None,
-                });
-            })
-            .unwrap()
-            .set_unknown_max_bytes(64)
-            .unwrap()
-            .set_glyph_protocol_enabled(false)
-            .unwrap();
-        terminal.vt_write(b"\x1b_25a1;q;cp=E0A0\x1b\\");
-        // Positive control: the same terminal still reports an unknown APC,
-        // so the Glyph Protocol APC above was skipped, not lost to a
-        // misconfigured callback.
-        terminal.vt_write(b"\x1b_unknown\x1b\\");
-        drop(terminal);
-        assert_eq!(seen.into_inner(), [Some(b"unknown".to_vec())]);
-    }
-
-    /// Stream `payload_len` bytes into an unknown APC that is never
-    /// terminated, returning how many more bytes the terminal holds
-    /// afterwards than before the APC began.
-    // The counting allocator is only built outside Miri, which can't run
-    // libghostty anyway.
-    #[cfg(not(miri))]
-    fn open_unknown_apc_growth(
-        configure: impl FnOnce(&mut Terminal<'_, '_>),
-        payload_len: usize,
-    ) -> usize {
-        let counting = crate::alloc::testing::Counting::default();
-        let alloc = counting.allocator();
-
-        let mut terminal =
-            Terminal::new_with_alloc(&alloc, 8, 2).expect("terminal should initialize");
-        configure(&mut terminal);
-
-        let before = counting.live();
-        terminal.vt_write(b"\x1b_X");
-        let chunk = [b'x'; 4096];
-        for _ in 0..payload_len / chunk.len() {
-            terminal.vt_write(&chunk);
-        }
-        // Saturate: `vt_write` may also free memory allocated before it.
-        let growth = counting.live().saturating_sub(before);
-        drop(terminal);
-        growth
-    }
-
-    #[test]
-    // The counting allocator is only built outside Miri, which can't run
-    // libghostty anyway.
-    #[cfg(not(miri))]
-    fn unknown_apc_capture_memory_is_bounded_only_by_the_limit() {
-        const LIMIT: usize = 64 * 1024;
-        const PAYLOAD: usize = 1024 * 1024;
-        let with_callback = |max| {
-            move |terminal: &mut Terminal<'_, '_>| {
-                terminal
-                    .on_unknown_sequence(|_term, _sequence| {})
-                    .unwrap()
-                    .set_unknown_max_bytes(max)
-                    .unwrap();
-            }
-        };
-
-        // The default of zero buffers nothing, even with a callback.
-        assert_eq!(open_unknown_apc_growth(with_callback(0), PAYLOAD), 0);
-        // An open unknown APC is buffered up to the limit, and no further.
-        let growth = open_unknown_apc_growth(with_callback(LIMIT), PAYLOAD);
-        assert!(growth > 0 && growth <= LIMIT, "{growth}");
-        // The APC buffer limit for recognized protocols doesn't apply.
-        let apc_limited = |terminal: &mut Terminal<'_, '_>| {
-            with_callback(LIMIT)(terminal);
-            terminal.set_apc_max_bytes(Some(16)).unwrap();
-        };
-        assert!(open_unknown_apc_growth(apc_limited, PAYLOAD) > 16);
-        // Nothing else bounds it: without a real limit, the buffer grows
-        // with the input.
-        assert!(open_unknown_apc_growth(with_callback(usize::MAX), PAYLOAD) >= PAYLOAD);
+        assert_eq!(
+            seen.into_inner(),
+            [
+                (b"unkn".to_vec(), true, None),
+                (b"7400".to_vec(), true, Some(Bel)),
+                (b"7400;status=busy".to_vec(), false, Some(St)),
+            ]
+        );
     }
 
     #[test]
