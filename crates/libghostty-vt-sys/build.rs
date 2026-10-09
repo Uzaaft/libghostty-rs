@@ -137,6 +137,14 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
 
     // Build libghostty-vt via zig.
     let install_prefix = out_dir.join("ghostty-install");
+    // Tell the gen-bindings tool, a binary of this crate, which headers
+    // this exact build installed. Cargo keeps one build output per feature
+    // set and profile, and ones from before a pin bump still hold the old
+    // headers, so scanning the target directory can find stale ones.
+    println!(
+        "cargo:rustc-env=LIBGHOSTTY_VT_SYS_INCLUDE_DIR={}",
+        install_prefix.join("include").display()
+    );
     let zig_cache_dir = out_dir.join("zig-cache");
     let zig_global_cache_dir = out_dir.join("zig-global-cache");
 

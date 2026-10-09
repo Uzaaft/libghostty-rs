@@ -188,6 +188,51 @@
             }
           );
 
+          # Regenerate the bindings from the pinned Ghostty headers and fail if
+          # they differ from the checked-in ones. GHOSTTY_INCLUDE_DIR is used
+          # instead of GHOSTTY_SOURCE_DIR so that the build script keeps linking
+          # the prebuilt library rather than building Ghostty from source.
+          #
+          # The headers come from the flake input, but users build against
+          # the commit pinned in build.rs. Nothing else ties the two together,
+          # so check that they agree first; otherwise bumping only one of them
+          # would leave this check green while comparing the wrong headers.
+          bindings-fresh = craneCheckLib.mkCargoDerivation (
+            commonArgs
+            // {
+              # The shared deps are built without the bindgen-tool feature and in
+              # the release profile, so they would be unpacked and then ignored.
+              # A dev build of just the generator is quicker than a release one.
+              cargoArtifacts = null;
+              pnameSuffix = "-bindings";
+              GHOSTTY_INCLUDE_DIR = "${ghostty}/include";
+              LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+              buildPhaseCargoCommand = ''
+                if ! grep -qF 'const GHOSTTY_COMMIT: &str = "${ghostty.rev}";' \
+                  crates/libghostty-vt-sys/build.rs; then
+                  echo "error: the Ghostty pin in flake.nix (${ghostty.rev}) does not" >&2
+                  echo "match GHOSTTY_COMMIT in crates/libghostty-vt-sys/build.rs." >&2
+                  echo "Bump both to the same commit." >&2
+                  exit 1
+                fi
+                # Not commonArgs.cargoExtraArgs: it also enables libghostty-vt
+                # features, which cargo rejects with only the -sys crate selected.
+                cargo run --locked --features libghostty-vt-sys/pkg-config -p libghostty-vt-sys \
+                  --features libghostty-vt-sys/bindgen-tool --bin gen-bindings
+                cargo fmt -p libghostty-vt-sys
+                if ! diff -u ${src}/crates/libghostty-vt-sys/src/bindings.rs \
+                  crates/libghostty-vt-sys/src/bindings.rs; then
+                  echo "error: crates/libghostty-vt-sys/src/bindings.rs is out of date." >&2
+                  echo "Regenerate it from the dev shell with:" >&2
+                  echo "  cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings && cargo fmt -p libghostty-vt-sys" >&2
+                  exit 1
+                fi
+              '';
+              doInstallCargoArtifacts = false;
+              installPhaseCommand = "touch $out";
+            }
+          );
+
           cargo-fmt = craneCheckLib.cargoFmt {
             pname = "libghostty-rs";
             version = "0.2.1";
