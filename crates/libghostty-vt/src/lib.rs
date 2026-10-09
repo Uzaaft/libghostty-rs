@@ -93,6 +93,32 @@
 
 pub use libghostty_vt_sys as ffi;
 
+/// Read `$field` of a sized struct that libghostty passed in, or `None` if
+/// the struct is too small to contain it.
+///
+/// The C API only lets callbacks read the fields that fit in the `size`
+/// libghostty reports, since sized structs grow by appending fields: reading
+/// one past `size` would read past the end of the struct libghostty passed.
+/// Reading the struct by value (`*ptr`) has the same problem, so read each
+/// field through this instead.
+///
+/// The expansion dereferences `$ptr`, so it must be used inside `unsafe`,
+/// with `$ptr` pointing to a live struct whose first `size` bytes are
+/// readable. `size` itself is the first field of every sized struct.
+macro_rules! sized_field {
+    ($ptr:expr, $ty:ty, $field:ident) => {{
+        // Never called: it only names the field's type, since taking even a
+        // raw pointer to a field past the end is out of bounds.
+        fn field_size<T, F>(_: for<'a> fn(&'a T) -> &'a F) -> usize {
+            ::std::mem::size_of::<F>()
+        }
+        let ptr: *const $ty = $ptr;
+        let end = ::std::mem::offset_of!($ty, $field) + field_size::<$ty, _>(|s| &s.$field);
+        ((*ptr).size >= end).then(|| (*ptr).$field)
+    }};
+}
+pub(crate) use sized_field;
+
 // Make sure that `Terminal`'s own impl blocks (i.e. core functions)
 // are placed *before* any extra impl blocks from other modules,
 // e.g. Kitty Graphics extensions, Selection APIs
