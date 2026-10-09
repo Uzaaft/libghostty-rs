@@ -40,11 +40,16 @@ pub fn to_reader<R: Read>(r: &mut R) -> ffi::Reader {
         // the userdata is the writer we need
         let r: &mut R = unsafe { &mut *userdata.cast::<R>() };
 
-        // SAFETY: We trust libghostty to give us valid data
-        let buf = unsafe { std::slice::from_raw_parts_mut(buffer, capacity) };
+        // SAFETY: libghostty supplies non-NULL writable storage for capacity
+        // bytes. It may be uninitialized, and safe Read implementations may
+        // inspect the entire slice, so initialize it before creating the slice.
+        let buf = unsafe {
+            buffer.write_bytes(0, capacity);
+            std::slice::from_raw_parts_mut(buffer, capacity)
+        };
 
         match r.read(buf) {
-            // SAFETY: Ditto
+            // SAFETY: libghostty supplies a writable out parameter.
             Ok(len) => unsafe {
                 *out_read = len;
                 true
@@ -56,5 +61,52 @@ pub fn to_reader<R: Read>(r: &mut R) -> ffi::Reader {
     ffi::Reader {
         userdata: std::ptr::from_mut(r).cast(),
         read: Some(trampoline::<R>),
+    }
+}
+
+#[cfg(all(test, miri))]
+mod miri_soundness {
+    use super::*;
+    use std::mem::MaybeUninit;
+
+    #[test]
+    fn reader_can_inspect_the_entire_destination() {
+        struct InspectingReader;
+        impl Read for InspectingReader {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                // A safe Read implementation may inspect bytes it does not
+                // overwrite, even when it returns fewer bytes than capacity.
+                assert!(buffer.iter().all(|&byte| byte == 0));
+                buffer[..2].copy_from_slice(&[0x31, 0x8b]);
+                Ok(2)
+            }
+        }
+
+        let mut reader = InspectingReader;
+        let callback = to_reader(&mut reader);
+        let mut storage = MaybeUninit::<[u8; 9]>::uninit();
+        for _ in 0..2 {
+            let mut read = usize::MAX;
+            // SAFETY: Model the native callback contract: live userdata,
+            // writable non-NULL storage, positive capacity and an out pointer.
+            assert!(unsafe {
+                callback.read.unwrap()(
+                    callback.userdata,
+                    storage.as_mut_ptr().cast(),
+                    9,
+                    &raw mut read,
+                )
+            });
+            assert_eq!(read, 2);
+            // SAFETY: The adapter initializes the entire destination before
+            // exposing it to Read, including bytes beyond the returned count.
+            assert_eq!(
+                unsafe { storage.assume_init_ref() },
+                &[0x31, 0x8b, 0, 0, 0, 0, 0, 0, 0]
+            );
+            // Reused native buffers may contain old bytes. Initialization must
+            // happen on every callback, not just on the first read.
+            storage.write([0xa5; 9]);
+        }
     }
 }
