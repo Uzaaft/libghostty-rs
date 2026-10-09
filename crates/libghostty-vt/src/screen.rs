@@ -177,6 +177,7 @@ impl TrackedGridRef {
     ///
     /// If the terminal that created the tracked reference has been dropped,
     /// this returns false.
+    #[must_use]
     pub fn has_value(&self) -> bool {
         unsafe { ffi::ghostty_tracked_grid_ref_has_value(self.inner.as_ptr()) }
     }

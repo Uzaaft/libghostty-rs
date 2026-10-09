@@ -1,0 +1,21 @@
+# The examples form their own workspace, separate from the library crates.
+# That keeps their heavier dependencies (macroquad, nix, ...) out of the root
+# workspace's lockfile, metadata and `--workspace` builds, while still letting
+# them share one lockfile. They are never published.
+[workspace]
+# Listed explicitly rather than as a `*` glob: the glob also matches
+# example/target/ once anything has been built, and Cargo then refuses to
+# load the workspace at all.
+members = ["ghostling_rs", "grid_ref_tracked_rs"]
+resolver = "2"
+
+# Keep these in sync with the root Cargo.toml, which can't be inherited
+# across workspaces.
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+publish = false
+
+[workspace.dependencies]
+libghostty-vt = { path = "../crates/libghostty-vt" }

@@ -1,5 +1,8 @@
 /target/
+# The examples are a separate workspace with their own target directory.
+/example/target/
 /result
+/result-*
 /.direnv/
 **/.zig-cache
 **/zig-out

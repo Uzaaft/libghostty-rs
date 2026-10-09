@@ -6,14 +6,16 @@
 - Enter dev shell: `nix develop`
 - Check: `cargo check`
 - Test: `cargo test -p libghostty-vt-sys`
-- Build example: `cargo build -p ghostling_rs`
-- Run example: `cargo run -p ghostling_rs`
+- Build examples: `cargo build --manifest-path example/Cargo.toml --workspace`
+- Run example: `cargo run --manifest-path example/Cargo.toml -p ghostling_rs`
+- After bumping the crate versions, also run `cargo update -w --manifest-path example/Cargo.toml`: CI builds the examples with `--locked`, so a stale `example/Cargo.lock` fails it
 
 ## Code Conventions
 
-- Rust workspace: `libghostty-vt-sys` (FFI bindings), `libghostty-vt` (safe wrappers), `ghostling_rs` (example)
-- Opaque pointer pattern: `NonNull<ffi::GhosttyFoo>` + `PhantomData<*mut ()>` + `Drop`
-- Sized structs: set `size` field to `std::mem::size_of::<Type>()` before FFI calls
+- Root Rust workspace: `libghostty-vt-sys` (FFI bindings), `libghostty-vt` (safe wrappers)
+- Examples workspace (`example/`, own lockfile and `example/target/`): `ghostling_rs`, `grid_ref_tracked_rs`
+- Opaque handles: own them as `alloc::Object<'alloc, ffi::FooImpl>` (borrowed ones as `alloc::Ref`) and free them in `Drop`
+- Sized structs: build them with `ffi::sized!(Type)`, which sets `size` to `size_of::<Type>()` before FFI calls
 - `from_result()` maps `GhosttyResult` to `Result<(), Error>`
 - Ghostty source is fetched at build time by `build.rs` (pinned commit). Override with `GHOSTTY_SOURCE_DIR` env var to use a local checkout.
 - Comment heavily — explain *why*, not just *what*

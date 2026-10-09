@@ -79,6 +79,11 @@
 #![warn(missing_copy_implementations)]
 #![warn(clippy::allow_attributes)]
 #![warn(clippy::allow_attributes_without_reason)]
+#![expect(
+    clippy::needless_pass_by_value,
+    reason = "handles such as grid refs and option structs are small, and taken
+    by value the same way the C API takes them"
+)]
 #![allow(
     clippy::missing_errors_doc,
     reason = "underlying C API may return any error outside of expected and

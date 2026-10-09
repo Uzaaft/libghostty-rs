@@ -26,8 +26,15 @@ pub struct FormatterOptions<'t, 's> {
     inner: ffi::FormatterTerminalOptions,
     _phan: PhantomData<&'s Selection<'t>>,
 }
+impl Default for FormatterOptions<'_, '_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<'t, 's> FormatterOptions<'t, 's> {
     /// Create a new set of options for [creating a terminal formatter](Formatter::new).
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: ffi::FormatterTerminalOptions {
@@ -43,16 +50,19 @@ impl<'t, 's> FormatterOptions<'t, 's> {
         }
     }
     /// Specify the output format to emit.
+    #[must_use]
     pub fn with_format(mut self, value: Format) -> Self {
         self.inner.emit = value.into();
         self
     }
     /// Specify whether to unwrap soft-wrapped lines.
+    #[must_use]
     pub fn with_unwrap(mut self, value: bool) -> Self {
         self.inner.unwrap = value;
         self
     }
     /// Specify whether to trim trailing whitespace on non-blank lines.
+    #[must_use]
     pub fn with_trim(mut self, value: bool) -> Self {
         self.inner.trim = value;
         self
@@ -61,39 +71,46 @@ impl<'t, 's> FormatterOptions<'t, 's> {
     ///
     /// If a selection is not given, the formatter defaults to formatting
     /// the entire screen.
+    #[must_use]
     pub fn with_selection(mut self, value: &'s Selection<'t>) -> Self {
-        self.inner.selection = &value.inner;
+        self.inner.selection = &raw const value.inner;
         self
     }
 
     // --- Extra settings --- //
 
     /// Specify whether to emit the palette using OSC 4 sequences.
+    #[must_use]
     pub fn with_palette(mut self, value: bool) -> Self {
         self.inner.extra.palette = value;
         self
     }
     /// Specify terminal modes that differ from their defaults using CSI h/l.
+    #[must_use]
     pub fn with_modes(mut self, value: bool) -> Self {
         self.inner.extra.modes = value;
         self
     }
     /// Specify whether to emit scrolling region state using DECSTBM and DECSLRM sequences.
+    #[must_use]
     pub fn with_scrolling_region(mut self, value: bool) -> Self {
         self.inner.extra.scrolling_region = value;
         self
     }
     /// Specify tabstop positions by clearing all tabs and setting each one.
+    #[must_use]
     pub fn with_tabstops(mut self, value: bool) -> Self {
         self.inner.extra.tabstops = value;
         self
     }
     /// Specify the present working directory using OSC 7.
+    #[must_use]
     pub fn with_pwd(mut self, value: bool) -> Self {
         self.inner.extra.pwd = value;
         self
     }
-    /// Specify keyboard modes such as ModifyOtherKeys.
+    /// Specify keyboard modes such as `ModifyOtherKeys`.
+    #[must_use]
     pub fn with_keyboard(mut self, value: bool) -> Self {
         self.inner.extra.keyboard = value;
         self
@@ -102,31 +119,37 @@ impl<'t, 's> FormatterOptions<'t, 's> {
     // --- Screen settings --- //
 
     /// Specify whether to emit cursor position using CUP (CSI H).
+    #[must_use]
     pub fn with_cursor(mut self, value: bool) -> Self {
         self.inner.extra.screen.cursor = value;
         self
     }
-    /// Emit current SGR style state based on the cursor's active style_id.
+    /// Emit current SGR style state based on the cursor's active `style_id`.
+    #[must_use]
     pub fn with_style(mut self, value: bool) -> Self {
         self.inner.extra.screen.style = value;
         self
     }
     /// Emit current hyperlink state using OSC 8 sequences.
+    #[must_use]
     pub fn with_hyperlink(mut self, value: bool) -> Self {
         self.inner.extra.screen.hyperlink = value;
         self
     }
     /// Emit character protection mode using DECSCA.
+    #[must_use]
     pub fn with_protection(mut self, value: bool) -> Self {
         self.inner.extra.screen.protection = value;
         self
     }
     /// Emit Kitty keyboard protocol state using CSI > u and CSI = sequences.
+    #[must_use]
     pub fn with_kitty_keyboard(mut self, value: bool) -> Self {
         self.inner.extra.screen.kitty_keyboard = value;
         self
     }
     /// Emit character set designations and invocations.
+    #[must_use]
     pub fn with_charsets(mut self, value: bool) -> Self {
         self.inner.extra.screen.charsets = value;
         self
