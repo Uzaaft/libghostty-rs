@@ -77,7 +77,12 @@ async fn main() -> Result<()> {
         .init();
 
     // Make libghostty-vt emit through the same tracing subscriber.
-    libghostty_vt::set_logger(Some(Box::new(libghostty_vt::log::TracingLogger)))?;
+    // SAFETY: Only the main thread ever calls into libghostty.
+    #[expect(
+        unsafe_code,
+        reason = "libghostty's global settings are unsynchronized"
+    )]
+    unsafe { libghostty_vt::set_logger(Some(Box::new(libghostty_vt::log::TracingLogger))) }?;
 
     let font = load_ttf_font_from_bytes(include_bytes!("../fonts/JetBrainsMono-Medium.ttf"))?;
 
@@ -100,7 +105,12 @@ async fn main() -> Result<()> {
     // Install the PNG decoder so the terminal can handle PNG images in the
     // Kitty Graphics Protocol. This is a process-global setting and must be
     // done before any terminal is created.
-    graphics::set_png_decoder(Some(Box::new(PngDecoder)))?;
+    // SAFETY: Only the main thread ever calls into libghostty.
+    #[expect(
+        unsafe_code,
+        reason = "libghostty's global settings are unsynchronized"
+    )]
+    unsafe { graphics::set_png_decoder(Some(Box::new(PngDecoder))) }?;
 
     // Create a ghostty virtual terminal with the computed grid and 1000
     // lines of scrollback.  This holds all the parsed screen state (cells,
@@ -1140,11 +1150,11 @@ impl SelectionState<'_> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         let grid_ref = terminal.grid_ref(point)?;
         let geometry = Geometry {
-                columns: terminal.cols()?.into(),
-                cell_width: dims.cell_width as u32,
-                padding_left: PADDING as u32,
-                screen_height: dims.window_height as u32,
-            };
+            columns: terminal.cols()?.into(),
+            cell_width: dims.cell_width as u32,
+            padding_left: PADDING as u32,
+            screen_height: dims.window_height as u32,
+        };
 
         let selection = self
             .drag_event

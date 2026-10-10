@@ -106,7 +106,8 @@
 //! }
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     graphics::set_png_decoder(Some(Box::new(StubPngDecoder)))?;
+//!     // SAFETY: No other thread uses libghostty yet.
+//!     unsafe { graphics::set_png_decoder(Some(Box::new(StubPngDecoder))) }?;
 //!
 //!     let mut terminal = Terminal::new(80, 24)?;
 //!
@@ -184,10 +185,10 @@
 #![cfg(feature = "kitty-graphics")]
 
 use std::{
-    cell::RefCell,
     ffi::OsStr,
     mem::{ManuallyDrop, MaybeUninit},
     path::Path,
+    sync::{Mutex, PoisonError},
 };
 
 use crate::{
@@ -888,11 +889,10 @@ pub enum Compression {
     ZlibDeflate = ffi::KittyImageCompression::ZLIB_DEFLATE,
 }
 
-// Unlike other sys functions (e.g. `log::set_logger`), the decoder
-// callback will only ever be called on
-thread_local! {
-    static DECODE_PNG: RefCell<Option<Box<dyn DecodePng>>> = RefCell::new(None);
-}
+// libghostty's decoder hook is process-global, so the decoder has to be too:
+// a terminal on any thread may call it. Decoding takes `&mut self`, hence the
+// mutex rather than the logger's read-write lock.
+static DECODE_PNG: Mutex<Option<Box<dyn DecodePng>>> = Mutex::new(None);
 
 /// Set the PNG decoder.
 ///
@@ -900,10 +900,14 @@ thread_local! {
 /// When cleared (`None` value), PNG decoding is unsupported and PNG image data
 /// will be rejected.
 ///
-/// # Thread safety
+/// This is a process-global setting, shared by terminals on every thread. It
+/// is simplest to set it once at startup, before creating any terminal.
 ///
-/// This function must only be called on the same thread as the terminal
-pub fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
+/// # Safety
+///
+/// libghostty does not synchronize this setting, so this must not be called
+/// while any other thread may be inside a libghostty call.
+pub unsafe fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
     unsafe extern "C" fn callback(
         _userdata: *mut std::ffi::c_void,
         allocator: *const ffi::Allocator,
@@ -911,8 +915,11 @@ pub fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
         data_len: usize,
         out: *mut ffi::SysImage,
     ) -> bool {
-        DECODE_PNG.with_borrow_mut(|decoder| {
-            let Some(decoder) = decoder else {
+        {
+            // A panic while decoding aborts the process (we are inside an
+            // `extern "C"` callback), so the lock can't really be poisoned.
+            let mut decoder = DECODE_PNG.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(decoder) = decoder.as_deref_mut() else {
                 return false;
             };
             // SAFETY: We trust libghostty to return valid values.
@@ -943,7 +950,7 @@ pub fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
                 }
                 None => false,
             }
-        })
+        }
     }
 
     // Write out the matches here to coerce function items into function
@@ -953,7 +960,7 @@ pub fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
         None => None,
         Some(_) => Some(callback),
     };
-    DECODE_PNG.replace(f);
+    *DECODE_PNG.lock().unwrap_or_else(PoisonError::into_inner) = f;
 
     crate::sys_set(
         ffi::SysOption::DECODE_PNG,
@@ -965,7 +972,7 @@ pub fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
 /// to decode PNG images into 8-bit RGBA pixels.
 ///
 /// See [`set_png_decoder`] for more details.
-pub trait DecodePng: 'static {
+pub trait DecodePng: Send + 'static {
     /// Decode a PNG into 8-bit RGBA pixels.
     ///
     /// The returned image's byte buffer must be allocated with
@@ -985,7 +992,8 @@ pub trait DecodePng: 'static {
 /// use libghostty_vt::kitty::graphics;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// graphics::set_png_decoder(Some(Box::new(graphics::RustPngDecoder::new())))?;
+/// // SAFETY: No other thread uses libghostty yet.
+/// unsafe { graphics::set_png_decoder(Some(Box::new(graphics::RustPngDecoder::new()))) }?;
 /// # Ok(())
 /// # }
 /// ```
