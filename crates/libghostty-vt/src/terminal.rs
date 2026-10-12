@@ -9,7 +9,7 @@ use crate::{
         from_optional_result_with_len, from_result, from_result_with_len,
     },
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
-    key, mouse,
+    key, mouse, osc,
     screen::{GridRef, Screen, TrackedGridRef},
     style::{self, Palette, RawPalette, RgbColor},
 };
@@ -1091,12 +1091,42 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 
-    /// Set the maximum bytes the APC handler will buffer for all protocols.
+    /// Set the maximum bytes the APC handler will buffer for each protocol it
+    /// implements (Kitty graphics and glyph protocols).
     ///
     /// This prevents malicious input from causing unbounded memory allocation.
     /// A `None` value removes all overrides, reverting to the built-in defaults.
+    /// APC sequences no protocol implements are bounded separately, by
+    /// [`set_unknown_max_bytes`](Self::set_unknown_max_bytes).
     pub fn set_apc_max_bytes(&mut self, max: Option<usize>) -> Result<&mut Self> {
         self.set_optional(Opt::APC_MAX_BYTES, max.as_ref())?;
+        Ok(self)
+    }
+
+    /// Set the most bytes of each unsupported sequence to keep and pass to the
+    /// [unknown sequence callback](Self::on_unknown_sequence). The same limit
+    /// applies to APC and OSC sequences.
+    ///
+    /// Zero, the default, turns unsupported sequence reporting off.
+    ///
+    /// A sequence longer than the limit is still reported. Its content holds
+    /// the first bytes up to the limit, and `truncated` is true.
+    ///
+    /// Choose a limit that fits the largest sequence you expect. Unknown OSC
+    /// sequences up to 2048 bytes are kept in a buffer the terminal already
+    /// owns, so limits up to 2048 add no memory allocations for OSC. Larger
+    /// limits allocate memory for each unknown OSC sequence. Unknown APC
+    /// sequences are always kept in allocated memory.
+    ///
+    /// <div class="warning">
+    ///
+    /// A running program controls when a sequence ends, so a very large limit
+    /// such as `usize::MAX` lets it make the terminal buffer an unterminated
+    /// sequence until allocation fails.
+    ///
+    /// </div>
+    pub fn set_unknown_max_bytes(&mut self, max: usize) -> Result<&mut Self> {
+        self.set(Opt::UNKNOWN_MAX_BYTES, &max)?;
         Ok(self)
     }
 
@@ -2122,6 +2152,51 @@ pub enum ClipboardReadError {
     IoError = ffi::ClipboardReadResult::IO_ERROR,
 }
 
+/// An unsupported terminal sequence, passed to
+/// [`Terminal::on_unknown_sequence`].
+///
+/// New kinds may be added in later versions. Callbacks should ignore any kind
+/// they don't handle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UnknownSequence<'t> {
+    /// Application Program Command (APC).
+    #[non_exhaustive]
+    Apc {
+        /// The bytes between the sequence introducer and terminator. They may
+        /// contain arbitrary binary data, and are borrowed only for the
+        /// callback duration.
+        content: &'t [u8],
+        /// Whether content was shortened by the byte limit or allocation
+        /// failure.
+        truncated: bool,
+    },
+    /// Operating System Command (OSC) whose number libghostty-vt does not
+    /// implement.
+    ///
+    /// OSC sequences start with `ESC ]`, followed by a number that identifies
+    /// the command, usually a `;`, and then the command's data. The sequence
+    /// ends with either BEL or ESC followed by a backslash. For example, a
+    /// program might write `ESC ] 7400;status=busy BEL`. For that sequence,
+    /// `content` is `7400;status=busy` and `terminator` is
+    /// [`osc::Terminator::Bel`].
+    #[non_exhaustive]
+    Osc {
+        /// Everything between `ESC ]` and the terminator, including the number
+        /// at the start. The bytes are only valid until the callback returns.
+        /// Copy them if you need them later.
+        content: &'t [u8],
+        /// True if the sequence was longer than
+        /// [`Terminal::set_unknown_max_bytes`], or memory ran out while
+        /// reading it. In that case `content` holds only the beginning of the
+        /// sequence.
+        truncated: bool,
+        /// How the program ended the sequence. If you send a reply, end it the
+        /// same way.
+        terminator: osc::Terminator,
+    },
+}
+
 /// A request to show a desktop notification.
 #[derive(Debug, Copy, Clone)]
 pub struct DesktopNotification<'t> {
@@ -2788,6 +2863,113 @@ handlers! {
     ) |term, func| {
         func(term, unsafe { ProgressReport::from_raw(progress) });
     }
+
+    /// Call the given function once for each complete sequence that
+    /// libghostty-vt does not implement. [`UnknownSequence`] is
+    /// non-exhaustive, because more kinds of sequences may be reported in
+    /// later versions.
+    ///
+    /// These are not reported:
+    ///
+    /// - Sequences the program cancelled partway through with CAN or SUB.
+    /// - Sequences libghostty-vt implements, even when their contents are
+    ///   malformed.
+    /// - Supported protocols that the embedder turned off.
+    ///
+    /// The callback runs during [`Self::vt_write`]. It may write a reply to
+    /// the pty, and that reply stays in order with the terminal's own
+    /// replies. It must not feed more input to the same terminal, which the
+    /// shared `&Terminal` it receives already rules out.
+    ///
+    /// Nothing is reported until [`Self::set_unknown_max_bytes`] is also set
+    /// to a nonzero value. Installing the callback by itself keeps no sequence
+    /// data and allocates no sequence-capture buffers.
+    ///
+    /// For OSC, the content is everything between `ESC ]` and the terminator,
+    /// including the number that identifies the sequence. As an example,
+    /// suppose your application invents its own OSC 7400 so that programs can
+    /// report their status. If a program writes `ESC ] 7400;status=busy BEL`,
+    /// the callback receives the content `7400;status=busy` and the
+    /// terminator [`osc::Terminator::Bel`]. Match on the number followed by
+    /// `;`, so that `7400;` does not also match an unrelated `74000;`
+    /// sequence.
+    ///
+    /// Only numbers libghostty-vt does not recognize are reported. A sequence
+    /// that uses a number it does implement, such as OSC 2 for the window
+    /// title, is never reported, even when its contents are malformed.
+    ///
+    /// Use the terminator from the request in your reply, since that is what
+    /// the program expects.
+    ///
+    /// ```rust
+    /// use std::cell::RefCell;
+    /// use libghostty_vt::{Terminal, terminal::UnknownSequence};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let statuses = RefCell::new(Vec::new());
+    ///
+    /// let mut terminal = Terminal::new(80, 24)?;
+    /// terminal
+    ///     .on_unknown_sequence(|_term, sequence| {
+    ///         let UnknownSequence::Osc { content, truncated, .. } = sequence else {
+    ///             return;
+    ///         };
+    ///         // This protocol needs the whole sequence, so skip cut-off ones.
+    ///         if truncated {
+    ///             return;
+    ///         }
+    ///         // Only handle OSC 7400. Everything else is ignored. The content
+    ///         // is only valid during this call, so copy what you need.
+    ///         if let Some(status) = content.strip_prefix(b"7400;") {
+    ///             statuses.borrow_mut().push(status.to_vec());
+    ///         }
+    ///     })?
+    ///     // Keep up to 4 KiB of each unknown sequence and report them.
+    ///     .set_unknown_max_bytes(4096)?;
+    ///
+    /// terminal.vt_write(b"\x1b]7400;status=busy\x07");
+    /// assert_eq!(*statuses.borrow(), [b"status=busy".to_vec()]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn on_unknown_sequence(
+        &mut self,
+        tag = UNKNOWN_SEQUENCE,
+        from = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence),
+        to = <'t>UnknownSequenceFn(UnknownSequence<'t>),
+    ) |term, func| {
+        // SAFETY: libghostty passes a valid sequence that is borrowed for the
+        // callback duration.
+        let sequence = unsafe { &*sequence };
+        // Sequence kinds added upstream later are skipped rather than
+        // misreported; the enum is non-exhaustive to grow with them.
+        match sequence.tag {
+            ffi::TerminalUnknownSequenceTag::APC => {
+                // SAFETY: The tag says the union holds an APC payload.
+                let apc = unsafe { sequence.value.apc };
+                func(term, UnknownSequence::Apc {
+                    // SAFETY: The content is borrowed for the callback
+                    // duration, which `UnknownSequence`'s lifetime enforces.
+                    content: unsafe { apc.content.to_bytes() },
+                    truncated: apc.truncated,
+                });
+            }
+            ffi::TerminalUnknownSequenceTag::OSC => {
+                // SAFETY: The tag says the union holds an OSC payload.
+                let osc = unsafe { sequence.value.osc };
+                let Ok(terminator) = osc.terminator.try_into() else {
+                    return;
+                };
+                func(term, UnknownSequence::Osc {
+                    // SAFETY: Ditto
+                    content: unsafe { osc.content.to_bytes() },
+                    truncated: osc.truncated,
+                    terminator,
+                });
+            }
+            _ => {}
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3077,6 +3259,47 @@ mod tests {
         let (output, written) = run(5);
         assert_eq!(output, b"\x1b]5522;type=write:status=DONE:id=c1\x1b\\");
         assert_eq!(written, [b"Hello".to_vec()]);
+    }
+
+    #[test]
+    fn unknown_sequences_are_reported() {
+        use osc::Terminator::{Bel, St};
+
+        let seen = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .on_unknown_sequence(|_term, sequence| {
+                // Record rather than assert: a panic in a callback aborts the
+                // whole test binary.
+                seen.borrow_mut().push(match sequence {
+                    UnknownSequence::Apc {
+                        content, truncated, ..
+                    } => (content.to_vec(), truncated, None),
+                    UnknownSequence::Osc {
+                        content,
+                        truncated,
+                        terminator,
+                        ..
+                    } => (content.to_vec(), truncated, Some(terminator)),
+                });
+            })
+            .unwrap();
+        // Registration alone leaves reporting disabled.
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        terminal.set_unknown_max_bytes(4).unwrap();
+        terminal.vt_write(b"\x1b_unknown\x1b\\");
+        terminal.vt_write(b"\x1b]7400;status=busy\x07");
+        terminal.set_unknown_max_bytes(64).unwrap();
+        terminal.vt_write(b"\x1b]7400;status=busy\x1b\\");
+        drop(terminal);
+        assert_eq!(
+            seen.into_inner(),
+            [
+                (b"unkn".to_vec(), true, None),
+                (b"7400".to_vec(), true, Some(Bel)),
+                (b"7400;status=busy".to_vec(), false, Some(St)),
+            ]
+        );
     }
 
     #[test]
