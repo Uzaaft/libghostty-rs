@@ -125,6 +125,32 @@ Ghostty FFI backend.
 
 Use `nix develop .#miri` when working interactively with the same toolchain.
 
+### Sanitizers
+
+Run the tests and doctests under AddressSanitizer with:
+
+```sh
+nix run .#asan
+```
+
+ASan instruments the Rust side only, including a rebuilt std; Zig has no
+ASan, so libghostty's own memory accesses are not checked. It does check the
+wrapper's accesses to memory that libghostty allocated with its default
+allocator, and on Linux it also reports leaked libghostty objects. Terminal
+pages are mapped straight from the OS, so views into them are not covered.
+
+There is no MemorySanitizer run. MSan needs every store instrumented, which
+Zig can't do, so it reports the bytes libghostty writes as uninitialized.
+
+The `cargo-test-ubsan` flake check is the UndefinedBehaviorSanitizer
+counterpart. It runs the same tests in the dev profile against a Debug build of
+libghostty, which turns on Zig's safety checks and builds Ghostty's own C and
+C++ with UBSan. It is part of `nix flake check`; to run only it:
+
+```sh
+nix build .#checks.$(nix eval --impure --raw --expr builtins.currentSystem).cargo-test-ubsan
+```
+
 ### Running the example
 
 The examples live in their own workspace under `example/`. To run one, enter

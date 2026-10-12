@@ -99,3 +99,32 @@ jobs:
 
       - name: Miri soundness checks
         run: nix run .#miri
+
+  asan:
+    name: Linux AddressSanitizer
+    runs-on: namespace-profile-linux-x86-sm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Namespace cache
+        uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1.4.3
+        with:
+          cache: |
+            nix
+            rust
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      # The app links the prebuilt libghostty, so pull it from the Ghostty
+      # cache rather than building it on every run.
+      - name: Use Ghostty binary cache
+        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with:
+          name: ghostty
+          skipPush: true
+
+      - name: AddressSanitizer checks
+        run: nix run .#asan
