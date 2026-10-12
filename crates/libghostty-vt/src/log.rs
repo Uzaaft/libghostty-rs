@@ -30,7 +30,8 @@ pub trait Logger: Send + Sync + 'static {
 ///
 /// ```
 /// use libghostty_vt::log;
-/// log::set_logger(Some(Box::new(log::LogStderr)));
+/// // SAFETY: No other thread uses libghostty yet.
+/// unsafe { log::set_logger(Some(Box::new(log::LogStderr))) }.unwrap();
 /// ```
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct LogStderr;
@@ -132,6 +133,14 @@ static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
 /// above). Release builds emit info and above; debug-level messages are
 /// compiled out entirely and will never reach the callback.
 ///
+/// This is a process-global setting. It is simplest to set it once at
+/// startup, before using any terminal functionality.
+///
+/// # Safety
+///
+/// libghostty does not synchronize this setting, so this must not be called
+/// while any other thread may be inside a libghostty call.
+///
 /// # Examples
 ///
 /// Use [`LogStderr`] as a simple way to write formatted logs to stderr:
@@ -139,7 +148,8 @@ static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
 /// ```
 /// use libghostty_vt::{set_logger, log::LogStderr};
 /// # fn main() -> Result<(), Box<dyn std::error::Error>>{
-/// set_logger(Some(Box::new(LogStderr)))?;
+/// // SAFETY: No other thread uses libghostty yet.
+/// unsafe { set_logger(Some(Box::new(LogStderr))) }?;
 /// # Ok(())}
 /// ```
 ///
@@ -149,7 +159,8 @@ static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
 /// ```ignore
 /// # fn main() -> Result<(), Box<dyn std::error::Error>>{
 /// tracing_subscriber::fmt().init();
-/// libghostty_vt::set_logger(Some(Box::new(libghostty_vt::log::TracingLogger)))?;
+/// // SAFETY: No other thread uses libghostty yet.
+/// unsafe { libghostty_vt::set_logger(Some(Box::new(libghostty_vt::log::TracingLogger))) }?;
 /// # Ok(())}
 /// ```
 ///
@@ -159,10 +170,11 @@ static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
 /// ```ignore
 /// # fn main() -> Result<(), Box<dyn std::error::Error>>{
 /// // Any logger will do, though usually you want to use the global logger
-/// libghostty_vt::set_logger(Some(Box::new(log::logger())))?;
+/// // SAFETY: No other thread uses libghostty yet.
+/// unsafe { libghostty_vt::set_logger(Some(Box::new(log::logger()))) }?;
 /// # Ok(())}
 /// ```
-pub fn set_logger(f: Option<Box<dyn Logger>>) -> Result<()> {
+pub unsafe fn set_logger(f: Option<Box<dyn Logger>>) -> Result<()> {
     unsafe extern "C" fn callback(
         _userdata: *mut std::ffi::c_void,
         level: ffi::SysLogLevel::Type,
