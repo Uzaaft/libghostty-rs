@@ -91,6 +91,7 @@
             ++ ["${ghostty}/nix/patches/zig-0.17-ios-process-replace.patch"];
         });
         ghosttyLib = ghostty.packages.${system}.libghostty-vt;
+        ghosttyDebugLib = ghostty.packages.${system}.libghostty-vt-debug;
 
         miriCommand = pkgs.writeShellApplication {
           name = "libghostty-miri";
@@ -333,6 +334,40 @@
               inherit cargoArtifacts;
               cargoExtraArgs = "${commonArgs.cargoExtraArgs} --features libghostty-vt-sys/link-dynamic";
               cargoTestExtraArgs = "--workspace --all-targets";
+            }
+          );
+
+          # The UndefinedBehaviorSanitizer counterpart. rustc has no UBSan;
+          # the dev profile's debug assertions, overflow checks and std's
+          # checks of unsafe preconditions play its part. Zig has none for
+          # Zig code either; its Debug safety checks (bounds, overflow,
+          # unreachable code, bad casts) play it there, along with Ghostty's
+          # own integrity checks, which only Debug runs. Debug also builds
+          # Ghostty's own C and C++ (src/simd and wuffs) with
+          # -fsanitize-c=full, and libghostty bundles Zig's UBSan runtime,
+          # which panics on the first report. simdutf and highway opt out of
+          # it upstream.
+          #
+          # This is the libghostty-vt-debug package rather than
+          # LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug because that only affects
+          # building Ghostty from source, which the sandbox can't fetch. It
+          # needs no nightly or network either, so it runs here on every
+          # platform rather than as an app.
+          cargo-test-ubsan = craneLib.mkCargoDerivation (
+            commonArgs
+            // {
+              # The shared dependency artifacts are built in the release
+              # profile, so this would only unpack and then ignore them.
+              cargoArtifacts = null;
+              pnameSuffix = "-ubsan";
+              CARGO_PROFILE = "dev";
+              buildInputs = [ghosttyDebugLib] ++ pkgs.lib.remove ghosttyLib commonArgs.buildInputs;
+              buildPhaseCargoCommand = ''
+                cargoWithProfile test ${commonArgs.cargoExtraArgs} --workspace --all-targets
+                cargoWithProfile test ${commonArgs.cargoExtraArgs} -p libghostty-vt --doc
+              '';
+              doInstallCargoArtifacts = false;
+              installPhaseCommand = "touch $out";
             }
           );
         };
