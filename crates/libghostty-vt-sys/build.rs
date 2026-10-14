@@ -231,12 +231,13 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
             .arg(&zig_global_cache_dir);
     }
 
-    // Pass -Dtarget only for non-iOS cross targets; native builds let zig
-    // auto-detect the host. iOS builds run host-native inside the xcframework
-    // emit, so they must not pass -Dtarget or a global --sysroot.
-    if target != host && ios_platform.is_none() {
-        let zig_target = zig_target(target);
-        build.arg(format!("-Dtarget={zig_target}"));
+    // iOS builds run host-native inside the xcframework emit, so they must
+    // not pass -Dtarget or a global --sysroot. Other native targets use host
+    // detection unless they need an explicit GNU libc baseline.
+    if ios_platform.is_none()
+        && let Some(target) = build_target(target, &host)
+    {
+        build.arg(format!("-Dtarget={target}"));
     }
 
     run(build, "zig build");
@@ -555,11 +556,17 @@ fn copy_dir_all(src: &Path, dst: &Path) {
     }
 }
 
-fn zig_target(target: &str) -> String {
+fn build_target(target: &str, host: &str) -> Option<String> {
+    // Native Linux runners can have newer libc than the supported baseline.
+    // Keep Ghostty's libc requirement explicit on every GNU build.
+    if target == host && !target.ends_with("-linux-gnu") {
+        return None;
+    }
+
     let value = match target {
-        "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu",
+        "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu.2.28",
         "x86_64-unknown-linux-musl" => "x86_64-linux-musl",
-        "aarch64-unknown-linux-gnu" => "aarch64-linux-gnu",
+        "aarch64-unknown-linux-gnu" => "aarch64-linux-gnu.2.28",
         "aarch64-unknown-linux-musl" => "aarch64-linux-musl",
         "aarch64-apple-darwin" => "aarch64-macos-none",
         "x86_64-apple-darwin" => "x86_64-macos-none",
@@ -571,5 +578,52 @@ fn zig_target(target: &str) -> String {
         "x86_64-linux-android" => "x86_64-linux-android",
         other => panic!("unsupported Rust target for vendored build: {other}"),
     };
-    value.to_owned()
+    Some(value.to_owned())
+}
+
+#[cfg(test)]
+mod targets {
+    use super::build_target;
+
+    #[test]
+    fn native_linux_uses_baseline() {
+        for (target, expected) in [
+            ("x86_64-unknown-linux-gnu", "x86_64-linux-gnu.2.28"),
+            ("aarch64-unknown-linux-gnu", "aarch64-linux-gnu.2.28"),
+        ] {
+            assert_eq!(build_target(target, target).as_deref(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn cross_linux_uses_baseline() {
+        for (target, expected) in [
+            ("x86_64-unknown-linux-gnu", "x86_64-linux-gnu.2.28"),
+            ("aarch64-unknown-linux-gnu", "aarch64-linux-gnu.2.28"),
+        ] {
+            assert_eq!(
+                build_target(target, "aarch64-apple-darwin").as_deref(),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn native_macos_keeps_detection() {
+        for target in ["aarch64-apple-darwin", "x86_64-apple-darwin"] {
+            assert_eq!(build_target(target, target), None);
+        }
+    }
+
+    #[test]
+    fn other_cross_targets_keep_mapping() {
+        assert_eq!(
+            build_target("x86_64-unknown-linux-musl", "aarch64-apple-darwin").as_deref(),
+            Some("x86_64-linux-musl")
+        );
+        assert_eq!(
+            build_target("x86_64-apple-darwin", "aarch64-apple-darwin").as_deref(),
+            Some("x86_64-macos-none")
+        );
+    }
 }
