@@ -51,9 +51,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Building
 
-Requires [Zig](https://ziglang.org/) 0.16.x on PATH. By default, the ghostty
-source is fetched automatically at build time from the pinned commit in
-`build.rs`. Set `GHOSTTY_SOURCE_DIR` to make the build use a local Ghostty
+Requires [Zig](https://ziglang.org/) 0.16.x on PATH, or selected through `ZIG`.
+Set `ZIG` to an executable path or command name, without arguments, to override
+the default `zig` executable. By default, the ghostty source is fetched
+automatically at build time from the pinned commit in `build.rs`.
+Set `GHOSTTY_SOURCE_DIR` to make the build use a local Ghostty
 checkout instead. Package managers that need network-free builds can also set
 `GHOSTTY_ZIG_SYSTEM_DIR` to a pre-fetched Zig package directory; this is passed
 to `zig build --system` so Zig does not download package dependencies during

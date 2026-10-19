@@ -90,6 +90,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
     println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
+    println!("cargo:rerun-if-env-changed=ZIG");
     println!("cargo:rerun-if-env-changed=TARGET");
     println!("cargo:rerun-if-env-changed=HOST");
     println!("cargo:rerun-if-env-changed=DEBUG");
@@ -183,7 +184,10 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
         );
     }
 
-    let mut build = Command::new("zig");
+    // Users can override the zig command with the `ZIG` env variable.
+    // We default to assuming zig is in path.
+    let zig = env::var_os("ZIG").unwrap_or_else(|| "zig".into());
+    let mut build = Command::new(zig);
     build
         .arg("build")
         .arg("-Demit-lib-vt=true")

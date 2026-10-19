@@ -3,6 +3,8 @@
 Raw FFI bindings for libghostty-vt.
 
 - Fetches and builds `libghostty-vt.a` from ghostty sources via Zig by default.
+- Set `ZIG` to an executable path or command name, without arguments, to override
+  the default `zig` executable resolved through PATH.
 - Exposes checked-in generated bindings in `src/bindings.rs`.
 - Static linking is the baseline rather than a Cargo feature. Enable the
   additive `link-dynamic` feature to link the shared library instead.
