@@ -2215,6 +2215,190 @@ pub enum ProgressState {
     Pause = ffi::TerminalProgressState::PAUSE,
 }
 
+/// A program status report (OSC 7501).
+///
+/// The program status protocol lets a program tell the terminal what it is
+/// doing: idle, working, done, waiting on the user, or failed, and why. It
+/// is meant for long-running work like builds, deploys, and coding agents,
+/// where the user is often looking at something else and wants to know when
+/// the work finishes or needs them. The protocol only describes state. How
+/// to show it, if at all, is up to your application.
+///
+/// The full specification is at
+/// <https://www.superlogical.com/rex/docs/build/program-status>
+///
+/// For example, a program waiting for the user to approve a change sends
+/// this, where ST is the string terminator (ESC \ or BEL):
+///
+/// ```text
+/// ESC ] 7501 ; state=blocked:kind=permission:app=terraform:msg=QXBwbHk/ ST
+/// ```
+///
+/// The callback then receives a report with:
+///
+/// - [`state`](Self::state): [`ProgramStatusState::Blocked`]
+/// - [`kind`](Self::kind): [`ProgramStatusKind::Permission`]
+/// - [`progress`](Self::progress): `None`, because the program didn't send
+///   one, so the work is indeterminate
+/// - [`id`](Self::id): empty, because this is the root record
+/// - [`app`](Self::app): `"terraform"`
+/// - [`title`](Self::title): empty
+/// - [`message`](Self::message): `"Apply?"`, decoded from the base64 in `msg`
+///
+/// Only reports that pass every check in the specification reach the
+/// callback. Text that the program didn't send is an empty string. All
+/// strings are only valid during the callback, so copy any you want to keep.
+/// The lifetime `'t` enforces this: the report cannot escape the
+/// [`Terminal::on_program_status`] callback it was handed to.
+#[derive(Debug, Copy, Clone)]
+pub struct ProgramStatus<'t> {
+    ptr: *const ffi::TerminalProgramStatus,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> ProgramStatus<'t> {
+    /// # Safety
+    ///
+    /// Caller must guarantee that `raw` and the strings it points to are
+    /// valid for the lifetime `'t`.
+    unsafe fn from_raw(raw: *const ffi::TerminalProgramStatus) -> Self {
+        Self {
+            ptr: raw,
+            _phan: PhantomData,
+        }
+    }
+
+    /// The raw report.
+    ///
+    /// Every field has been present since the struct was introduced, so
+    /// reading them doesn't need to consult `size` (unlike fields added
+    /// later, which go through `sized_field!`).
+    fn raw(self) -> &'t ffi::TerminalProgramStatus {
+        // SAFETY: We trust libghostty to give us a valid underlying ptr,
+        // which lives for the callback duration, i.e. `'t`.
+        unsafe { &*self.ptr }
+    }
+
+    /// What the program is doing.
+    ///
+    /// A state value from a newer libghostty that these bindings don't know
+    /// yet gives [`Error::InvalidValue`].
+    pub fn state(self) -> Result<ProgramStatusState> {
+        self.raw().state.try_into().map_err(|_| Error::InvalidValue)
+    }
+
+    /// What the program needs from the user. Only set for
+    /// [`ProgramStatusState::Blocked`]. It is [`ProgramStatusKind::None`]
+    /// for other states, when the program didn't say, or when it sent a kind
+    /// this version of libghostty doesn't know.
+    ///
+    /// A kind value from a newer libghostty that these bindings don't know
+    /// yet gives [`Error::InvalidValue`].
+    pub fn kind(self) -> Result<ProgramStatusKind> {
+        self.raw().kind.try_into().map_err(|_| Error::InvalidValue)
+    }
+
+    /// How far along the work is, from 0 through 100, or `None` when there
+    /// is no percentage. Only set for [`ProgramStatusState::Working`] and
+    /// [`ProgramStatusState::Blocked`]. For those states, `None` means the
+    /// work is indeterminate: the program is busy but has no percentage to
+    /// report. It is also `None` for other states and when the program sent
+    /// a value outside that range.
+    #[must_use]
+    pub fn progress(self) -> Option<u8> {
+        // Upstream uses -1 as the "no percentage" sentinel and otherwise
+        // only ever sends 0 through 100, so every negative value is `None`.
+        u8::try_from(self.raw().progress).ok()
+    }
+
+    /// Which record this report is about. Empty for the root record.
+    ///
+    /// A program that only reports on itself leaves this empty. A program
+    /// that reports on several things at once gives each its own id, such as
+    /// `"us-east"` and `"eu-west"` for a deploy to two regions. A `/` makes
+    /// one record the child of another, so `"build/test"` is a child of
+    /// `"build"`. The parent record doesn't have to exist.
+    #[must_use]
+    pub fn id(self) -> &'t [u8] {
+        // SAFETY: The report and its strings live for the callback
+        // duration, i.e. `'t`.
+        unsafe { self.raw().id.to_bytes() }
+    }
+
+    /// A stable name for the program that a machine can match on, such as
+    /// `"cargo"`, `"terraform"`, or `"claude-code"`. Use it as a key for
+    /// grouping, filtering, or choosing an icon. It is not a label. The label
+    /// is [`title`](Self::title). Empty when the report didn't include one.
+    /// See [`Terminal::on_program_status`] for how an empty app is filled in
+    /// from a parent record.
+    #[must_use]
+    pub fn app(self) -> &'t [u8] {
+        // SAFETY: Ditto.
+        unsafe { self.raw().app.to_bytes() }
+    }
+
+    /// A short label for the record, meant for people. Programs that report
+    /// several records use this to tell them apart.
+    #[must_use]
+    pub fn title(self) -> &'t [u8] {
+        // SAFETY: Ditto.
+        unsafe { self.raw().title.to_bytes() }
+    }
+
+    /// One line of text for people, saying what the record is doing,
+    /// waiting for, or has finished. You may shorten it to fit, but don't
+    /// try to read meaning into it.
+    #[must_use]
+    pub fn message(self) -> &'t [u8] {
+        // SAFETY: Ditto.
+        unsafe { self.raw().message.to_bytes() }
+    }
+}
+
+/// What a program says it is doing, in a program status report (OSC 7501).
+///
+/// See [`ProgramStatus`] for an overview of the protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(i32)]
+#[non_exhaustive]
+pub enum ProgramStatusState {
+    /// At rest, waiting for the user's next instruction. For example, an
+    /// interactive tool sitting at its own prompt.
+    Idle = ffi::ProgramStatusState::IDLE,
+    /// Running on its own. The report may include a progress percentage.
+    Working = ffi::ProgramStatusState::WORKING,
+    /// Finished a piece of work, and the result is ready for the user to
+    /// look at.
+    Done = ffi::ProgramStatusState::DONE,
+    /// Can't continue until the user does something.
+    /// [`kind`](ProgramStatus::kind) says what the program needs and
+    /// [`message`](ProgramStatus::message) says why. The report may include
+    /// a progress percentage.
+    Blocked = ffi::ProgramStatusState::BLOCKED,
+    /// Failed and stopped.
+    Error = ffi::ProgramStatusState::ERROR,
+    /// Not a real state. Remove the record with this report's id and every
+    /// record beneath it. If the id is empty, remove every record.
+    Clear = ffi::ProgramStatusState::CLEAR,
+}
+
+/// What a blocked program needs from the user, in a program status report
+/// (OSC 7501).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(i32)]
+#[non_exhaustive]
+pub enum ProgramStatusKind {
+    /// The program didn't say, or the state isn't
+    /// [`ProgramStatusState::Blocked`].
+    None = ffi::ProgramStatusKind::NONE,
+    /// Approval to do something, such as "Apply these changes?".
+    Permission = ffi::ProgramStatusKind::PERMISSION,
+    /// An answer the user has to type.
+    Question = ffi::ProgramStatusKind::QUESTION,
+    /// A login, password, token, or other credential.
+    Auth = ffi::ProgramStatusKind::AUTH,
+}
+
 //---------------------------------------
 // Callbacks
 //---------------------------------------
@@ -2787,6 +2971,159 @@ handlers! {
         to = <'t>ProgressReportFn(ProgressReport<'t>),
     ) |term, func| {
         func(term, unsafe { ProgressReport::from_raw(progress) });
+    }
+
+    /// Call the given function when the running program sends a program
+    /// status report via OSC 7501.
+    ///
+    /// Called synchronously each time the running program sends a valid
+    /// report. See [`ProgramStatus`] for what a report contains.
+    ///
+    /// The terminal doesn't store reports, so your application keeps them.
+    /// To follow the specification, keep one record per id. A report with an
+    /// empty id is about the root record, the program itself. The records
+    /// follow these rules:
+    ///
+    /// - A report replaces its record completely. A value the report leaves
+    ///   out is gone from the record afterwards. It doesn't keep its old
+    ///   value.
+    /// - A [`ProgramStatusState::Clear`] report removes the record with its
+    ///   id and every record beneath it, so clearing `"build"` also removes
+    ///   `"build/test"`. A clear report with an empty id removes every
+    ///   record.
+    /// - A record without an app takes it from its nearest ancestor that has
+    ///   one. If the root record has app `"deploy"` and the record
+    ///   `"us-east"` has none, show `"us-east"` with app `"deploy"` too.
+    /// - When a new shell prompt starts (the
+    ///   `GHOSTTY_SEMANTIC_PROMPT_PROMPT_START` shell integration event) or
+    ///   the program running in the terminal exits, remove `working` and
+    ///   `blocked` records. You may remove `idle` records too. Keep `done`
+    ///   and `error` records until the user has seen them, for example until
+    ///   they next focus the terminal.
+    /// - Keep at most 256 records, and allow at least 64. When a new record
+    ///   would go over your limit, remove the one that was updated longest
+    ///   ago.
+    ///
+    /// A full reset (RIS, `ESC c`) removes every record. When that happens,
+    /// the terminal calls this with a [`ProgramStatusState::Clear`] report
+    /// and an empty id. This only happens when `ESC c` is processed by
+    /// [`Terminal::vt_write`]. [`Terminal::reset`] doesn't call this, so
+    /// clear your records yourself after calling it.
+    ///
+    /// [`title`](ProgramStatus::title) and
+    /// [`message`](ProgramStatus::message) are already decoded and contain
+    /// no control characters, but they are still untrusted text from the
+    /// program. Don't treat them as markup. If you show them outside the
+    /// terminal, such as in a tab or a notification, remove invisible
+    /// formatting characters like text direction overrides, and say which
+    /// terminal the text came from so a program can't pretend to be one
+    /// running elsewhere.
+    ///
+    /// Example, where `records` stands in for your application's own
+    /// storage:
+    ///
+    /// ```rust
+    /// use std::cell::RefCell;
+    /// use std::collections::HashMap;
+    /// use libghostty_vt::{Terminal, terminal::ProgramStatusState};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// // One record per id. This one keeps only the state and message.
+    /// let records = RefCell::new(HashMap::<Vec<u8>, (ProgramStatusState, Vec<u8>)>::new());
+    /// # let pty = RefCell::new(Vec::new());
+    ///
+    /// let mut terminal = Terminal::new(80, 24)?;
+    /// // Set a pty write callback too, so programs that check for support
+    /// // get a reply.
+    /// terminal
+    ///     .on_pty_write(|_term, bytes| {
+    ///         // Write `bytes` back to the pty.
+    /// #       pty.borrow_mut().extend_from_slice(bytes);
+    ///     })?
+    ///     .on_program_status(|_term, report| {
+    ///         // A panic in the callback aborts the process, so ignore a
+    ///         // state these bindings don't know instead of unwrapping.
+    ///         let Ok(state) = report.state() else { return };
+    ///         let mut records = records.borrow_mut();
+    ///
+    ///         if state == ProgramStatusState::Clear {
+    ///             // Remove this record and every record beneath it. An empty
+    ///             // id removes every record.
+    ///             let id = report.id();
+    ///             records.retain(|key, _| {
+    ///                 let beneath = key
+    ///                     .strip_prefix(id)
+    ///                     .is_some_and(|rest| rest.is_empty() || rest.starts_with(b"/"));
+    ///                 !(id.is_empty() || beneath)
+    ///             });
+    ///             return;
+    ///         }
+    ///
+    ///         // Replace the whole record. The strings are only valid during
+    ///         // this call, so copy them.
+    ///         records.insert(report.id().to_vec(), (state, report.message().to_vec()));
+    ///     })?;
+    /// # let ids = || {
+    /// #     let mut ids: Vec<_> = records.borrow().keys().cloned().collect();
+    /// #     ids.sort();
+    /// #     ids
+    /// # };
+    ///
+    /// // A root record and a few beneath it. "QnVpbGRpbmc=" is "Building".
+    /// terminal.vt_write(b"\x1b]7501;state=working:app=cargo:msg=QnVpbGRpbmc=\x1b\\");
+    /// terminal.vt_write(b"\x1b]7501;state=working:id=build\x1b\\");
+    /// terminal.vt_write(b"\x1b]7501;state=blocked:kind=question:id=build/test\x1b\\");
+    /// terminal.vt_write(b"\x1b]7501;state=done:id=buildx\x1b\\");
+    /// # assert_eq!(ids(), [&b""[..], b"build", b"build/test", b"buildx"]);
+    /// # assert_eq!(
+    /// #     records.borrow()[&b""[..]],
+    /// #     (ProgramStatusState::Working, b"Building".to_vec()),
+    /// # );
+    ///
+    /// // A report replaces its record completely, so the message is gone.
+    /// terminal.vt_write(b"\x1b]7501;state=done\x1b\\");
+    /// # assert_eq!(records.borrow()[&b""[..]], (ProgramStatusState::Done, Vec::new()));
+    ///
+    /// // Clearing "build" also removes "build/test", but not "buildx".
+    /// terminal.vt_write(b"\x1b]7501;state=clear:id=build\x1b\\");
+    /// # assert_eq!(ids(), [&b""[..], b"buildx"]);
+    ///
+    /// // A program checking for support gets a reply through the pty.
+    /// terminal.vt_write(b"\x1b]7501;?\x1b\\");
+    /// # assert!(pty.borrow().starts_with(b"\x1b]7501;?:states="));
+    ///
+    /// // A full reset removes every record.
+    /// terminal.vt_write(b"\x1bc");
+    /// # assert!(records.borrow().is_empty());
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// Programs may ask whether the terminal supports the protocol by
+    /// sending `OSC 7501 ; ?`. While this callback is set, the terminal
+    /// answers through [`Terminal::on_pty_write`] with `?` followed by the
+    /// states and kinds it accepts:
+    ///
+    /// ```text
+    /// program:  ESC ] 7501 ; ? ST
+    /// terminal: ESC ] 7501 ; ?:states=idle,working,done,blocked,error:kinds=permission,question,auth ST
+    /// ```
+    ///
+    /// While this callback is not set, the query gets no reply, so a program
+    /// that asks sees the protocol as unsupported. Asking is optional, so
+    /// programs may send reports anyway. Those are dropped. Set a pty write
+    /// callback too, or programs never see the reply.
+    pub fn on_program_status(
+        &mut self,
+        tag = PROGRAM_STATUS,
+        from = TerminalProgramStatusFn(
+            report: *const ffi::TerminalProgramStatus
+        ),
+        to = <'t>ProgramStatusFn(ProgramStatus<'t>),
+    ) |term, func| {
+        // SAFETY: The report and its strings are only valid during the
+        // callback, which `ProgramStatus`'s lifetime enforces.
+        func(term, unsafe { ProgramStatus::from_raw(report) });
     }
 }
 
@@ -3642,6 +3979,222 @@ mod tests {
                 (b"\xc3\x28".to_vec(), b"ok".to_vec()),
             ]
         );
+    }
+
+    /// What a program status callback observed about one report, copied
+    /// out since the report is only valid during the callback.
+    ///
+    /// `state` and `kind` are `None` when the raw value didn't convert, so
+    /// that shows up as a failed comparison outside the callback.
+    #[derive(Debug, PartialEq, Eq)]
+    struct SeenStatus {
+        state: Option<ProgramStatusState>,
+        kind: Option<ProgramStatusKind>,
+        progress: Option<u8>,
+        id: Vec<u8>,
+        app: Vec<u8>,
+        title: Vec<u8>,
+        message: Vec<u8>,
+    }
+
+    impl SeenStatus {
+        /// A report with only `state` set, as upstream fills in every
+        /// value the program didn't send.
+        fn bare(state: ProgramStatusState) -> Self {
+            Self {
+                state: Some(state),
+                kind: Some(ProgramStatusKind::None),
+                progress: None,
+                id: Vec::new(),
+                app: Vec::new(),
+                title: Vec::new(),
+                message: Vec::new(),
+            }
+        }
+    }
+
+    /// Feed `input` to a terminal with a program status callback, returning
+    /// the reports it saw and what the terminal wrote back to the pty.
+    ///
+    /// Assertions happen outside the callback: a panic inside it would
+    /// abort the whole test binary instead of failing the test.
+    fn program_status(input: &[u8]) -> (Vec<SeenStatus>, Vec<u8>) {
+        let seen = RefCell::new(Vec::new());
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .on_pty_write(|_, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .unwrap()
+            .on_program_status(|_, report| {
+                seen.borrow_mut().push(SeenStatus {
+                    state: report.state().ok(),
+                    kind: report.kind().ok(),
+                    progress: report.progress(),
+                    id: report.id().to_vec(),
+                    app: report.app().to_vec(),
+                    title: report.title().to_vec(),
+                    message: report.message().to_vec(),
+                });
+            })
+            .unwrap();
+        terminal.vt_write(input);
+        drop(terminal);
+        (seen.into_inner(), output.into_inner())
+    }
+
+    #[test]
+    fn program_status_delivers_every_field() {
+        // title is "Plan" and msg is "Apply?", both base64.
+        let (seen, output) = program_status(
+            b"\x1b]7501;state=blocked:kind=permission:progress=40:id=a/b\
+              :app=terraform:title=UGxhbg==:msg=QXBwbHk/\x07",
+        );
+        assert_eq!(
+            seen,
+            [SeenStatus {
+                state: Some(ProgramStatusState::Blocked),
+                kind: Some(ProgramStatusKind::Permission),
+                progress: Some(40),
+                id: b"a/b".to_vec(),
+                app: b"terraform".to_vec(),
+                title: b"Plan".to_vec(),
+                message: b"Apply?".to_vec(),
+            }]
+        );
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn program_status_leaves_unsent_values_empty() {
+        // The example from the upstream docs: no progress means the work is
+        // indeterminate, and no id means the root record.
+        let (seen, _) = program_status(
+            b"\x1b]7501;state=blocked:kind=permission:app=terraform:msg=QXBwbHk/\x1b\\",
+        );
+        assert_eq!(
+            seen,
+            [SeenStatus {
+                kind: Some(ProgramStatusKind::Permission),
+                app: b"terraform".to_vec(),
+                message: b"Apply?".to_vec(),
+                ..SeenStatus::bare(ProgramStatusState::Blocked)
+            }]
+        );
+
+        let (seen, _) = program_status(b"\x1b]7501;state=done\x1b\\");
+        assert_eq!(seen, [SeenStatus::bare(ProgramStatusState::Done)]);
+    }
+
+    #[test]
+    fn program_status_progress_and_kind_follow_state() {
+        let (seen, _) = program_status(
+            &[
+                // 0 is a real percentage, not "no progress".
+                &b"\x1b]7501;state=working:progress=0\x07"[..],
+                b"\x1b]7501;state=working:progress=100\x07",
+                // Out of range reads as no percentage.
+                b"\x1b]7501;state=working:progress=101\x07",
+                // Progress and kind only count for the states that use them.
+                b"\x1b]7501;state=idle:progress=50:kind=question\x07",
+                b"\x1b]7501;state=blocked:kind=auth\x07",
+                // A kind libghostty doesn't know reads as none.
+                b"\x1b]7501;state=blocked:kind=telepathy\x07",
+            ]
+            .concat(),
+        );
+        assert_eq!(
+            seen,
+            [
+                SeenStatus {
+                    progress: Some(0),
+                    ..SeenStatus::bare(ProgramStatusState::Working)
+                },
+                SeenStatus {
+                    progress: Some(100),
+                    ..SeenStatus::bare(ProgramStatusState::Working)
+                },
+                SeenStatus::bare(ProgramStatusState::Working),
+                SeenStatus::bare(ProgramStatusState::Idle),
+                SeenStatus {
+                    kind: Some(ProgramStatusKind::Auth),
+                    ..SeenStatus::bare(ProgramStatusState::Blocked)
+                },
+                SeenStatus::bare(ProgramStatusState::Blocked),
+            ]
+        );
+    }
+
+    #[test]
+    fn program_status_drops_invalid_reports() {
+        // An unknown state and a bad id each discard the whole report.
+        let (seen, output) =
+            program_status(b"\x1b]7501;state=sleeping\x07\x1b]7501;state=idle:id=a//b\x07");
+        assert!(seen.is_empty());
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn program_status_clears_every_record_on_full_reset() {
+        let (seen, _) = program_status(b"\x1b]7501;state=error:id=x\x07\x1bc");
+        assert_eq!(
+            seen,
+            [
+                SeenStatus {
+                    id: b"x".to_vec(),
+                    ..SeenStatus::bare(ProgramStatusState::Error)
+                },
+                SeenStatus::bare(ProgramStatusState::Clear),
+            ]
+        );
+    }
+
+    #[test]
+    fn program_status_is_not_cleared_by_reset() {
+        // Upstream's `ghostty_terminal_reset` only resets the terminal; the
+        // clear report comes from the stream handling `ESC c`.
+        let seen = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .on_program_status(|_, report| {
+                seen.borrow_mut()
+                    .push((report.state().ok(), report.id().to_vec()));
+            })
+            .unwrap();
+
+        terminal.vt_write(b"\x1b]7501;state=error:id=x\x07");
+        assert_eq!(
+            seen.take(),
+            [(Some(ProgramStatusState::Error), b"x".to_vec())]
+        );
+
+        terminal.reset();
+        assert!(seen.borrow().is_empty());
+
+        terminal.vt_write(b"\x1bc");
+        assert_eq!(seen.take(), [(Some(ProgramStatusState::Clear), Vec::new())]);
+    }
+
+    #[test]
+    fn program_status_query_is_answered_only_with_a_callback() {
+        const REPLY: &[u8] =
+            b"\x1b]7501;?:states=idle,working,done,blocked,error:kinds=permission,question,auth";
+
+        // The reply uses the same terminator as the query, and the query
+        // itself is not a report.
+        let (seen, output) = program_status(b"\x1b]7501;?\x1b\\\x1b]7501;?\x07");
+        assert!(seen.is_empty());
+        assert_eq!(output, [REPLY, b"\x1b\\", REPLY, b"\x07"].concat());
+
+        // Without the callback the query goes unanswered, so the program
+        // sees the protocol as unsupported.
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .on_pty_write(|_, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .unwrap();
+        terminal.vt_write(b"\x1b]7501;?\x1b\\");
+        drop(terminal);
+        assert!(output.into_inner().is_empty());
     }
 
     fn tiny_terminal() -> Terminal<'static, 'static> {
