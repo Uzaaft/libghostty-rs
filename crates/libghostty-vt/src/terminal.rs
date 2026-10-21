@@ -397,6 +397,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// Scroll the terminal viewport.
+    ///
+    /// Scrolls the terminal's viewport according to the given behavior.
+    /// See [`ScrollViewport::DeltaPrompt`] for the navigation behavior.
     pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
         unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) }
     }
@@ -1307,6 +1310,7 @@ impl From<ffi::PointCoordinate> for PointCoordinate {
 
 /// Scroll viewport behavior.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ScrollViewport {
     /// Scroll to the top of the scrollback.
     Top,
@@ -1316,6 +1320,16 @@ pub enum ScrollViewport {
     Delta(isize),
     /// Scroll to an absolute row offset from the top of the scrollback.
     Row(usize),
+    /// Scroll by a number of prompts relative to the viewport top.
+    ///
+    /// Negative values move backward and positive values move forward.
+    /// Requires semantic prompt markers from the shell. Zero or no matching
+    /// prompt is a no-op. If fewer prompts remain than requested, move to
+    /// the last matching prompt, clamped to the active area.
+    ///
+    /// Moving forward through a final prompt continuation can snap to the
+    /// active area even when there is no newer prompt.
+    DeltaPrompt(isize),
 }
 impl From<ScrollViewport> for ffi::TerminalScrollViewport {
     fn from(value: ScrollViewport) -> Self {
@@ -1341,6 +1355,14 @@ impl From<ScrollViewport> for ffi::TerminalScrollViewport {
                 value: {
                     let mut v = ffi::TerminalScrollViewportValue::default();
                     v.row = row;
+                    v
+                },
+            },
+            ScrollViewport::DeltaPrompt(delta_prompt) => Self {
+                tag: ffi::TerminalScrollViewportTag::DELTA_PROMPT,
+                value: {
+                    let mut v = ffi::TerminalScrollViewportValue::default();
+                    v.delta_prompt = delta_prompt;
                     v
                 },
             },
@@ -3358,6 +3380,53 @@ mod tests {
         terminal.vt_write(input);
         drop(terminal);
         (seen.into_inner(), output.into_inner())
+    }
+
+    #[test]
+    fn scroll_viewport_delta_prompt() {
+        // Same transcript as upstream's `scroll_viewport delta_prompt` test:
+        // prompts start on rows 0, 3, 6 and 9 of a 10-row history, and with
+        // 2 visible rows the active area starts at row 8.
+        let mut terminal = Terminal::new(80, 2).expect("terminal should initialize");
+        terminal.vt_write(
+            b"\x1b]133;P;k=i\x07p1\r\n\
+              \x1b]133;B\x07cmd1\r\n\
+              \x1b]133;C\x07out1\r\n\
+              \x1b]133;P;k=i\x07p2\r\n\
+              \x1b]133;B\x07cmd2\r\n\
+              \x1b]133;C\x07out2\r\n\
+              \x1b]133;P;k=i\x07p3\r\n\
+              \x1b]133;B\x07cmd3\r\n\
+              \x1b]133;C\x07out3\r\n\
+              \x1b]133;P;k=i\x07p4",
+        );
+        let mut scroll = |scroll| {
+            terminal.scroll_viewport(scroll);
+            terminal.scrollbar().expect("scrollbar should exist").offset
+        };
+
+        // First, upstream's exact sequence.
+        //
+        // Counting is relative to the viewport top (row 8), so going backward
+        // from the active area lands on p3, then p2. Forward returns to p3.
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(-1)), 6);
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(-1)), 3);
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(1)), 6);
+
+        // Over-asking stops at the last matching prompt: p1 going backward
+        // (from p3, so this walks past p2), and p4 going forward, which lies
+        // in the active area and so is clamped to it. Zero is then a no-op.
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(isize::MIN)), 0);
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(isize::MAX)), 8);
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(0)), 8);
+
+        // Extra steps beyond upstream's test: step back from the active area
+        // to p3, check zero is a no-op away from the active area too, then
+        // over-ask with ordinary counts in both directions.
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(-1)), 6);
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(0)), 6);
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(-100)), 0);
+        assert_eq!(scroll(ScrollViewport::DeltaPrompt(100)), 8);
     }
 
     #[test]
