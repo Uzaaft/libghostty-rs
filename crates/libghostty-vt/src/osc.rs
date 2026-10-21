@@ -1,6 +1,6 @@
 //! Handling OSC (Operating System Command) escape sequences.
 
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::{ffi::CStr, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
@@ -141,9 +141,21 @@ impl<'p> Command<'p, '_> {
 
         let raw_type = unsafe { ffi::ghostty_osc_command_type(self.inner) };
         Some(match raw_type {
-            Type::CHANGE_WINDOW_TITLE => CommandType::ChangeWindowTitle {
-                title: self.get(Data::CHANGE_WINDOW_TITLE_STR)?,
-            },
+            Type::CHANGE_WINDOW_TITLE => {
+                // The output type is `const char *`, a thin pointer to a
+                // NUL-terminated string. Reading it straight into a (fat)
+                // `&str` would leave the length zeroed.
+                let title = self.get::<*const std::ffi::c_char>(Data::CHANGE_WINDOW_TITLE_STR)?;
+                // SAFETY: `osc.h` documents CHANGE_WINDOW_TITLE_STR as a
+                // pointer to a NUL-terminated string, owned by the parser and
+                // valid until the next `ghostty_osc_*` call on it. The `'p`
+                // borrow of the parser rules out such a call while the
+                // `&'p CStr` lives.
+                let title = unsafe { CStr::from_ptr(title) };
+                // Upstream doesn't promise UTF-8, so hand the bytes over as
+                // they are and let callers decide whether to validate.
+                CommandType::ChangeWindowTitle { title }
+            }
             Type::CHANGE_WINDOW_ICON => CommandType::ChangeWindowIcon,
             Type::SEMANTIC_PROMPT => CommandType::SemanticPrompt,
             Type::CLIPBOARD_CONTENTS => CommandType::ClipboardContents,
@@ -193,9 +205,46 @@ impl<'p> Command<'p, '_> {
 pub enum CommandType<'p> {
     #[default]
     Invalid,
+    /// A window title change (OSC 0 or OSC 2).
+    ///
+    /// ```rust
+    /// use libghostty_vt::osc::{CommandType, Parser};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut parser = Parser::new()?;
+    ///
+    /// for byte in *b"2;hello" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// let command = parser.end(0x5C);
+    /// assert!(matches!(
+    ///     command.command_type(),
+    ///     CommandType::ChangeWindowTitle { title } if title == c"hello"
+    /// ));
+    ///
+    /// // The title isn't checked for UTF-8: these bytes are passed through.
+    /// parser.reset();
+    /// for byte in *b"2;\xff" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// let command = parser.end(0x5C);
+    /// assert!(matches!(
+    ///     command.command_type(),
+    ///     CommandType::ChangeWindowTitle { title } if title.to_bytes() == b"\xff"
+    /// ));
+    /// # Ok(())
+    /// # }
+    /// ```
     ChangeWindowTitle {
         /// Window title string data.
-        title: &'p str,
+        ///
+        /// Memory is owned by the parser and valid until the next call to the
+        /// same parser.
+        ///
+        /// The title is not guaranteed to be UTF-8. It ends at the first NUL
+        /// byte: the parser stores the title bytes as given, so a title fed to
+        /// it with an embedded NUL is cut off there.
+        title: &'p CStr,
     },
     ChangeWindowIcon,
     SemanticPrompt,
