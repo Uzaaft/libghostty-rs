@@ -955,28 +955,43 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     pub fn vt_processing_error(&self) -> Result<bool> {
         self.get(Data::VT_PROCESSING_ERROR)
     }
-    /// Get the terminal title as set by escape sequences (e.g. OSC 0/2).
+    /// The terminal title as set by escape sequences (e.g. OSC 0/2).
     ///
-    /// Returns a borrowed string, valid until the next mutating terminal call.
-    /// An empty string is returned when no title has been set.
-    pub fn title(&self) -> Result<&str> {
+    /// Returns a borrowed string. It is valid until the next mutating terminal
+    /// call (e.g. [`Terminal::vt_write`]). An empty string is returned when no
+    /// title has been set.
+    ///
+    /// The bytes come from the program and are not guaranteed to be UTF-8.
+    pub fn title(&self) -> Result<&[u8]> {
         let str = self.get::<ffi::String>(Data::TITLE)?;
-        // SAFETY: We trust libghostty to return a valid borrowed string,
-        // while we uphold that no mutation could happen during its lifetime.
-        let str = unsafe { str.to_bytes() };
-        std::str::from_utf8(str).map_err(|_| Error::InvalidValue)
+        // SAFETY: libghostty documents the returned pointer as valid until the
+        // next mutating terminal call. Not every mutating call takes
+        // `&mut self` (`set_selection` doesn't), but libghostty only rewrites
+        // the title and pwd storage when processing input, resetting, or
+        // through the TITLE and PWD options. These bindings expose the first
+        // two only through `&mut self` methods (`vt_write`,
+        // `vt_write_until_ground`, `reset`) and don't wrap the options yet;
+        // a future setter for them must take `&mut self` too. No UTF-8 or
+        // NUL-termination is assumed; we only read `len` bytes.
+        Ok(unsafe { str.to_bytes() })
     }
 
-    /// Get the current working directory as set by escape sequences (e.g. OSC 7).
+    /// The terminal's current working directory as set by escape sequences
+    /// (e.g. OSC 7).
     ///
-    /// Returns a borrowed string, valid until the next mutating terminal call.
-    /// An empty string is returned when no pwd has been set.
-    pub fn pwd(&self) -> Result<&str> {
+    /// Returns a borrowed string. It is valid until the next mutating terminal
+    /// call (e.g. [`Terminal::vt_write`]). An empty string is returned when no
+    /// pwd has been set.
+    ///
+    /// The terminal stores whatever bytes the shell emitted, without parsing.
+    /// That means for OSC 7 the value is the raw URI (typically `file://...`);
+    /// for OSC 9/OSC 1337 it is typically a bare path. The bytes are not
+    /// guaranteed to be UTF-8.
+    pub fn pwd(&self) -> Result<&[u8]> {
         let str = self.get::<ffi::String>(Data::PWD)?;
-        // SAFETY: We trust libghostty to return a valid borrowed string,
-        // while we uphold that no mutation could happen during its lifetime.
-        let str = unsafe { str.to_bytes() };
-        std::str::from_utf8(str).map_err(|_| Error::InvalidValue)
+        // SAFETY: Ditto (see `title`): only `&mut self` methods can rewrite
+        // the pwd storage, and only `len` bytes are read.
+        Ok(unsafe { str.to_bytes() })
     }
     /// The total number of rows in the active screen including scrollback.
     pub fn total_rows(&self) -> Result<usize> {
@@ -4044,7 +4059,7 @@ mod tests {
     fn title_changed_callback_returns_correct_title() {
         // The callback bound on `on_title_changed` is `'cb`, not `'static`,
         // so the closure can borrow stack locals directly – no Rc needed.
-        let captured_title: RefCell<String> = RefCell::new(String::new());
+        let captured_title: RefCell<Vec<u8>> = RefCell::new(Vec::new());
         let callback_count: Cell<usize> = Cell::new(0);
 
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
@@ -4062,19 +4077,19 @@ mod tests {
         // OSC 2 (set title) should invoke on_title_changed.
         terminal.vt_write(b"\x1b]2;Hello Effects\x1b\\");
         assert_eq!(callback_count.get(), 1);
-        assert_eq!(*captured_title.borrow(), "Hello Effects");
+        assert_eq!(*captured_title.borrow(), b"Hello Effects");
 
         // A second title change should fire the callback again.
         terminal.vt_write(b"\x1b]2;Second Title\x1b\\");
         assert_eq!(callback_count.get(), 2);
-        assert_eq!(*captured_title.borrow(), "Second Title");
+        assert_eq!(*captured_title.borrow(), b"Second Title");
     }
 
     /// Send an OSC 7 current-directory sequence, then verify `term.pwd()`
     /// returns the correct value inside the `on_pwd_changed` callback.
     #[test]
     fn pwd_changed_callback_returns_correct_pwd() {
-        let captured_pwd: RefCell<String> = RefCell::new(String::new());
+        let captured_pwd: RefCell<Vec<u8>> = RefCell::new(Vec::new());
         let callback_count: Cell<usize> = Cell::new(0);
 
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
@@ -4089,11 +4104,17 @@ mod tests {
 
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/project\x1b\\");
         assert_eq!(callback_count.get(), 1);
-        assert_eq!(*captured_pwd.borrow(), "file://localhost/tmp/project");
+        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/project");
 
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/other\x1b\\");
         assert_eq!(callback_count.get(), 2);
-        assert_eq!(*captured_pwd.borrow(), "file://localhost/tmp/other");
+        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/other");
+
+        // libghostty stores the pwd bytes as-is, so non-UTF-8 input must come
+        // back verbatim instead of being rejected.
+        terminal.vt_write(b"\x1b]7;file://localhost/tmp/\xff\x1b\\");
+        assert_eq!(callback_count.get(), 3);
+        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/\xff");
     }
 
     #[test]
