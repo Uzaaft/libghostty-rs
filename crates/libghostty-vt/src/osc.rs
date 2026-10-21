@@ -167,6 +167,7 @@ impl<'p> Command<'p, '_> {
             Type::CONEMU_XTERM_EMULATION => CommandType::ConemuXtermEmulation,
             Type::CONEMU_COMMENT => CommandType::ConemuComment,
             Type::KITTY_TEXT_SIZING => CommandType::KittyTextSizing,
+            Type::PROGRAM_STATUS => CommandType::ProgramStatus,
 
             _ => return None,
         })
@@ -217,4 +218,43 @@ pub enum CommandType<'p> {
     ConemuXtermEmulation,
     ConemuComment,
     KittyTextSizing,
+    /// A program status report or support query (OSC 7501), which a program
+    /// sends to say what it is doing, such as working or waiting on the user.
+    ///
+    /// The OSC parser only identifies this command. To receive the report's
+    /// contents, use a terminal with [`Terminal::on_program_status`] instead
+    /// (see [`ProgramStatus`]).
+    ///
+    /// ```rust
+    /// use libghostty_vt::osc::{CommandType, Parser};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut parser = Parser::new()?;
+    ///
+    /// // Both a report and a support query (a body of just `?`) are
+    /// // identified as program status commands.
+    /// for body in [&b"7501;state=working:app=cargo:progress=40"[..], b"7501;?"] {
+    ///     parser.reset();
+    ///     for &byte in body {
+    ///         parser.next_byte(byte);
+    ///     }
+    ///     let command = parser.end(0x5C);
+    ///     assert!(matches!(command.command_type(), CommandType::ProgramStatus));
+    /// }
+    ///
+    /// // A report the specification rejects, here one with an unknown
+    /// // state, is discarded as a whole.
+    /// parser.reset();
+    /// for byte in *b"7501;state=sleeping" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// let command = parser.end(0x5C);
+    /// assert!(matches!(command.command_type(), CommandType::Invalid));
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`Terminal::on_program_status`]: crate::Terminal::on_program_status
+    /// [`ProgramStatus`]: crate::terminal::ProgramStatus
+    ProgramStatus,
 }
