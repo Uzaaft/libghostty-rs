@@ -1724,7 +1724,16 @@ impl ImageIteration<'_, '_> {
     /// The generation of the image's contents.
     ///
     /// It changes whenever the image's pixels change, including when an
-    /// animation moves to a new frame. Use it as part of your texture cache
+    // Only link to the `kitty` wrappers when the `kitty-graphics` feature
+    // provides them. Otherwise the link would be broken.
+    #[cfg_attr(
+        feature = "kitty-graphics",
+        doc = "[animation](crate::kitty::graphics#animation) moves to a new frame. Use it as part of your texture cache"
+    )]
+    #[cfg_attr(
+        not(feature = "kitty-graphics"),
+        doc = "animation moves to a new frame. Use it as part of your texture cache"
+    )]
     /// key, with the [protocol](Self::protocol) and [image ID](Self::image_id):
     /// if it matches the texture you have, you don't need to read the pixels
     /// again. For Kitty graphics, this is the same value as
