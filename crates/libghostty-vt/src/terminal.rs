@@ -1165,6 +1165,46 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         self.set(Opt::TITLE_REPORT, &enabled)?;
         Ok(self)
     }
+
+    /// Enable checksum reports in response to DECRQCRA
+    /// (`CSI Pi ; Pg ; Pt ; Pl ; Pb ; Pr * y`).
+    ///
+    /// This is disabled by default because a running program can checksum the
+    /// screen one cell at a time and so read back everything on it, including
+    /// output from other programs. Passing `false` disables checksum
+    /// reporting.
+    ///
+    /// While this is disabled, XTCHECKSUM (`CSI Ps # y`), which changes how
+    /// the checksum is calculated, is ignored as well. See
+    /// [`Self::set_xt_checksum_extension`].
+    pub fn set_xt_checksum_report_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
+        self.set(Opt::XT_CHECKSUM_REPORT, &enabled)?;
+        Ok(self)
+    }
+
+    /// Set how the DECRQCRA checksum is calculated after a reset (RIS or
+    /// DECSTR). This also changes the current calculation.
+    ///
+    /// The value holds the same bits as XTCHECKSUM (`CSI Ps # y`) and xterm's
+    /// `checksumExtension` resource, which a running program can still use to
+    /// change the calculation until the next reset. See
+    /// [`XtChecksumExtension`] for the bits.
+    ///
+    /// [`XtChecksumExtension::empty()`] is the calculation of a real DEC
+    /// terminal. Values above 31, i.e. any bits outside
+    /// [`XtChecksumExtension::all()`] kept by
+    /// [`XtChecksumExtension::from_bits_retain`], return
+    /// `Err(Error::InvalidValue)` and leave both the current and the reset
+    /// calculation unchanged.
+    ///
+    /// Checksums are only reported once enabled with
+    /// [`Self::set_xt_checksum_report_enabled`].
+    pub fn set_xt_checksum_extension(&mut self, ext: XtChecksumExtension) -> Result<&mut Self> {
+        // Upstream treats NULL and 0 the same, so there's no need for an
+        // `Option` here: the empty set already means "the DEC default".
+        self.set(Opt::XT_CHECKSUM_EXTENSION, &ext.bits())?;
+        Ok(self)
+    }
 }
 impl Drop for Terminal<'_, '_> {
     fn drop(&mut self) {
@@ -1584,6 +1624,29 @@ impl From<TertiaryDeviceAttributes> for ffi::DeviceAttributesTertiary {
         Self {
             unit_id: value.unit_id,
         }
+    }
+}
+
+bitflags::bitflags! {
+    /// How the DECRQCRA checksum is calculated.
+    ///
+    /// These are the same bits as XTCHECKSUM (`CSI Ps # y`) and xterm's
+    /// `checksumExtension` resource. The empty set is the calculation of a
+    /// real DEC terminal.
+    ///
+    /// See [`Terminal::set_xt_checksum_extension`].
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct XtChecksumExtension: u8 {
+        /// Don't negate the result.
+        const NO_NEGATE = 1;
+        /// Don't add the video attributes of each cell.
+        const NO_ATTRIBUTES = 2;
+        /// Don't omit blanks.
+        const NO_OMIT_BLANKS = 4;
+        /// Count cells that were never written to as spaces.
+        const UNWRITTEN_AS_SPACES = 8;
+        /// Use full codepoints instead of the DEC 8-bit values.
+        const FULL_CODEPOINTS = 16;
     }
 }
 
@@ -4612,6 +4675,193 @@ mod tests {
         assert!(!read.granted());
         assert!(!read.can_remember());
         read.reply(Ok(&[]), &[], false);
+    }
+
+    /// Bold `A`, then `B`, a space and `C` on the first row.
+    ///
+    /// Expected checksums, worked out from upstream's `xt_checksum.compute`:
+    /// bold `A` is 0x41 + 0x80 (bold attribute) = 0xC1, `B` is 0x42 and `C`
+    /// is 0x43. The DEC calculation omits the space because it isn't the
+    /// first cell, so the sum is 0x146, negated to 0xFEBA.
+    const CHECKSUM_SCREEN: &[u8] = b"\x1b[1mA\x1b[0mB C";
+
+    /// DECRQCRA with id 7 over row 1, columns 1 through 4.
+    const DECRQCRA: &[u8] = b"\x1b[7;1;1;1;1;4*y";
+
+    /// Write a DECRQCRA and return whatever the terminal replied.
+    fn request_checksum(terminal: &mut Terminal<'_, '_>, output: &RefCell<Vec<u8>>) -> Vec<u8> {
+        output.borrow_mut().clear();
+        terminal.vt_write(DECRQCRA);
+        output.borrow().clone()
+    }
+
+    #[test]
+    fn xt_checksum_report_requires_opt_in() {
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .expect("callback should register");
+        terminal.vt_write(CHECKSUM_SCREEN);
+
+        // Disabled by default.
+        assert_eq!(request_checksum(&mut terminal, &output), b"");
+
+        terminal
+            .set_xt_checksum_report_enabled(true)
+            .expect("enabling checksum reports should succeed");
+        assert_eq!(
+            request_checksum(&mut terminal, &output),
+            b"\x1bP7!~FEBA\x1b\\"
+        );
+
+        terminal
+            .set_xt_checksum_report_enabled(false)
+            .expect("disabling checksum reports should succeed");
+        assert_eq!(request_checksum(&mut terminal, &output), b"");
+    }
+
+    #[test]
+    fn xt_checksum_xtchecksum_ignored_while_disabled() {
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .expect("callback should register");
+        terminal.vt_write(CHECKSUM_SCREEN);
+
+        // XTCHECKSUM 1 (don't negate) while reporting is off is dropped, so
+        // the reply after enabling is still the negated DEC checksum.
+        terminal.vt_write(b"\x1b[1#y");
+        terminal
+            .set_xt_checksum_report_enabled(true)
+            .expect("enabling checksum reports should succeed");
+        assert_eq!(
+            request_checksum(&mut terminal, &output),
+            b"\x1bP7!~FEBA\x1b\\"
+        );
+
+        // Once enabled, the same XTCHECKSUM takes effect: 0x146 unnegated.
+        terminal.vt_write(b"\x1b[1#y");
+        assert_eq!(
+            request_checksum(&mut terminal, &output),
+            b"\x1bP7!~0146\x1b\\"
+        );
+    }
+
+    #[test]
+    fn xt_checksum_extension_changes_calculation() {
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .expect("callback should register");
+        terminal.vt_write(CHECKSUM_SCREEN);
+        terminal
+            .set_xt_checksum_report_enabled(true)
+            .expect("enabling checksum reports should succeed");
+
+        // Without attributes: 0x41 + 0x42 + 0x43 = 0xC6, negated to 0xFF3A.
+        terminal
+            .set_xt_checksum_extension(XtChecksumExtension::NO_ATTRIBUTES)
+            .expect("valid extension should be accepted");
+        assert_eq!(
+            request_checksum(&mut terminal, &output),
+            b"\x1bP7!~FF3A\x1b\\"
+        );
+
+        // Keeping blanks adds the space: 0x146 + 0x20 = 0x166, negated to
+        // 0xFE9A.
+        terminal
+            .set_xt_checksum_extension(XtChecksumExtension::NO_OMIT_BLANKS)
+            .expect("valid extension should be accepted");
+        assert_eq!(
+            request_checksum(&mut terminal, &output),
+            b"\x1bP7!~FE9A\x1b\\"
+        );
+
+        // The extension also applies after a full reset (RIS), which clears
+        // the screen, so rewrite it.
+        terminal
+            .set_xt_checksum_extension(XtChecksumExtension::NO_NEGATE)
+            .expect("valid extension should be accepted");
+        terminal.vt_write(b"\x1bc");
+        terminal.vt_write(CHECKSUM_SCREEN);
+        assert_eq!(
+            request_checksum(&mut terminal, &output),
+            b"\x1bP7!~0146\x1b\\"
+        );
+
+        // The empty set restores the DEC calculation.
+        terminal
+            .set_xt_checksum_extension(XtChecksumExtension::empty())
+            .expect("empty extension should be accepted");
+        assert_eq!(
+            request_checksum(&mut terminal, &output),
+            b"\x1bP7!~FEBA\x1b\\"
+        );
+
+        // Bits above 31 are rejected and leave the calculation unchanged.
+        let result = terminal.set_xt_checksum_extension(XtChecksumExtension::from_bits_retain(32));
+        assert!(matches!(result, Err(Error::InvalidValue)));
+        assert_eq!(
+            request_checksum(&mut terminal, &output),
+            b"\x1bP7!~FEBA\x1b\\"
+        );
+    }
+
+    #[test]
+    fn xt_checksum_extension_unwritten_and_full_codepoints() {
+        let output = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .expect("callback should register");
+        terminal
+            .set_xt_checksum_report_enabled(true)
+            .expect("enabling checksum reports should succeed");
+
+        // Row 2: column 1 is U+1D400 MATHEMATICAL BOLD CAPITAL A, written
+        // without attributes.
+        // Row 1: column 1 is never written, column 2 is a bold `X`. Bold is
+        // left on so we'd notice it leaking into the unwritten cell.
+        terminal.vt_write("\x1b[2;1H\u{1D400}\x1b[1;2H\x1b[1mX".as_bytes());
+        let request = |terminal: &mut Terminal<'_, '_>, req: &[u8]| {
+            output.borrow_mut().clear();
+            terminal.vt_write(req);
+            output.borrow().clone()
+        };
+
+        // Row 1, columns 1 through 2. Bold `X` is 0x58 + 0x80 = 0xD8.
+        // DEC: the unwritten cell is skipped entirely, so `X` is the only
+        // cell: 0xD8, negated to 0xFF28.
+        let row1 = b"\x1b[7;1;1;1;1;2*y";
+        terminal
+            .set_xt_checksum_extension(XtChecksumExtension::empty())
+            .expect("valid extension should be accepted");
+        assert_eq!(request(&mut terminal, row1), b"\x1bP7!~FF28\x1b\\");
+        // Unwritten as spaces: the unwritten cell is a space with no style
+        // (bold only applies to cells that get printed) and, being the first
+        // cell, isn't trimmed: 0x20 + 0xD8 = 0xF8, negated to 0xFF08.
+        terminal
+            .set_xt_checksum_extension(XtChecksumExtension::UNWRITTEN_AS_SPACES)
+            .expect("valid extension should be accepted");
+        assert_eq!(request(&mut terminal, row1), b"\x1bP7!~FF08\x1b\\");
+
+        // Row 2, column 1.
+        // DEC: anything outside the 8-bit ranges counts as ESC: 0x1B, negated
+        // to 0xFFE5.
+        let row2 = b"\x1b[7;1;2;1;2;1*y";
+        terminal
+            .set_xt_checksum_extension(XtChecksumExtension::empty())
+            .expect("valid extension should be accepted");
+        assert_eq!(request(&mut terminal, row2), b"\x1bP7!~FFE5\x1b\\");
+        // Full codepoints: 0x1D400 truncated to 16 bits is 0xD400, negated to
+        // 0x2C00.
+        terminal
+            .set_xt_checksum_extension(XtChecksumExtension::FULL_CODEPOINTS)
+            .expect("valid extension should be accepted");
+        assert_eq!(request(&mut terminal, row2), b"\x1bP7!~2C00\x1b\\");
     }
 }
 
