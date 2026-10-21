@@ -29,8 +29,8 @@
 //! produced, never in one piece. The callback may be invoked several times for
 //! a single paste; the pieces must be written to the pty in order.
 //!
-//! Text that could inject commands (a newline when unbracketed, or the
-//! bracketed paste terminator when bracketed) is refused with
+//! Text that could inject commands (a newline or carriage return when
+//! unbracketed, or the bracketed paste terminator when bracketed) is refused with
 //! [`Error::Rejected`](crate::Error::Rejected) and nothing written unless
 //! [`Options::with_allow_unsafe`] is set. The usual flow is to call once,
 //! confirm with the user on [`Error::Rejected`](crate::Error::Rejected), and call again with
@@ -116,11 +116,14 @@ use crate::{
 /// Check if paste data is safe to paste into the terminal.
 ///
 /// Data is considered unsafe if it contains:
-///   * Newlines (`\n`) which can inject commands
+///   * Line terminators (`\n` or `\r`) which can inject commands. A carriage return is what the
+///     Enter key sends, so it is as dangerous as a newline on an unbracketed paste.
 ///   * The bracketed paste end sequence (`\x1b[201~`) which can be used to exit bracketed paste
 ///     mode and inject commands
 ///
 /// This check is conservative and considers data unsafe regardless of current terminal state.
+/// [`Terminal::paste`] applies the terminal-state-aware rule itself (line terminators are safe
+/// inside a bracketed paste); use this to apply the stricter rule on top.
 #[must_use]
 pub fn is_safe(data: &str) -> bool {
     unsafe { ffi::ghostty_paste_is_safe(data.as_ptr().cast(), data.len()) }
@@ -140,8 +143,11 @@ pub fn is_safe(data: &str) -> bool {
 /// output buffer.
 ///
 /// If the output buffer is too small, the function returns
-/// `Err(Error::OutOfSpace { required })` where `required` is the required
+/// `Err(Error::OutOfSpace { required })` where `required` is the required size.
 /// The caller can then retry with a sufficiently sized buffer.
+///
+/// This is the encoder [`Terminal::paste`] uses for a text paste;
+/// use it directly when there is no terminal to paste into.
 pub fn encode(data: &mut [u8], bracketed: bool, buf: &mut [u8]) -> Result<usize> {
     let mut written = 0usize;
     let result = unsafe {
@@ -447,11 +453,24 @@ mod tests {
         assert!(result.unwrap());
         assert_eq!(*output.borrow(), b"a\rb");
 
-        // Bracketed: newlines are safe, but the end sequence is not.
+        // So could a lone carriage return, since it is what Enter sends. It
+        // is passed through as is.
+        assert!(!is_safe("a\rb"));
+        let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"a\rb");
+        assert!(matches!(result, Err(Error::Rejected)));
+        assert!(output.borrow().is_empty());
+        let (result, _) = paste(&mut terminal, &output, options, &TEXT, b"a\rb");
+        assert!(result.unwrap());
+        assert_eq!(*output.borrow(), b"a\rb");
+
+        // Bracketed: line terminators are safe, but the end sequence is not.
         terminal.set_mode(Mode::BRACKETED_PASTE, true).unwrap();
         let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"a\nb");
         assert!(result.unwrap());
         assert_eq!(*output.borrow(), b"\x1b[200~a\nb\x1b[201~");
+        let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"a\rb");
+        assert!(result.unwrap());
+        assert_eq!(*output.borrow(), b"\x1b[200~a\rb\x1b[201~");
         let (result, _) = paste(
             &mut terminal,
             &output,
