@@ -7,6 +7,7 @@
 //! it to:
 //!
 //!   - Read the pixels of an image so you can draw it.
+//!   - Play animated images (with [`Terminal::kitty_graphics_animation_tick`]).
 //!   - Inspect the images and placements the storage holds.
 //!
 //! This API doesn't tell you where to draw images. The render state does
@@ -85,6 +86,158 @@
 //! either one safe to use as a cache key on its own. The render state's
 //! placements generation is different: only compare it with the last value
 //! you read from the same render state.
+//!
+//! ## Animation
+//!
+//! The Kitty graphics protocol lets programs send images with several frames
+//! and ask the terminal to play them, much like an animated GIF. The terminal
+//! stores every frame, but it does not keep its own timer. Your application
+//! drives playback by calling [`Terminal::kitty_graphics_animation_tick`].
+//!
+//! Each call shows whichever frame is due at the time you pass in. When an
+//! image moves to a new frame, two things change:
+//!
+//!   - [`Image::data`] returns the pixels of the new frame.
+//!   - [`Image::generation`] returns a new value.
+//!
+//! If you already cache textures by image generation (see
+//! [Knowing what changed](#knowing-what-changed) above), new frames appear
+//! without any extra work.
+//!
+//! The tick also tells you when the next frame is due. Use that time to
+//! schedule a single redraw instead of calling the tick in a loop:
+//!
+//!   1. Call the tick each time you prepare a frame to draw, as long as the
+//!      storage holds at least one image.
+//!   2. If it returns `Some` time, schedule one redraw at the returned time.
+//!      Don't schedule it sooner than your shortest frame interval (for
+//!      example 8 ms for a 120 Hz display).
+//!   3. If it returns `None`, nothing is playing. Don't schedule anything.
+//!
+//! You never need to watch for animations starting. A program starts or
+//! resumes playback by writing a command to the terminal, and that write
+//! already gives you a reason to redraw. The tick on that redraw picks up the
+//! animation. A terminal with no playing animations costs nothing extra.
+//!
+//! Here is a helper, `tick_animations`, that follows these steps. A renderer
+//! calls it once per frame and uses the result to schedule the next redraw.
+//! The example plays a two-frame animation with that helper. It uses a
+//! pretend clock so that it runs instantly:
+//!
+//! ```
+//! use libghostty_vt::{Terminal, error};
+//!
+//! /// The shortest time between two redraws. About 8 ms suits a 120 Hz display.
+//! const MIN_FRAME_INTERVAL_MS: u64 = 8;
+//!
+//! /// Advance any playing animations while preparing a frame to draw.
+//! ///
+//! /// Call this once per frame, before drawing images. It returns how many
+//! /// milliseconds to wait before the next redraw, or `None` if no animation
+//! /// is playing. In that case, don't schedule a redraw for animations at
+//! /// all. A program that starts an animation does so by writing to the
+//! /// terminal, which already causes a redraw.
+//! ///
+//! /// `now_ms` comes from a clock you choose, such as milliseconds since your
+//! /// app started. Always use the same clock with the same starting point.
+//! fn tick_animations(terminal: &mut Terminal<'_, '_>, now_ms: u64) -> error::Result<Option<u64>> {
+//!     let Some(next_ms) = terminal.kitty_graphics_animation_tick(now_ms)? else {
+//!         return Ok(None);
+//!     };
+//!
+//!     // `next_ms` is an absolute time. Turn it into a delay from now.
+//!     let delay_ms = next_ms.saturating_sub(now_ms);
+//!     Ok(Some(delay_ms.max(MIN_FRAME_INTERVAL_MS)))
+//! }
+//!
+//! /// Print the first pixel and the generation of an image.
+//! fn print_image(
+//!     terminal: &Terminal<'_, '_>,
+//!     image_id: u32,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
+//!     let graphics = terminal.kitty_graphics()?;
+//!     let image = graphics.image(image_id).ok_or("no such image")?;
+//!     let pixels = image.data()?.ok_or("pixels still loading")?;
+//!     let generation = image.generation()?;
+//!     print!(
+//!         "pixel=({},{},{}) generation={generation}",
+//!         pixels[0], pixels[1], pixels[2],
+//!     );
+//!     Ok(())
+//! }
+//!
+//! # /// The first pixel and the generation of image 2, for the asserts.
+//! # fn image(terminal: &Terminal<'_, '_>) -> ([u8; 3], u64) {
+//! #     let graphics = terminal.kitty_graphics().unwrap();
+//! #     let image = graphics.image(2).unwrap();
+//! #     let pixels = image.data().unwrap().unwrap();
+//! #     ([pixels[0], pixels[1], pixels[2]], image.generation().unwrap())
+//! # }
+//! #
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let mut terminal = Terminal::new(80, 24)?;
+//! terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?;
+//!
+//! // These commands set up the animation:
+//! //
+//! //   a=T  Send a red 1x1 RGBA image with ID 2 and display it.
+//! //   a=f  Add a blue second frame that shows for 40 ms.
+//! //   a=a  Make the first frame show for 30 ms. It starts at 0 ms,
+//! //        which would mean the frame is skipped.
+//! //   a=a  Start playing on a loop (s=3).
+//! //
+//! // q=2 tells the terminal not to send replies.
+//! terminal.vt_write(
+//!     b"\x1b_Ga=T,f=32,i=2,s=1,v=1,q=2;/wAA/w==\x1b\\\
+//!       \x1b_Ga=f,f=32,i=2,s=1,v=1,z=40,q=2;AAD//w==\x1b\\\
+//!       \x1b_Ga=a,i=2,r=1,z=30,q=2\x1b\\\
+//!       \x1b_Ga=a,i=2,s=3,q=2\x1b\\",
+//! );
+//!
+//! // Draw three frames, following each delay. A real app waits for the
+//! // delay that `tick_animations` returns. To keep this example quick, a
+//! // pretend clock jumps ahead by that delay instead.
+//! let mut now_ms = 0;
+//! # let mut frames = Vec::new();
+//! for _ in 0..3 {
+//!     let delay_ms = tick_animations(&mut terminal, now_ms)?;
+//!
+//!     // The tick invalidates image handles, so `print_image` looks the
+//!     // image up again. The generation changes whenever the frame does.
+//!     print!("  t={now_ms} ms: ");
+//!     print_image(&terminal, 2)?;
+//! #   frames.push((now_ms, image(&terminal), delay_ms));
+//!     let Some(delay_ms) = delay_ms else {
+//!         println!(", nothing playing");
+//!         break;
+//!     };
+//!     println!(", next redraw in {delay_ms} ms");
+//!
+//!     now_ms += delay_ms;
+//! }
+//! # // The first tick starts the red frame's 30 ms timer without changing
+//! # // the image. At 30 ms the blue frame shows for 40 ms, then at 70 ms
+//! # // playback loops back to red, each time with a new generation.
+//! # let [(t0, (p0, g0), d0), (t1, (p1, g1), d1), (t2, (p2, g2), d2)] = frames[..] else {
+//! #     panic!("expected three frames, got {frames:?}");
+//! # };
+//! # assert_eq!((t0, p0, d0), (0, [255, 0, 0], Some(30)));
+//! # assert_eq!((t1, p1, d1), (30, [0, 0, 255], Some(40)));
+//! # assert_eq!((t2, p2, d2), (70, [255, 0, 0], Some(30)));
+//! # assert!(g0 != g1 && g1 != g2 && g0 != g2);
+//!
+//! // Stop playback (s=1). Once stopped, the tick asks for no redraws.
+//! terminal.vt_write(b"\x1b_Ga=a,i=2,s=1,q=2\x1b\\");
+//! let delay_ms = tick_animations(&mut terminal, now_ms)?;
+//! if delay_ms.is_none() {
+//!     println!("  t={now_ms} ms: stopped, no redraw needed");
+//! }
+//! # assert_eq!(delay_ms, None);
+//! # // Stopping leaves the image on the frame it was showing.
+//! # assert_eq!(image(&terminal), (p2, g2));
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! ## Unicode placeholders
 //!
@@ -544,6 +697,73 @@ impl Terminal<'_, '_> {
         })
     }
 
+    /// Advance playing animations and get the time of the next frame.
+    ///
+    /// Every playing animation on the active screen moves to the frame that is
+    /// due at `now_ms`.
+    /// An animation moves forward at most one frame per call. If calls arrive
+    /// late, playback slows down rather than skipping frames.
+    ///
+    /// Images that moved to a new frame get a new
+    /// [generation](Image::generation), and their [`Image::data`] returns the
+    /// new frame's pixels.
+    ///
+    /// Time is measured in milliseconds on a clock you choose, such as the
+    /// time since your application started. The clock must only move forward,
+    /// and you must keep using the same clock with the same starting point for
+    /// as long as the terminal exists. The returned time uses the same clock.
+    ///
+    /// This call changes the image storage. Like [`Terminal::vt_write`], it
+    /// invalidates any [`Image`] handles and image data you are holding, so
+    /// look images up again afterwards. Because this method takes
+    /// `&mut self`, any [`Graphics`], [`Image`] or pixel slice must be dropped
+    /// first and looked up again afterwards with [`Terminal::kitty_graphics`],
+    /// [`Graphics::image`] and [`Image::data`]:
+    ///
+    /// ```compile_fail,E0502
+    /// # use libghostty_vt::Terminal;
+    /// let mut terminal = Terminal::new(80, 24).unwrap();
+    /// let graphics = terminal.kitty_graphics().unwrap();
+    /// let image = graphics.image(1).unwrap();
+    /// let pixels = image.data().unwrap().unwrap();
+    /// // The tick invalidates `pixels`, so it can't run while they're held.
+    /// terminal.kitty_graphics_animation_tick(0).unwrap();
+    /// println!("{}", pixels[0]);
+    /// ```
+    ///
+    /// Call this once each time you prepare a frame to draw, not in a loop.
+    /// The [Animation](crate::kitty::graphics#animation) section explains how
+    /// to schedule redraws with the returned time and includes an example.
+    ///
+    /// Returns `Some` with the time the next frame is due, in milliseconds on
+    /// the same clock as `now_ms`, if an animation is playing. Returns `None`
+    /// if nothing is playing or Kitty graphics are disabled at build time.
+    //
+    // This lives on `Terminal` rather than `Graphics` on purpose: upstream
+    // takes the storage handle, but `Graphics` and the `Image`s and pixel
+    // slices it hands out all borrow the terminal immutably, and any number of
+    // them can exist at once. Taking `&mut self` here is what lets the borrow
+    // checker guarantee none of them survive the tick that invalidates them.
+    pub fn kitty_graphics_animation_tick(&mut self, now_ms: u64) -> Result<Option<u64>> {
+        // Not `Terminal::kitty_graphics`: when Kitty graphics are disabled in
+        // the Zig build (which our Cargo features don't control), upstream
+        // reports the handle as `NO_VALUE`, and that getter would turn it into
+        // `Err(Error::InvalidValue)`. Here it just means nothing is playing.
+        let Some(graphics) =
+            self.get_optional::<ffi::KittyGraphics>(ffi::TerminalData::KITTY_GRAPHICS)?
+        else {
+            return Ok(None);
+        };
+        let mut next_ms = MaybeUninit::<u64>::zeroed();
+        // SAFETY: `graphics` was just obtained from this terminal and nothing
+        // else can be borrowing it, as we hold `&mut self`. `next_ms` is a
+        // valid, non-NULL out-pointer, which is only written on success.
+        let result = unsafe {
+            ffi::ghostty_kitty_graphics_animation_tick(graphics, now_ms, next_ms.as_mut_ptr())
+        };
+        from_optional_result_uninit(result, next_ms)
+    }
+
     /// The Kitty image storage limit in bytes for the active screen.
     ///
     /// A value of zero means the Kitty graphics protocol is disabled.
@@ -720,8 +940,8 @@ impl<'t> Image<'t> {
     }
 
     /// A value that changes whenever this image's pixels may have changed:
-    /// when a program sends the image or replaces it, and when an animation
-    /// moves to a new frame.
+    /// when a program sends the image or replaces it, and when an
+    /// [animation](crate::kitty::graphics#animation) moves to a new frame.
     ///
     /// Use it as part of your texture cache key. If it matches the texture you
     /// have, you don't need to read the pixels again. The render state reports
@@ -1410,6 +1630,91 @@ pub struct DecodedImage<'alloc> {
     pub height: u32,
     /// Byte buffer containing the decoded RGBA pixel data.
     pub data: Bytes<'alloc>,
+}
+
+#[cfg(all(test, not(miri)))]
+mod animation_tests {
+    use crate::Terminal;
+
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const BLUE: [u8; 4] = [0, 0, 255, 255];
+
+    fn terminal() -> Terminal<'static, 'static> {
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        terminal
+            .set_kitty_image_storage_limit(64 * 1024 * 1024)
+            .unwrap();
+        terminal
+    }
+
+    /// The first pixel and the generation of image 1.
+    fn image(terminal: &Terminal<'_, '_>) -> ([u8; 4], u64) {
+        let graphics = terminal.kitty_graphics().unwrap();
+        let image = graphics.image(1).unwrap();
+        let pixels = image.data().unwrap().unwrap();
+        (pixels[..4].try_into().unwrap(), image.generation().unwrap())
+    }
+
+    #[test]
+    fn nothing_playing_returns_none() {
+        let mut terminal = terminal();
+
+        // Empty storage.
+        assert_eq!(terminal.kitty_graphics_animation_tick(0).unwrap(), None);
+
+        // A placed static image.
+        terminal.vt_write(b"\x1b_Ga=T,f=32,i=1,s=1,v=1,q=2;/wAA/w==\x1b\\");
+        assert_eq!(terminal.kitty_graphics_animation_tick(0).unwrap(), None);
+        assert_eq!(terminal.kitty_graphics_animation_tick(1000).unwrap(), None);
+    }
+
+    #[test]
+    fn advances_one_frame_per_tick_and_reports_the_next_frame_time() {
+        let mut terminal = terminal();
+
+        // A red root frame shown for 25 ms and a blue second frame shown for
+        // 60 ms, playing on a loop.
+        terminal.vt_write(
+            b"\x1b_Ga=T,f=32,i=1,s=1,v=1,q=2;/wAA/w==\x1b\\\
+              \x1b_Ga=f,f=32,i=1,s=1,v=1,z=60,q=2;AAD//w==\x1b\\\
+              \x1b_Ga=a,i=1,r=1,z=25,q=2\x1b\\\
+              \x1b_Ga=a,i=1,s=3,q=2\x1b\\",
+        );
+        let (pixel, g0) = image(&terminal);
+        assert_eq!(pixel, RED);
+
+        // The first tick starts the red frame's timer and changes nothing.
+        let tick = |terminal: &mut Terminal<'_, '_>, now_ms| {
+            terminal.kitty_graphics_animation_tick(now_ms).unwrap()
+        };
+        assert_eq!(tick(&mut terminal, 1000), Some(1025));
+        assert_eq!(image(&terminal), (RED, g0));
+
+        // An early tick reports the same absolute time.
+        assert_eq!(tick(&mut terminal, 1010), Some(1025));
+        assert_eq!(image(&terminal), (RED, g0));
+
+        // On time, the blue frame shows with a new generation.
+        assert_eq!(tick(&mut terminal, 1025), Some(1085));
+        let (pixel, g1) = image(&terminal);
+        assert_eq!(pixel, BLUE);
+        assert_ne!(g1, g0);
+
+        // A very late tick still moves on by exactly one frame, back to red,
+        // and counts the red frame's gap from now. 5030 ms is chosen so that
+        // catching up would look different: blue started at 1025 ms and the
+        // loop lasts 85 ms, so 5030 ms is 10 ms into a blue frame on the
+        // original schedule.
+        assert_eq!(tick(&mut terminal, 5030), Some(5055));
+        let (pixel, g2) = image(&terminal);
+        assert_eq!(pixel, RED);
+        assert_ne!(g2, g1);
+
+        // Stopped playback has nothing to schedule and keeps the frame.
+        terminal.vt_write(b"\x1b_Ga=a,i=1,s=1,q=2\x1b\\");
+        assert_eq!(tick(&mut terminal, 6000), None);
+        assert_eq!(image(&terminal), (RED, g2));
+    }
 }
 
 #[cfg(all(test, not(miri), feature = "kitty-graphics", feature = "png"))]
