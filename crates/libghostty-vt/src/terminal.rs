@@ -1,6 +1,6 @@
 //! Types and functions around terminal state management.
 
-use std::{io::Write, marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
+use std::{io::Write, marker::PhantomData, mem::MaybeUninit, num::NonZeroU16, ptr::NonNull};
 
 use crate::{
     alloc::{Allocator, Bytes, Object},
@@ -2399,6 +2399,61 @@ pub enum ProgramStatusKind {
     Auth = ffi::ProgramStatusKind::AUTH,
 }
 
+/// A request from the running program to resize the window.
+///
+/// Passed to [`Terminal::on_resize_window`].
+///
+/// New kinds may be added in later versions. Match with a wildcard arm and
+/// ignore any kind you don't handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ResizeWindow {
+    /// Resize the window's text area to a size in rows and columns
+    /// (CSI 8 ; rows ; columns t).
+    Grid {
+        /// Requested height in rows, or `None` to keep the current height.
+        rows: Option<NonZeroU16>,
+        /// Requested width in columns, or `None` to keep the current width.
+        columns: Option<NonZeroU16>,
+    },
+}
+
+impl ResizeWindow {
+    /// Reads a request, or gives `None` for a kind these bindings don't know.
+    ///
+    /// This takes a pointer rather than the struct by value on purpose: for
+    /// a kind without a payload upstream may leave the whole union
+    /// unwritten, and copying an entirely uninitialized union relies on
+    /// validity rules Rust hasn't settled yet. So we only read the tag, and
+    /// then only the union field the tag says is active.
+    ///
+    /// # Safety
+    ///
+    /// Caller must guarantee that `raw` is valid for reads and properly
+    /// aligned, that its `tag` is initialized, and that the union field named
+    /// by `tag` is initialized.
+    unsafe fn from_raw(raw: *const ffi::TerminalResizeWindow) -> Option<Self> {
+        // SAFETY: Upheld by caller. This reads just the tag field through
+        // the raw pointer, without making a reference to the whole struct.
+        match unsafe { (*raw).tag } {
+            ffi::TerminalResizeWindowTag::GRID => {
+                // SAFETY: Upheld by caller; the tag says `grid` is the
+                // active union field.
+                let ffi::TerminalResizeWindowGrid { rows, columns } = unsafe { (*raw).value.grid };
+                // Upstream uses 0 as "keep the current size", which is
+                // exactly what `None` means here.
+                Some(Self::Grid {
+                    rows: NonZeroU16::new(rows),
+                    columns: NonZeroU16::new(columns),
+                })
+            }
+            // Upstream may add kinds without an ABI break. We can't read
+            // their payload, so there's no Rust value for them.
+            _ => None,
+        }
+    }
+}
+
 //---------------------------------------
 // Callbacks
 //---------------------------------------
@@ -3124,6 +3179,68 @@ handlers! {
         // SAFETY: The report and its strings are only valid during the
         // callback, which `ProgramStatus`'s lifetime enforces.
         func(term, unsafe { ProgramStatus::from_raw(report) });
+    }
+
+    /// Call the given function when the running program asks to resize the
+    /// window, such as with CSI 8 ; rows ; columns t.
+    ///
+    /// More kinds of requests may be reported in later versions; see
+    /// [`ResizeWindow`]. Requests of a kind these bindings don't know are not
+    /// passed to the closure. The terminal is not resized by this: the embedder
+    /// decides whether to allow the request, and if so resizes its window and
+    /// the terminal (with [`Terminal::resize`]). Letting any program resize
+    /// the window is a nuisance at best, so consider making this opt-in for
+    /// users.
+    ///
+    /// Without this callback, resize requests are ignored.
+    ///
+    /// ```rust
+    /// use std::{cell::Cell, num::NonZeroU16};
+    /// use libghostty_vt::{Terminal, terminal::ResizeWindow};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let requested = Cell::new(None);
+    ///
+    /// let mut terminal = Terminal::new(80, 24)?;
+    /// terminal.on_resize_window(|_term, request| match request {
+    ///     ResizeWindow::Grid { rows, columns } => requested.set(Some((rows, columns))),
+    ///     // Ignore kinds of requests you don't handle.
+    ///     _ => {}
+    /// })?;
+    ///
+    /// terminal.vt_write(b"\x1b[8;30;100t");
+    /// # assert_eq!(requested.get(), Some((NonZeroU16::new(30), NonZeroU16::new(100))));
+    ///
+    /// // The terminal itself keeps its size. Apply the request yourself
+    /// // (`None` means keep the current size of that dimension).
+    /// # assert_eq!((terminal.cols()?, terminal.rows()?), (80, 24));
+    /// if let Some((rows, columns)) = requested.take() {
+    ///     let rows = rows.map_or(terminal.rows()?, NonZeroU16::get);
+    ///     let cols = columns.map_or(terminal.cols()?, NonZeroU16::get);
+    ///     terminal.resize(cols, rows, 8, 16)?;
+    /// }
+    /// # assert_eq!((terminal.cols()?, terminal.rows()?), (100, 30));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn on_resize_window(
+        &mut self,
+        tag = RESIZE_WINDOW,
+        from = TerminalResizeWindowFn(request: *const ffi::TerminalResizeWindow),
+        to = ResizeWindowFn(ResizeWindow),
+    ) |term, func| {
+        // SAFETY: We trust libghostty to give us a valid, non-NULL request
+        // that lives for the callback duration, with the tag and its
+        // matching payload written. For a payload-less kind the union may be
+        // left unwritten, which is why `from_raw` checks the tag before
+        // reading anything else, instead of us copying the struct out.
+        let request = unsafe { ResizeWindow::from_raw(request) };
+        // Upstream asks callbacks to ignore tags they don't handle. A tag
+        // these bindings don't know has no Rust value, so the closure isn't
+        // called for it.
+        if let Some(request) = request {
+            func(term, request);
+        }
     }
 }
 
@@ -4197,6 +4314,95 @@ mod tests {
         assert!(output.into_inner().is_empty());
     }
 
+    /// Feed `input` to an 80x24 terminal with a resize window callback,
+    /// returning the requests it saw and the terminal's size afterwards as
+    /// `(cols, rows)`.
+    ///
+    /// Assertions happen outside the callback: a panic inside it would
+    /// abort the whole test binary instead of failing the test.
+    fn resize_window(input: &[u8]) -> (Vec<ResizeWindow>, (u16, u16)) {
+        let seen = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        terminal
+            .on_resize_window(|_, request| seen.borrow_mut().push(request))
+            .unwrap();
+        terminal.vt_write(input);
+        let size = (terminal.cols().unwrap(), terminal.rows().unwrap());
+        drop(terminal);
+        (seen.into_inner(), size)
+    }
+
+    #[test]
+    fn resize_window_delivers_rows_then_columns() {
+        let (seen, size) = resize_window(b"\x1b[8;30;100t");
+        // Asymmetric values catch a swapped rows/columns mapping.
+        assert_eq!(
+            seen,
+            [ResizeWindow::Grid {
+                rows: NonZeroU16::new(30),
+                columns: NonZeroU16::new(100),
+            }]
+        );
+        // The request alone doesn't resize the terminal.
+        assert_eq!(size, (80, 24));
+    }
+
+    #[test]
+    fn resize_window_reports_omitted_and_zero_params_as_none() {
+        // Upstream can't tell an explicit 0 from an omitted parameter, and
+        // both mean "keep the current size" for that dimension.
+        let (seen, size) = resize_window(b"\x1b[8;;120t\x1b[8;30t\x1b[8t\x1b[8;0;0t");
+        assert_eq!(
+            seen,
+            [
+                ResizeWindow::Grid {
+                    rows: None,
+                    columns: NonZeroU16::new(120),
+                },
+                ResizeWindow::Grid {
+                    rows: NonZeroU16::new(30),
+                    columns: None,
+                },
+                ResizeWindow::Grid {
+                    rows: None,
+                    columns: None,
+                },
+                ResizeWindow::Grid {
+                    rows: None,
+                    columns: None,
+                },
+            ]
+        );
+        assert_eq!(size, (80, 24));
+    }
+
+    #[test]
+    fn resize_window_from_raw_skips_unknown_tags() {
+        let mut raw = ffi::TerminalResizeWindow {
+            tag: ffi::TerminalResizeWindowTag::GRID,
+            ..Default::default()
+        };
+        raw.value.grid = ffi::TerminalResizeWindowGrid {
+            rows: 30,
+            columns: 100,
+        };
+        assert_eq!(
+            // SAFETY: `raw` is a live local with the tag and `grid` written.
+            unsafe { ResizeWindow::from_raw(&raw const raw) },
+            Some(ResizeWindow::Grid {
+                rows: NonZeroU16::new(30),
+                columns: NonZeroU16::new(100),
+            })
+        );
+
+        // A kind added upstream later has no Rust value. That the trampoline
+        // then skips the closure is checked by the miri mock in
+        // `miri_soundness::resize_window_skips_unknown_tags`.
+        raw.tag = ffi::TerminalResizeWindowTag::GRID + 1;
+        // SAFETY: Ditto; an unknown tag makes `from_raw` read nothing else.
+        assert_eq!(unsafe { ResizeWindow::from_raw(&raw const raw) }, None);
+    }
+
     fn tiny_terminal() -> Terminal<'static, 'static> {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
@@ -4415,7 +4621,8 @@ mod tests {
 /// These tests are gated on `cfg(miri)` because they construct the exact
 /// shapes the C API produces and feed them into the safe wrappers, which was
 /// UB before the wrappers stopped building slices and `&str` from unvalidated
-/// FFI input. Run with:
+/// FFI input. The module also holds tests that need the mock C API to produce
+/// shapes real libghostty can't yet (e.g. unknown upstream tags). Run with:
 ///
 /// ```sh
 /// cargo +nightly miri test -p libghostty-vt miri_soundness
@@ -4431,6 +4638,7 @@ mod miri_soundness {
         userdata: *mut std::ffi::c_void,
         write: ffi::TerminalWritePtyFn,
         read: ffi::TerminalClipboardReadFn,
+        resize: ffi::TerminalResizeWindowFn,
     }
 
     #[unsafe(no_mangle)]
@@ -4444,6 +4652,7 @@ mod miri_soundness {
             userdata: std::ptr::null_mut(),
             write: None,
             read: None,
+            resize: None,
         });
         // SAFETY: The constructor supplies a writable out parameter.
         unsafe { *out = Box::into_raw(terminal).cast() };
@@ -4474,6 +4683,10 @@ mod miri_soundness {
                 // SAFETY: The wrapper supplies the matching callback ABI.
                 terminal.read = Some(unsafe { std::mem::transmute(value) });
             }
+            ffi::TerminalOption::RESIZE_WINDOW => {
+                // SAFETY: The wrapper supplies the matching callback ABI.
+                terminal.resize = Some(unsafe { std::mem::transmute(value) });
+            }
             _ => return ffi::Result::INVALID_VALUE,
         }
         ffi::Result::SUCCESS
@@ -4495,14 +4708,45 @@ mod miri_soundness {
         data: *const u8,
         len: usize,
     ) {
-        let (userdata, write, read) = {
+        let (userdata, write, read, resize) = {
             // SAFETY: The wrapper supplies a live handle. End this borrow
             // before dispatch, since a clipboard reply can dispatch again.
             let mock = unsafe { &*terminal.cast::<MockTerminal>() };
-            (mock.userdata, mock.write, mock.read)
+            (mock.userdata, mock.write, mock.read, mock.resize)
         };
         // SAFETY: vt_write supplies initialized bytes for this call.
-        if unsafe { std::slice::from_raw_parts(data, len) } == b"clipboard" {
+        let bytes = unsafe { std::slice::from_raw_parts(data, len) };
+        if let Some(kind) = bytes.strip_prefix(b"resize:") {
+            // The libghostty these bindings build against only sends tags
+            // they know, so a kind added upstream later can only be faked
+            // here. The input picks the tag.
+            let known = kind == b"grid";
+            // Write only the tag and the active field, leaving the rest of the
+            // union (and struct padding) uninitialized, so miri flags any
+            // read of bytes upstream never wrote. An unknown kind has no
+            // field we know, so its whole union stays uninitialized and miri
+            // also flags a grid read before the tag is checked.
+            let mut request = MaybeUninit::<ffi::TerminalResizeWindow>::uninit();
+            let p = request.as_mut_ptr();
+            // SAFETY: `p` points to writable, aligned storage for the struct,
+            // and `&raw mut` makes no reference to the uninitialized memory.
+            // This matches `lib.TaggedUnion.cval`, whose `@unionInit` leaves
+            // the rest of the union undefined.
+            unsafe {
+                if known {
+                    (&raw mut (*p).tag).write(ffi::TerminalResizeWindowTag::GRID);
+                    (&raw mut (*p).value.grid).write(ffi::TerminalResizeWindowGrid {
+                        rows: 30,
+                        columns: 100,
+                    });
+                } else {
+                    (&raw mut (*p).tag).write(ffi::TerminalResizeWindowTag::GRID + 1);
+                }
+            }
+            // SAFETY: Registration provided this callback and its userdata;
+            // the request remains live throughout synchronous dispatch.
+            unsafe { resize.unwrap()(terminal, userdata, p.cast_const()) };
+        } else if bytes == b"clipboard" {
             let request = ffi::ClipboardRead {
                 ctx: terminal.cast(),
                 reply: Some(reply_to_read),
@@ -4586,6 +4830,30 @@ mod miri_soundness {
         }
         dispatch(terminal);
         assert_eq!(*order.borrow(), [1, 2, 3]);
+    }
+
+    /// Upstream may add resize request kinds without an ABI break, and asks
+    /// callbacks to ignore tags they don't handle. The trampoline must skip
+    /// the closure for such a tag rather than abort (e.g. by `expect`ing the
+    /// conversion inside `extern "C"`), while still delivering known tags.
+    #[test]
+    fn resize_window_skips_unknown_tags() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .on_resize_window(|_, request| seen.borrow_mut().push(request))
+            .unwrap();
+        // `GRID + 1`, then `GRID` as the positive control.
+        terminal.vt_write(b"resize:unknown");
+        terminal.vt_write(b"resize:grid");
+        drop(terminal);
+        assert_eq!(
+            seen.into_inner(),
+            [ResizeWindow::Grid {
+                rows: NonZeroU16::new(30),
+                columns: NonZeroU16::new(100),
+            }]
+        );
     }
 
     /// The C trampoline declares `contents: ?[*]const ClipboardContent` and

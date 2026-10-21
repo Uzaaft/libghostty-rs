@@ -96,8 +96,10 @@
             cargo miri test --locked -p libghostty-vt-sys --lib
             cargo miri test --locked -p libghostty-vt --lib alloc::tests::
             # Issue #74 soundness regression tests (both clipboard findings
-            # live in this module). Miri aborts the test process at the first
-            # UB it finds, so a broken tree reports only the first failing test.
+            # live in this module), plus tests that need the mock C API to
+            # produce shapes real libghostty can't yet. Miri aborts the test
+            # process at the first UB it finds, so a broken tree reports only
+            # the first failing test.
             cargo miri test --locked -p libghostty-vt --lib miri_soundness
           '';
         };
