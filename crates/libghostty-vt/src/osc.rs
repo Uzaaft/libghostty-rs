@@ -292,6 +292,7 @@ impl<'p> Command<'p, '_> {
 /// # }
 /// ```
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 #[expect(missing_docs, reason = "missing upstream docs")]
 pub enum CommandType<'p> {
     #[default]
