@@ -1917,13 +1917,17 @@ impl std::iter::FusedIterator for ClipboardContents<'_> {}
 
 /// One MIME representation in a clipboard write.
 ///
+/// Both strings are borrowed and valid only for the duration of the callback.
 /// The data is binary-safe and has already been decoded from any protocol-level
 /// encoding. A zero-length data string is an explicit empty representation; it
 /// does not clear the clipboard.
 #[derive(Clone, Copy, Debug)]
 pub struct ClipboardContent<'t> {
     /// MIME type of the representation.
-    pub mime: &'t str,
+    ///
+    /// libghostty does not promise the MIME type is UTF-8, so it is exposed as
+    /// raw bytes.
+    pub mime: &'t [u8],
     /// Decoded, binary-safe representation data.
     pub data: &'t [u8],
 }
@@ -1936,11 +1940,9 @@ impl ClipboardContent<'_> {
         // SAFETY: Upheld by caller
         unsafe {
             Self {
-                // Ghostty currently only emits ASCII mime types, but the C
-                // API does not guarantee UTF-8, so validate rather than
-                // trust; fall back to the opaque-bytes mime type.
-                mime: std::str::from_utf8(value.mime.to_bytes())
-                    .unwrap_or("application/octet-stream"),
+                // The C API does not promise UTF-8 for the MIME type, so
+                // hand the bytes over as-is and let callers validate.
+                mime: value.mime.to_bytes(),
                 // The data is binary-safe per the C API (e.g. an image/png
                 // representation), so it must not be exposed as `str`.
                 data: value.data.to_bytes(),
@@ -5233,13 +5235,14 @@ mod miri_soundness {
         };
         // SAFETY: `data` outlives the borrow, matching the callback contract.
         let content = unsafe { ClipboardContent::from_raw(&raw) };
-        assert_eq!(content.mime, "text/plain");
+        assert_eq!(content.mime, b"text/plain");
         assert_eq!(content.data, &data);
     }
 
-    /// `mime` stays `&str`, so it must be validated rather than trusted:
-    /// a non-UTF-8 mime string falls back to the opaque-bytes mime type
-    /// instead of producing an invalid `&str`.
+    /// The C API doesn't promise UTF-8 for `mime` either. It used to be
+    /// validated into a `&str`, with non-UTF-8 values replaced by
+    /// `application/octet-stream`; it is raw bytes now, so check a non-UTF-8
+    /// mime string comes back verbatim instead of being substituted.
     #[test]
     fn clipboard_content_with_non_utf8_mime() {
         let mime = [0xFF_u8, 0xFE];
@@ -5257,7 +5260,7 @@ mod miri_soundness {
         // SAFETY: `mime` and `data` outlive the borrow, matching the
         // callback contract.
         let content = unsafe { ClipboardContent::from_raw(&raw) };
-        assert_eq!(content.mime, "application/octet-stream");
+        assert_eq!(content.mime, &mime);
         assert_eq!(content.data, b"hello");
     }
 }
