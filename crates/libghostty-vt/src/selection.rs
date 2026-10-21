@@ -607,6 +607,12 @@ impl<'t, 's> FormatOptions<'t, 's> {
         self
     }
     /// Specify whether to trim trailing whitespace on non-blank lines.
+    ///
+    /// Trailing blank lines are always trimmed, except in [`Format::Vt`]
+    /// output without trimming, where they are kept as part of the layout.
+    ///
+    /// Defaults to `false`, so [`Format::Vt`] output keeps trailing blank
+    /// rows unless this is set.
     #[must_use]
     pub fn with_trim(mut self, value: bool) -> Self {
         self.inner.trim = value;
