@@ -62,6 +62,12 @@ impl<'t, 's> FormatterOptions<'t, 's> {
         self
     }
     /// Specify whether to trim trailing whitespace on non-blank lines.
+    ///
+    /// Trailing blank lines are always trimmed, except in [`Format::Vt`]
+    /// output without trimming, where they are kept as part of the layout.
+    ///
+    /// Defaults to `false`, so [`Format::Vt`] output keeps trailing blank
+    /// rows unless this is set.
     #[must_use]
     pub fn with_trim(mut self, value: bool) -> Self {
         self.inner.trim = value;
@@ -388,6 +394,75 @@ mod tests {
             format_write(&mut formatter, &mut actual).unwrap();
             assert_eq!(actual, expected, "{format:?}");
         }
+    }
+
+    /// Mirrors upstream's `PageList VT without trim keeps trailing blank
+    /// rows` test in `src/terminal/formatter.zig`.
+    #[test]
+    fn only_untrimmed_vt_keeps_trailing_blank_rows() {
+        let mut terminal = Terminal::new(10, 6).unwrap();
+        terminal.vt_write(b"one\r\ntwo");
+        let format = |format, trim| {
+            let options = FormatterOptions::new().with_format(format).with_trim(trim);
+            format_buf(&mut Formatter::new(&terminal, options).unwrap())
+        };
+
+        // Six rows, two with text, so five newlines.
+        assert_eq!(format(Format::Vt, false), b"one\r\ntwo\r\n\r\n\r\n\r\n");
+        // Trimmed output and other formats still drop them.
+        assert_eq!(format(Format::Vt, true), b"one\r\ntwo");
+        assert_eq!(format(Format::Plain, false), b"one\ntwo");
+    }
+
+    /// The one-shot selection API goes through the same upstream
+    /// `PageListFormatter`, so the selection's trailing blank rows are kept
+    /// too, and only up to the selection's last row.
+    #[test]
+    fn only_untrimmed_vt_keeps_trailing_blank_rows_in_selection() {
+        use crate::{
+            selection::FormatOptions,
+            terminal::{Point, PointCoordinate},
+        };
+
+        let mut terminal = Terminal::new(10, 6).unwrap();
+        terminal.vt_write(b"one\r\ntwo");
+        let at = |x, y| {
+            terminal
+                .grid_ref(Point::Active(PointCoordinate { x, y }))
+                .unwrap()
+        };
+        // Rows 0 to 3: two with text, then two blank ones.
+        let selection = Selection::new(at(0, 0), at(9, 3), false);
+        let format = |format, trim| {
+            let options = FormatOptions::new()
+                .with_emit_format(format)
+                .with_trim(trim)
+                .with_selection(&selection);
+            let bytes = terminal.format_selection_alloc(None, options).unwrap();
+            bytes.unwrap().to_vec()
+        };
+        // Unlike `Formatter`, the selection API always emits upstream's
+        // `.styles` extras around VT content: the whole 256-color palette as
+        // OSC 4 sequences (each ending in ST) before it, and the SGR reset
+        // after it. Strip them one by one, unwrapping at each step, so that
+        // anything else (stray output, a missing entry) fails the test
+        // instead of being silently cut off along with them.
+        let vt_content = |trim| {
+            let output = format(Format::Vt, trim);
+            let mut rest = output.as_slice();
+            for _ in 0..256 {
+                rest = rest.strip_prefix(b"\x1b]4;").unwrap();
+                let st = rest.windows(2).position(|w| w == b"\x1b\\").unwrap();
+                rest = &rest[st + 2..];
+            }
+            rest.strip_suffix(b"\x1b[0m").unwrap().to_vec()
+        };
+
+        // Four rows, so three newlines: one between the text rows and one
+        // for each blank row. The blank rows below the selection don't count.
+        assert_eq!(vt_content(false), b"one\r\ntwo\r\n\r\n");
+        assert_eq!(vt_content(true), b"one\r\ntwo");
+        assert_eq!(format(Format::Plain, false), b"one\ntwo");
     }
 
     #[test]
