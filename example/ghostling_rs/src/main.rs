@@ -9,6 +9,7 @@
 #![deny(unsafe_code)] // Well, almost.
 use std::{
     cell::Cell,
+    collections::HashMap,
     time::{Duration, Instant},
 };
 
@@ -25,9 +26,9 @@ use libghostty_vt::{
     alloc::Bytes,
     build_info,
     key::{self, Key},
-    kitty::graphics::{self, DecodePng, DecodedImage, Graphics, Layer, PlacementIterator},
+    kitty::graphics::{self, DecodePng, DecodedImage, Graphics},
     mouse,
-    render::{CellIterator, RenderState, RowIterator},
+    render::{CellIterator, ImageIterator, ImageLayer, ImageProtocol, RenderState, RowIterator},
     selection::gesture::{DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     style::RgbColor,
     terminal::{
@@ -111,8 +112,9 @@ async fn main() -> Result<()> {
         .set_terminfo_name(TERM)?;
 
     // The terminal options don't include cell pixel dimensions, so
-    // issue an initial resize to set them.  Without this, Kitty
-    // graphics placement_rect would divide by zero cell sizes.
+    // issue an initial resize to set them.  Kitty image sizes depend on
+    // the cell size, and without one the render state's image list is
+    // empty.
     terminal.resize(cols, rows, dims.cell_width as u32, dims.cell_height as u32)?;
 
     terminal
@@ -286,7 +288,43 @@ struct Renderer<'alloc> {
     render_state: RenderState<'alloc>,
     row_it: RowIterator<'alloc>,
     cell_it: CellIterator<'alloc>,
-    placement_it: PlacementIterator<'alloc>,
+    image_it: ImageIterator<'alloc>,
+    /// The image placements to draw, copied out of the render state's image
+    /// list and sorted by z-index. Most frames don't change any image, so we
+    /// keep this between frames and only rebuild it when the list changed.
+    images: Vec<QueuedImage>,
+    /// The placements generation `images` was built from. `None` until the
+    /// first frame, so that frame always reads the list: a new render state
+    /// reports 0, so starting at `Some(0)` would skip it.
+    images_generation: Option<u64>,
+    /// Uploaded image pixels, keyed by image ID, with the image generation
+    /// they were read at. Placements of the same image share one texture
+    /// (an image shown with placeholder cells arrives as one entry per row),
+    /// and the pixels are only read again when the generation changes.
+    /// Dropping a `Texture2D` frees it, so removing an entry is enough.
+    textures: HashMap<u32, (u64, Texture2D)>,
+}
+
+/// One image placement from the render state's image list, with everything
+/// needed to draw it. The pixels are not included: they live in the Kitty
+/// graphics storage and are looked up by `image_id` when drawing.
+struct QueuedImage {
+    image_id: u32,
+    /// Changes whenever the image's pixels do (including on every animation
+    /// frame), so it tells us when the cached texture is out of date.
+    image_generation: u64,
+    layer: ImageLayer,
+    z: i32,
+    /// The top-left cell, relative to the viewport. Can be negative when the
+    /// image starts above or left of the viewport.
+    viewport_col: i32,
+    viewport_row: i32,
+    /// Pixel offset of the image within its top-left cell.
+    cell_offset: Vec2,
+    /// The size to draw the image at, in pixels.
+    size: Vec2,
+    /// The part of the image to draw, in image pixels.
+    source: Rect,
 }
 
 impl<'alloc> Renderer<'alloc> {
@@ -295,7 +333,10 @@ impl<'alloc> Renderer<'alloc> {
             render_state: RenderState::new()?,
             row_it: RowIterator::new()?,
             cell_it: CellIterator::new()?,
-            placement_it: PlacementIterator::new()?,
+            image_it: ImageIterator::new()?,
+            images: Vec::new(),
+            images_generation: None,
+            textures: HashMap::new(),
         })
     }
 
@@ -328,8 +369,72 @@ impl<'alloc> Renderer<'alloc> {
         let colors = snapshot.colors()?;
         clear_background(color(colors.background));
 
-        // Obtain the Kitty graphics storage from the terminal. This is a
-        // reference valid until the next mutating terminal call.
+        // Read the render state's image list, which says where to draw every
+        // image on screen, however the program placed it (at a cell, with
+        // Unicode placeholder cells, or relative to another image). The list
+        // only changes when its generation does, so most frames reuse the
+        // queue built last time.
+        let generation = snapshot.image_placements_generation()?;
+        if self.images_generation != Some(generation) {
+            self.images_generation = Some(generation);
+            self.images.clear();
+
+            let mut placements = self.image_it.update(&snapshot)?;
+            while let Some(placement) = placements.next() {
+                // We can only draw Kitty graphics. Skip other protocols
+                // (including ones newer than this crate, which give an
+                // error) instead of failing the whole frame.
+                let Ok(ImageProtocol::Kitty) = placement.protocol() else {
+                    continue;
+                };
+
+                self.images.push(QueuedImage {
+                    image_id: placement.image_id()?,
+                    image_generation: placement.image_generation()?,
+                    layer: placement.layer()?,
+                    z: placement.z()?,
+                    viewport_col: placement.viewport_col()?,
+                    viewport_row: placement.viewport_row()?,
+                    cell_offset: vec2(
+                        placement.cell_offset_x()? as f32,
+                        placement.cell_offset_y()? as f32,
+                    ),
+                    size: vec2(
+                        placement.pixel_width()? as f32,
+                        placement.pixel_height()? as f32,
+                    ),
+                    source: Rect::new(
+                        placement.source_x()? as f32,
+                        placement.source_y()? as f32,
+                        placement.source_width()? as f32,
+                        placement.source_height()? as f32,
+                    ),
+                });
+            }
+
+            // The list isn't in drawing order. Within a layer, images with a
+            // lower z-index are drawn first; each layer pass below picks its
+            // images out of this queue in order.
+            self.images.sort_by_key(|image| image.z);
+
+            // Free the textures of images that are no longer on screen. The
+            // list is rebuilt whenever an image is added or removed, so this
+            // is the only place the set of images can shrink.
+            self.textures
+                .retain(|id, _| self.images.iter().any(|image| image.image_id == *id));
+        }
+
+        // Images are clipped to the terminal grid, since placements that
+        // start above or left of the viewport (or run past its far edges)
+        // are reported at their full size.
+        let grid = vec2(
+            f32::from(snapshot.cols()?) * dims.cell_width,
+            f32::from(snapshot.rows()?) * dims.cell_height,
+        );
+
+        // Obtain the Kitty graphics storage from the terminal. We only need
+        // it for the images' pixels. This is a reference valid until the next
+        // mutating terminal call.
         let graphics = terminal.kitty_graphics();
 
         // Populate the row iterator from the current render state snapshot,
@@ -339,14 +444,15 @@ impl<'alloc> Renderer<'alloc> {
         // to point at the next row via a mutable reference.
         let mut row_it = self.row_it.update(&snapshot)?;
 
-        // --- Layer 1: images below cell backgrounds (z < INT32_MIN/2) ---
+        // --- Layer 1: images below cell backgrounds ---
         if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
-                terminal,
-                &mut self.placement_it,
+                &self.images,
+                &mut self.textures,
                 graphics,
-                Layer::BelowBg,
+                ImageLayer::BelowBackground,
                 dims,
+                grid,
             )?
         }
 
@@ -468,18 +574,19 @@ impl<'alloc> Renderer<'alloc> {
             y += dims.cell_height;
         }
 
-        // --- Layer 2: images below text (i32::MIN / 2 <= z < 0) ---
+        // --- Layer 2: images below text ---
         // Drawn after cell backgrounds but before the cursor and any
         // above-text images.  In our single-pass renderer the cell text
         // has already been drawn, but this still achieves the correct
         // visual for the common case where images sit behind text.
         if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
-                terminal,
-                &mut self.placement_it,
+                &self.images,
+                &mut self.textures,
                 graphics,
-                Layer::BelowText,
+                ImageLayer::BelowText,
                 dims,
+                grid,
             )?
         }
 
@@ -501,14 +608,15 @@ impl<'alloc> Renderer<'alloc> {
             );
         }
 
-        // --- Layer 3: images above text (z >= 0) ---
+        // --- Layer 3: images above text ---
         if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
-                terminal,
-                &mut self.placement_it,
+                &self.images,
+                &mut self.textures,
                 graphics,
-                Layer::AboveText,
+                ImageLayer::AboveText,
                 dims,
+                grid,
             )?
         }
 
@@ -518,76 +626,97 @@ impl<'alloc> Renderer<'alloc> {
         Ok(())
     }
 
-    fn render_kitty_images<'t>(
-        terminal: &'t Terminal<'_, '_>,
-        placement_it: &mut PlacementIterator<'_>,
-        graphics: &Graphics<'t>,
-        layer: Layer,
+    /// Draw the queued images of one layer, lowest z-index first.
+    fn render_kitty_images(
+        images: &[QueuedImage],
+        textures: &mut HashMap<u32, (u64, Texture2D)>,
+        graphics: &Graphics<'_>,
+        layer: ImageLayer,
         dims: Dimensions,
+        grid: Vec2,
     ) -> Result<()> {
-        let mut placements = placement_it.update(graphics)?;
-        placements.set_layer(layer)?;
+        // libghostty sizes images with the integer cell size we passed to
+        // `Terminal::resize`, but we lay cells out at their fractional
+        // measured size. Scale image geometry by the difference so images
+        // keep lining up with their cells (and the rows of an image shown
+        // with placeholder cells don't leave gaps between them).
+        let scale = vec2(
+            dims.cell_width / (dims.cell_width as u32) as f32,
+            dims.cell_height / (dims.cell_height as u32) as f32,
+        );
 
-        while let Some(placement) = placements.next() {
-            let image_id = placement.image_id()?;
-            let Some(image) = graphics.image(image_id) else {
-                continue;
-            };
-
-            let info = placement.placement_render_info(&image, terminal)?;
-
-            // Skip images that aren't visible in our viewport,
-            // or have zero width/height in either pixel or grid coordinates
-            if !info.viewport_visible
-                || info.pixel_width == 0
-                || info.pixel_height == 0
-                || info.grid_cols == 0
-                || info.grid_rows == 0
-            {
-                continue;
-            }
-
-            // We only handle RGBA (the PNG decoder we registered converts
-            // everything to RGBA)
-            if image.format()? != graphics::ImageFormat::Rgba {
-                continue;
-            }
-
-            let image_width = image.width()?;
-            let image_height = image.height()?;
-            // Some placements have no decoded pixel buffer to upload yet.
-            let Some(data) = image.data()? else {
-                continue;
-            };
-            if data.len() < (image_width * image_height * 4) as usize {
-                continue;
-            }
-
-            // Compute grid cell count for rendered size.
-            let dest_size = vec2(
-                info.grid_cols as f32 * dims.cell_width,
-                info.grid_rows as f32 * dims.cell_height,
+        // `images` is sorted by z, so filtering keeps that order.
+        for queued in images.iter().filter(|image| image.layer == layer) {
+            // Where to draw, relative to the top-left corner of the grid.
+            let dest = Rect::new(
+                queued.viewport_col as f32 * dims.cell_width + queued.cell_offset.x * scale.x,
+                queued.viewport_row as f32 * dims.cell_height + queued.cell_offset.y * scale.y,
+                queued.size.x * scale.x,
+                queued.size.y * scale.y,
             );
 
-            // Read the sub-cell pixel offsets
-            let x_offset = placement.x_offset()?;
-            let y_offset = placement.y_offset()?;
+            // Clip to the grid, and skip images that end up with nothing
+            // visible (or never had a size to begin with).
+            let Some(visible) = dest.intersect(Rect::new(0.0, 0.0, grid.x, grid.y)) else {
+                continue;
+            };
+            if visible.w <= 0.0 || visible.h <= 0.0 {
+                continue;
+            }
 
-            let tex = Texture2D::from_rgba8(image_width as u16, image_height as u16, data);
+            // Cut the same part out of the source rectangle, so the clipped
+            // image isn't squashed into the visible area.
+            let source_per_dest = vec2(queued.source.w / dest.w, queued.source.h / dest.h);
+            let source = Rect::new(
+                queued.source.x + (visible.x - dest.x) * source_per_dest.x,
+                queued.source.y + (visible.y - dest.y) * source_per_dest.y,
+                visible.w * source_per_dest.x,
+                visible.h * source_per_dest.y,
+            );
+
+            // Only read and upload the pixels when we have no texture for this
+            // generation of the image. An animation frame changes both the
+            // image generation and the placements generation, so the queue
+            // is rebuilt with the new image generation and the frame shows up
+            // here as a cache miss.
+            let cached = textures
+                .get(&queued.image_id)
+                .is_some_and(|(generation, _)| *generation == queued.image_generation);
+            if !cached {
+                let Some(image) = graphics.image(queued.image_id) else {
+                    continue;
+                };
+
+                // We only handle RGBA (the PNG decoder we registered converts
+                // everything to RGBA)
+                if image.format()? != graphics::ImageFormat::Rgba {
+                    continue;
+                }
+
+                let image_width = image.width()?;
+                let image_height = image.height()?;
+                // Some placements have no decoded pixel buffer to upload yet.
+                let Some(data) = image.data()? else {
+                    continue;
+                };
+                if data.len() < (image_width * image_height * 4) as usize {
+                    continue;
+                }
+
+                // Replacing an older texture drops it, which frees it.
+                let tex = Texture2D::from_rgba8(image_width as u16, image_height as u16, data);
+                textures.insert(queued.image_id, (queued.image_generation, tex));
+            }
+            let (_, tex) = &textures[&queued.image_id];
 
             draw_texture_ex(
-                &tex,
-                PADDING + info.viewport_col as f32 * dims.cell_width + x_offset as f32,
-                PADDING + info.viewport_row as f32 * dims.cell_height + y_offset as f32,
+                tex,
+                PADDING + visible.x,
+                PADDING + visible.y,
                 WHITE,
                 DrawTextureParams {
-                    dest_size: Some(dest_size),
-                    source: Some(Rect {
-                        x: info.source_x as f32,
-                        y: info.source_y as f32,
-                        w: info.source_width as f32,
-                        h: info.source_height as f32,
-                    }),
+                    dest_size: Some(visible.size()),
+                    source: Some(source),
                     ..Default::default()
                 },
             );
