@@ -49,6 +49,39 @@ impl<'alloc> Parser<'alloc> {
         unsafe { ffi::ghostty_osc_reset(self.0.as_raw()) }
     }
 
+    /// Set the most bytes to keep from each OSC sequence whose number the
+    /// parser does not implement.
+    ///
+    /// Zero, the default, discards these sequences and they produce
+    /// [`CommandType::Invalid`]. Any other value makes them produce
+    /// [`CommandType::Unknown`].
+    ///
+    /// A sequence longer than the limit is still reported. Its content holds
+    /// the first bytes up to the limit, and its `truncated` field is true.
+    ///
+    /// Limits up to 2048 bytes use a buffer the parser already owns and never
+    /// allocate memory. Larger limits allocate memory from the parser's
+    /// allocator for each unknown sequence.
+    ///
+    /// Options stay set across [`Parser::reset`]. You can change an option
+    /// at any time, but a sequence that is already being parsed may keep the
+    /// old setting. It is simplest to set options before the first sequence.
+    ///
+    /// See [`CommandType::Unknown`] for an example.
+    pub fn set_unknown_max_bytes(&mut self, max_bytes: usize) -> Result<&mut Self> {
+        // Zero is also what the NULL "restore the default" value sets, so
+        // always passing a pointer covers both.
+        let result = unsafe {
+            ffi::ghostty_osc_set(
+                self.0.as_raw(),
+                ffi::OscOption::UNKNOWN_MAX_BYTES,
+                std::ptr::from_ref(&max_bytes).cast(),
+            )
+        };
+        from_result(result)?;
+        Ok(self)
+    }
+
     /// Parse the next byte in an OSC sequence.
     ///
     /// Processes a single byte as part of an OSC sequence. The parser maintains
@@ -179,6 +212,33 @@ impl<'p> Command<'p, '_> {
             Type::CONEMU_XTERM_EMULATION => CommandType::ConemuXtermEmulation,
             Type::CONEMU_COMMENT => CommandType::ConemuComment,
             Type::KITTY_TEXT_SIZING => CommandType::KittyTextSizing,
+            Type::KITTY_CLIPBOARD_PROTOCOL => CommandType::KittyClipboardProtocol,
+            Type::KITTY_DND_PROTOCOL => CommandType::KittyDndProtocol,
+            Type::HIERARCHICAL_CONTEXT => CommandType::HierarchicalContext,
+            Type::KITTY_DESKTOP_NOTIFICATION => CommandType::KittyDesktopNotification,
+            Type::UNKNOWN => {
+                // The content string is only valid until the next call to any
+                // `ghostty_osc_*` function on this parser, so read the other
+                // fields first and the content last.
+                let truncated = self.get(Data::UNKNOWN_TRUNCATED)?;
+                // A terminator these bindings don't know has no Rust value, so
+                // the whole command is reported as invalid rather than
+                // guessing one.
+                let terminator = self
+                    .get::<ffi::OscTerminator::Type>(Data::UNKNOWN_TERMINATOR)?
+                    .try_into()
+                    .ok()?;
+                // SAFETY: We trust libghostty to give us a valid string. It is
+                // owned by the parser and valid until the next `ghostty_osc_*`
+                // call on it. This is the last such call here, and from now on
+                // the `'p` borrow of the parser rules out any further ones.
+                let content = unsafe { self.get::<ffi::String>(Data::UNKNOWN_CONTENT)?.to_bytes() };
+                CommandType::Unknown {
+                    content,
+                    truncated,
+                    terminator,
+                }
+            }
             Type::PROGRAM_STATUS => CommandType::ProgramStatus,
 
             _ => return None,
@@ -200,7 +260,38 @@ impl<'p> Command<'p, '_> {
 }
 
 /// Type of an OSC command.
-#[derive(Debug, Clone, Default)]
+///
+/// ```rust
+/// use libghostty_vt::osc::{CommandType, Parser};
+///
+/// // Feed the bytes between `ESC ]` and the terminator, here ST (`ESC \`).
+/// fn parse<'p>(parser: &'p mut Parser<'_>, body: &[u8]) -> CommandType<'p> {
+///     parser.reset();
+///     for &byte in body {
+///         parser.next_byte(byte);
+///     }
+///     parser.end(0x5C).command_type()
+/// }
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let mut parser = Parser::new()?;
+///
+/// // Kitty clipboard protocol (OSC 5522).
+/// let command = parse(&mut parser, b"5522;type=read;dGV4dC9wbGFpbg==");
+/// assert!(matches!(command, CommandType::KittyClipboardProtocol));
+/// // Kitty drag and drop protocol (OSC 72).
+/// let command = parse(&mut parser, b"72;t=a:i=5;text/plain text/uri-list");
+/// assert!(matches!(command, CommandType::KittyDndProtocol));
+/// // Hierarchical context signalling (OSC 3008).
+/// let command = parse(&mut parser, b"3008;start=abc123");
+/// assert!(matches!(command, CommandType::HierarchicalContext));
+/// // Kitty desktop notifications (OSC 99).
+/// let command = parse(&mut parser, b"99;i=bobr;payload");
+/// assert!(matches!(command, CommandType::KittyDesktopNotification));
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[expect(missing_docs, reason = "missing upstream docs")]
 pub enum CommandType<'p> {
     #[default]
@@ -267,6 +358,102 @@ pub enum CommandType<'p> {
     ConemuXtermEmulation,
     ConemuComment,
     KittyTextSizing,
+    KittyClipboardProtocol,
+    KittyDndProtocol,
+    HierarchicalContext,
+    KittyDesktopNotification,
+    /// An OSC sequence whose number the parser does not implement.
+    ///
+    /// Only produced when the limit set with [`Parser::set_unknown_max_bytes`] is nonzero.
+    /// Otherwise these sequences are [`CommandType::Invalid`].
+    ///
+    /// Only numbers the parser does not implement are reported this way. A
+    /// sequence with a number the parser does implement stays
+    /// [`CommandType::Invalid`] when its contents are malformed.
+    ///
+    /// ```rust
+    /// use libghostty_vt::osc::{CommandType, Parser, Terminator};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut parser = Parser::new()?;
+    ///
+    /// // By default, a sequence with a number the parser does not implement
+    /// // is discarded. OSC 7400 is made up for this example.
+    /// for byte in *b"7400;status=busy" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// let command = parser.end(0x07);
+    /// assert!(matches!(command.command_type(), CommandType::Invalid));
+    ///
+    /// // Keep up to 8 bytes of each unknown sequence.
+    /// parser.set_unknown_max_bytes(8)?.reset();
+    /// for byte in *b"7400;abc" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// // This sequence ended with BEL (0x07).
+    /// let command = parser.end(0x07);
+    /// let CommandType::Unknown { content, truncated, terminator } = command.command_type() else {
+    ///     panic!("expected an unknown command");
+    /// };
+    /// assert_eq!(content, b"7400;abc");
+    /// assert!(!truncated);
+    /// // If you reply to the sequence, end the reply with BEL too.
+    /// assert_eq!(terminator, Terminator::Bel);
+    ///
+    /// // A sequence longer than the limit is still reported, but only its
+    /// // first 8 bytes are kept.
+    /// parser.reset();
+    /// for byte in *b"7400;abcdef" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// // This one ended with ST (`ESC \`).
+    /// let command = parser.end(0x5C);
+    /// let CommandType::Unknown { content, truncated, terminator } = command.command_type() else {
+    ///     panic!("expected an unknown command");
+    /// };
+    /// assert_eq!(content, b"7400;abc");
+    /// assert!(truncated);
+    /// assert_eq!(terminator, Terminator::St);
+    ///
+    /// // A known number with malformed contents is not reported as unknown.
+    /// parser.reset();
+    /// for byte in *b"7501;state=sleeping" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// let command = parser.end(0x07);
+    /// assert!(matches!(command.command_type(), CommandType::Invalid));
+    ///
+    /// // A limit of zero discards unknown sequences again.
+    /// parser.set_unknown_max_bytes(0)?.reset();
+    /// for byte in *b"7400;abc" {
+    ///     parser.next_byte(byte);
+    /// }
+    /// let command = parser.end(0x07);
+    /// assert!(matches!(command.command_type(), CommandType::Invalid));
+    /// # Ok(())
+    /// # }
+    /// ```
+    Unknown {
+        /// The raw bytes of an unknown sequence: everything that was passed to
+        /// [`Parser::next_byte`], including the number at the start. For
+        /// example, the sequence `ESC ] 7400;status=busy BEL` gives
+        /// `7400;status=busy`.
+        ///
+        /// Owned by the parser and valid until the next call to the same
+        /// parser.
+        content: &'p [u8],
+        /// True if the unknown sequence was longer than the limit set with
+        /// [`Parser::set_unknown_max_bytes`], or memory ran out while reading
+        /// it. In that case the content holds only the beginning of the
+        /// sequence.
+        truncated: bool,
+        /// How the unknown sequence was ended, based on the terminator passed
+        /// to [`Parser::end`]. If you reply to the sequence, end the reply the
+        /// same way. A terminator from a newer libghostty that these bindings
+        /// don't know yet gives [`CommandType::Invalid`] instead (see
+        /// [`Terminator`]).
+        terminator: Terminator,
+    },
     /// A program status report or support query (OSC 7501), which a program
     /// sends to say what it is doing, such as working or waiting on the user.
     ///
@@ -306,4 +493,23 @@ pub enum CommandType<'p> {
     /// [`Terminal::on_program_status`]: crate::Terminal::on_program_status
     /// [`ProgramStatus`]: crate::terminal::ProgramStatus
     ProgramStatus,
+}
+
+/// How an OSC sequence was ended.
+///
+/// Programs can end an OSC sequence in two ways. When you reply to a
+/// sequence, end the reply the same way the program ended its request.
+/// Some programs only recognize replies that match.
+///
+/// Newer versions of libghostty may add terminators. A terminator these
+/// bindings don't know yet makes [`Command::command_type`] give
+/// [`CommandType::Invalid`].
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum Terminator {
+    /// The string terminator (ST): ESC followed by a backslash (0x1B 0x5C).
+    St = ffi::OscTerminator::ST,
+    /// The bell character, BEL (byte 0x07).
+    Bel = ffi::OscTerminator::BEL,
 }
