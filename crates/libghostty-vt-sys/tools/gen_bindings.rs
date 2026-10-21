@@ -73,6 +73,10 @@ const PREFIXES: &[(&str, &str)] = &[
         "GhosttyTerminalUnknownSequenceTag",
         "GHOSTTY_TERMINAL_UNKNOWN_SEQUENCE",
     ),
+    (
+        "GhosttyTerminalResizeWindowTag",
+        "GHOSTTY_TERMINAL_RESIZE_WINDOW",
+    ),
     ("GhosttyOptimizeMode", "GHOSTTY_OPTIMIZE"),
     ("GhosttyKeyEncoderOption", "GHOSTTY_KEY_ENCODER_OPT"),
     ("GhosttyMouseTrackingMode", "GHOSTTY_MOUSE_TRACKING"),

@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "3425025e585a3403340d4dc6d65132f42e05e605";
+const GHOSTTY_COMMIT: &str = "521cf2c5d30bd48028ca61546c64e7913764073d";
 
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
@@ -216,7 +216,11 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
 
     // Package managers can provide Ghostty's Zig package cache ahead of time
     // and ask Zig to resolve packages from that immutable store path instead
-    // of fetching during this Cargo build script.
+    // of fetching during this Cargo build script. Those sandboxes usually
+    // have no writable home either, so the global cache goes under OUT_DIR.
+    // Zig 0.17 removed `--global-cache-dir`; the global cache can only be
+    // redirected through the environment now (as ghostty's own
+    // nix/build-support/update-mirror.nu does).
     if let Ok(dir) = env::var("GHOSTTY_ZIG_SYSTEM_DIR") {
         assert!(
             !dir.is_empty(),
@@ -231,8 +235,7 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
         build
             .arg("--system")
             .arg(&zig_system_dir)
-            .arg("--global-cache-dir")
-            .arg(&zig_global_cache_dir);
+            .env("ZIG_GLOBAL_CACHE_DIR", &zig_global_cache_dir);
     }
 
     // Pass -Dtarget only for non-iOS cross targets; native builds let zig
