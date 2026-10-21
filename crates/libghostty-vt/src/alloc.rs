@@ -108,7 +108,8 @@ impl<'alloc> Bytes<'alloc> {
 
     /// Allocate `len` zeroed bytes with a custom allocator.
     ///
-    /// Not really useful except in very niche cases.
+    /// Rarely needed, except by a PNG decoder, which must allocate its output
+    /// with this.
     pub fn new_with_alloc<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         len: usize,

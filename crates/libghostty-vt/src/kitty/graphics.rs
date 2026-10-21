@@ -1512,10 +1512,27 @@ pub fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
 pub trait DecodePng: 'static {
     /// Decode a PNG into 8-bit RGBA pixels.
     ///
-    /// The returned image's byte buffer must be allocated with
-    /// [`Bytes::new_with_alloc`] from the provided allocator, since
-    /// libghostty frees it with that allocator. An image whose buffer
-    /// comes from anywhere else is rejected as if decoding failed.
+    /// The library calls this when it receives a PNG image and needs the raw
+    /// pixels. The decoder decodes the PNG bytes in `data` and returns the
+    /// result. See the [module-level example](self#example) for a complete
+    /// callback.
+    ///
+    /// # On success
+    ///
+    /// Allocate the pixel buffer with [`Bytes::new_with_alloc`] and `alloc`,
+    /// write the decoded pixels into it, and return it in a [`DecodedImage`].
+    /// The library then owns the buffer and frees it with the same allocator.
+    /// See [`DecodedImage`] for the expected pixel layout.
+    ///
+    /// The allocator limits how much memory a single image may use, so
+    /// [`Bytes::new_with_alloc`] can fail for very large images. Treat that as
+    /// a failure.
+    ///
+    /// # On failure
+    ///
+    /// Return `None`, and the image is rejected. An image whose buffer comes
+    /// from any allocator other than `alloc` is also rejected, as if decoding
+    /// failed.
     fn decode_png<'alloc>(
         &mut self,
         alloc: &'alloc Allocator<'_>,
@@ -1617,18 +1634,24 @@ impl DecodePng for RustPngDecoder {
     }
 }
 
-/// Result of decoding an image.
+/// A decoded image, returned by a decoder such as [`DecodePng`].
 ///
-/// The `data` buffer must be allocated through the allocator provided to the
-/// decode callback. The library takes ownership and will free it with the
-/// same allocator.
+/// Pixels are 8-bit RGBA: four bytes per pixel, stored row by row starting
+/// at the top-left corner, with no padding between rows. A complete image
+/// is therefore `width * height * 4` bytes long.
+///
+/// The pixel buffer must be allocated with the allocator passed to
+/// [`DecodePng::decode_png`]. When the decoder returns the image and its
+/// buffer came from that allocator, the library takes ownership of the
+/// buffer and frees it with that same allocator.
 #[derive(Debug)]
 pub struct DecodedImage<'alloc> {
     /// Image width in pixels.
     pub width: u32,
     /// Image height in pixels.
     pub height: u32,
-    /// Byte buffer containing the decoded RGBA pixel data.
+    /// The decoded RGBA pixels, allocated with the allocator passed to
+    /// [`DecodePng::decode_png`].
     pub data: Bytes<'alloc>,
 }
 
