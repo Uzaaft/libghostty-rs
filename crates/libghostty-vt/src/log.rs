@@ -1,10 +1,7 @@
 //! Logging functionality.
-use std::sync::RwLock;
+use std::sync::{PoisonError, RwLock};
 
-use crate::{
-    error::{Error, Result},
-    ffi,
-};
+use crate::{error::Result, ffi};
 
 /// Callback type for logging.
 ///
@@ -21,8 +18,8 @@ pub trait Logger: Send + Sync + 'static {
     /// Log a message with the given level and scope.
     ///
     /// The installed logger stays read-locked while this runs, so this
-    /// method must not call [`set_logger`], as doing so would deadlock or
-    /// abort the process.
+    /// method must not synchronously make libghostty log, or call
+    /// [`set_logger`], as doing so may deadlock or abort the process.
     fn log(&self, level: Level, scope: &str, message: &str);
 }
 
@@ -199,9 +196,8 @@ pub unsafe fn set_logger(f: Option<Box<dyn Logger>>) -> Result<()> {
             return;
         };
 
-        let Ok(log) = LOGGER.read() else {
-            return;
-        };
+        // See `set_logger` for why the lock can't be poisoned.
+        let log = LOGGER.read().unwrap_or_else(PoisonError::into_inner);
         let Some(log) = log.as_deref() else {
             return;
         };
@@ -215,12 +211,13 @@ pub unsafe fn set_logger(f: Option<Box<dyn Logger>>) -> Result<()> {
         None => None,
         Some(_) => Some(callback),
     };
-    {
-        let Ok(mut logger) = LOGGER.write() else {
-            return Err(Error::InvalidValue);
-        };
-        *logger = f;
-    }
+    // Keep the old logger alive until function exit: its destructor may make
+    // libghostty log, so it must run after unlocking and updating the hook.
+    // User code never runs under the write lock, so it can't be poisoned.
+    let _old = std::mem::replace(
+        &mut *LOGGER.write().unwrap_or_else(PoisonError::into_inner),
+        f,
+    );
     crate::sys_set(
         ffi::SysOption::LOG,
         ptr.map_or(std::ptr::null(), |p| p as *const std::ffi::c_void),
