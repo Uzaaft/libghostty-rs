@@ -210,6 +210,11 @@ async fn main() -> Result<()> {
     );
     tracing::info!("Initialized terminal with size {cols}x{rows}");
 
+    // The clock for Kitty graphics animations. libghostty keeps no timer of
+    // its own: we hand it the time on every tick, and it must always come
+    // from this same monotonic clock with the same starting point.
+    let animation_clock = Instant::now();
+
     // Each frame: handle resize → read pty → process input → render.
     loop {
         // Recalculate grid dimensions when the window is resized.
@@ -273,6 +278,20 @@ async fn main() -> Result<()> {
                 order_quit();
             }
         }
+
+        // Move playing Kitty animations to the frame that is due now. This
+        // goes before the render state update so the snapshot (and the pixels
+        // we read while drawing) already show the new frame. It takes
+        // `&mut terminal`, so no image handles may be held across it. The
+        // renderer keeps none between frames, only textures and copied
+        // placement data.
+        //
+        // The tick also returns when the next frame is due, so that renderers
+        // that only redraw on demand can schedule a redraw. We redraw on every
+        // vsync via `next_frame` regardless, so we have nothing to schedule
+        // and the next tick simply happens on the next frame.
+        let now_ms = u64::try_from(animation_clock.elapsed().as_millis())?;
+        terminal.kitty_graphics_animation_tick(now_ms)?;
 
         // Draw the current terminal screen.
         renderer.render_terminal(&terminal, dims, Some(&font))?;
