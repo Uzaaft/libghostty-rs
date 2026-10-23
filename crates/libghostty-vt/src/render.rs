@@ -1459,7 +1459,7 @@ impl CellIteration<'_, '_> {
     ///
     /// The base codepoint is placed first, followed by any extra codepoints.
     pub fn graphemes(&self) -> Result<Vec<char>> {
-        let len = self.graphemes_len()?;
+        let len = self.graphemes_len()? as usize;
         let mut graphemes = vec!['\0'; len];
         self.graphemes_buf(&mut graphemes)?;
         Ok(graphemes)
@@ -1468,7 +1468,7 @@ impl CellIteration<'_, '_> {
     /// The total number of grapheme codepoints including the base codepoint.
     ///
     /// Returns 0 if the cell has no text.
-    pub fn graphemes_len(&self) -> Result<usize> {
+    pub fn graphemes_len(&self) -> Result<u32> {
         self.get(ffi::RenderStateRowCellsData::GRAPHEMES_LEN)
     }
 
@@ -1476,7 +1476,23 @@ impl CellIteration<'_, '_> {
     ///
     /// The buffer must be at least [`CellIteration::graphemes_len`] elements.
     /// The base codepoint is written first, followed by any extra codepoints.
+    ///
+    /// If the buffer is too small, the function returns
+    /// `Err(Error::OutOfSpace { required })` where `required` is the
+    /// required number of codepoints, and `buf` is left unchanged. The
+    /// caller can then retry with a sufficiently sized buffer.
     pub fn graphemes_buf(&self, buf: &mut [char]) -> Result<()> {
+        // Upstream takes no buffer length and writes unchecked, so the size
+        // check has to happen here: without it a short buffer from safe code
+        // would be an out-of-bounds write.
+        let required = self.graphemes_len()? as usize;
+        if buf.len() < required {
+            return Err(Error::OutOfSpace { required });
+        }
+        // SAFETY: GRAPHEMES_BUF writes exactly `graphemes_len` elements for
+        // the current cell, and we just checked `buf` holds at least that
+        // many, so every write stays in bounds. Nothing between the length
+        // query and this call can move the iterator, since we hold `&self`.
         let result = unsafe {
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
@@ -2331,6 +2347,35 @@ mod tests {
         cell_iteration.next().unwrap();
         cell_iteration.graphemes_utf8(&mut text).unwrap();
         assert_eq!(text, "");
+    }
+
+    /// Upstream's `GRAPHEMES_BUF` takes no length and writes unchecked, so a
+    /// short buffer must be rejected on the Rust side before calling C.
+    #[test]
+    fn graphemes_buf_rejects_short_buffer() {
+        let mut terminal = Terminal::new(4, 1).unwrap();
+        // An "e" with a combining acute accent: two codepoints in one cell.
+        terminal.vt_write("e\u{301}".as_bytes());
+        let mut state = RenderState::new().unwrap();
+        let snapshot = state.update(&terminal).unwrap();
+        let mut rows = RowIterator::new().unwrap();
+        let mut cells = CellIterator::new().unwrap();
+        let mut iteration = rows.update(&snapshot).unwrap();
+        let mut cell_iteration = cells.update(iteration.next().unwrap()).unwrap();
+        cell_iteration.next().unwrap();
+
+        // One slot short: rejected with the needed size, buffer untouched.
+        let mut short = ['x'];
+        assert!(matches!(
+            cell_iteration.graphemes_buf(&mut short),
+            Err(Error::OutOfSpace { required: 2 })
+        ));
+        assert_eq!(short, ['x']);
+
+        // Exactly the needed size: filled with base then combining mark.
+        let mut exact = ['x'; 2];
+        cell_iteration.graphemes_buf(&mut exact).unwrap();
+        assert_eq!(exact, ['e', '\u{301}']);
     }
 
     /// Every value of one image placement, read through the public getters.
