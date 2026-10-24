@@ -392,6 +392,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// If synchronized output was enabled, the [render hold](Self::on_render_hold)
     /// callback is invoked to report that the hold ended.
+    ///
+    /// This doesn't call the [reset](Self::on_reset) callback.
     pub fn reset(&mut self) {
         unsafe { ffi::ghostty_terminal_reset(self.inner.as_raw()) }
     }
@@ -3529,9 +3531,10 @@ handlers! {
     ///
     /// A full reset (RIS, `ESC c`) removes every record. When that happens,
     /// the terminal calls this with a [`ProgramStatusState::Clear`] report
-    /// and an empty id. This only happens when `ESC c` is processed by
-    /// [`Terminal::vt_write`]. [`Terminal::reset`] doesn't call this, so
-    /// clear your records yourself after calling it.
+    /// and an empty id, and then calls the [`Terminal::on_reset`] callback.
+    /// This only happens when `ESC c` is processed by [`Terminal::vt_write`]
+    /// or [`Terminal::vt_write_until_ground`]. [`Terminal::reset`] doesn't
+    /// call this, so clear your records yourself after calling it.
     ///
     /// [`title`](ProgramStatus::title) and
     /// [`message`](ProgramStatus::message) are already decoded and contain
@@ -3707,6 +3710,37 @@ handlers! {
         // SAFETY: The event and its strings are only valid during the
         // callback, which `SemanticPrompt`'s lifetime enforces.
         func(term, unsafe { SemanticPrompt::from_raw(event) });
+    }
+
+    /// Call the given function when the running program performs a full
+    /// reset (RIS, `ESC c`).
+    ///
+    /// A full reset clears the screen and scrollback, returns modes to their
+    /// defaults, and clears the title and working directory. Use this
+    /// callback to reset any state your application keeps about what's
+    /// running in the terminal, such as the current command.
+    ///
+    /// The terminal has already reset itself when this is called. The
+    /// [`Terminal::on_title_changed`] and [`Terminal::on_pwd_changed`]
+    /// callbacks are not called for the cleared title and working directory,
+    /// so update anything you show for them here. A full reset also removes
+    /// any progress report and program status records. If you set
+    /// [`Terminal::on_progress_report`] or [`Terminal::on_program_status`],
+    /// those callbacks are called before this one.
+    ///
+    /// A soft reset (DECSTR, `CSI ! p`) keeps the screen, title and working
+    /// directory, and doesn't call this.
+    ///
+    /// [`Terminal::reset`] doesn't call this either: only a reset the
+    /// running program sends through [`Terminal::vt_write`] or
+    /// [`Terminal::vt_write_until_ground`] does.
+    pub fn on_reset(
+        &mut self,
+        tag = RESET,
+        from = TerminalResetFn(),
+        to = ResetFn(),
+    ) |term, func| {
+        func(term);
     }
 
     /// Call the given function when the running program asks to resize the
@@ -4677,6 +4711,54 @@ mod tests {
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/\xff\x1b\\");
         assert_eq!(callback_count.get(), 3);
         assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/\xff");
+    }
+
+    /// Only a full reset sent by the program (RIS) fires `on_reset`, and the
+    /// terminal has already reset itself by then.
+    #[test]
+    fn reset_callback_fires_only_on_ris() {
+        let callback_count: Cell<usize> = Cell::new(0);
+        let title_in_callback: RefCell<Option<Vec<u8>>> = RefCell::new(None);
+
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+
+        terminal
+            .on_reset(|term| {
+                callback_count.set(callback_count.get() + 1);
+                // Record rather than assert here: a panic in a callback
+                // aborts the whole test binary.
+                *title_in_callback.borrow_mut() = term.title().ok().map(<[u8]>::to_owned);
+            })
+            .expect("callback should register");
+
+        // Set a title first so we can tell whether RIS already cleared it
+        // when the callback ran, as upstream documents.
+        terminal.vt_write(b"\x1b]2;Before Reset\x1b\\");
+        assert_eq!(terminal.title().unwrap(), b"Before Reset");
+        // A progress report and a program status report fire their own
+        // callbacks, and RIS fires both again just before this one. Sending
+        // them here catches this callback being registered under either
+        // sibling's option instead.
+        terminal.vt_write(b"\x1b]9;4;1;50\x1b\\");
+        terminal.vt_write(b"\x1b]7501;state=working:id=build\x1b\\");
+        assert_eq!(callback_count.get(), 0);
+        terminal.vt_write(b"\x1bc");
+        assert_eq!(callback_count.get(), 1);
+        assert_eq!(*title_in_callback.borrow(), Some(Vec::new()));
+
+        // `vt_write_until_ground` feeds the same stream, so it fires too.
+        terminal.vt_write(b"\x1b");
+        terminal.vt_write_until_ground(b"c").unwrap();
+        assert_eq!(callback_count.get(), 2);
+
+        // A soft reset (DECSTR) doesn't count as a full reset.
+        terminal.vt_write(b"\x1b[!p");
+        assert_eq!(callback_count.get(), 2);
+
+        // Upstream's `ghostty_terminal_reset` resets the terminal directly
+        // and only the stream handling `ESC c` calls the callback.
+        terminal.reset();
+        assert_eq!(callback_count.get(), 2);
     }
 
     #[test]
