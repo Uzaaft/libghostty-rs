@@ -2718,6 +2718,155 @@ pub enum ProgramStatusKind {
     Auth = ffi::ProgramStatusKind::AUTH,
 }
 
+/// A shell integration event, passed to the
+/// [`Terminal::on_semantic_prompt`] callback.
+///
+/// [`kind`](Self::kind) says which step of the command this is. The other
+/// fields only carry information for the kinds listed on each field, and are
+/// zero or empty otherwise.
+///
+/// Strings are only valid during the callback. Copy them if you need them
+/// later. The lifetime `'t` enforces this: the event cannot escape the
+/// [`Terminal::on_semantic_prompt`] callback it was handed to.
+#[derive(Debug, Copy, Clone)]
+pub struct SemanticPrompt<'t> {
+    ptr: *const ffi::TerminalSemanticPrompt,
+    _phan: PhantomData<&'t ()>,
+}
+
+impl<'t> SemanticPrompt<'t> {
+    /// # Safety
+    ///
+    /// Caller must guarantee that `raw` and the strings it points to are
+    /// valid for the lifetime `'t`.
+    unsafe fn from_raw(raw: *const ffi::TerminalSemanticPrompt) -> Self {
+        Self {
+            ptr: raw,
+            _phan: PhantomData,
+        }
+    }
+
+    /// The raw event.
+    ///
+    /// Upstream promises every field we read has been present since the
+    /// struct was introduced, so reading them doesn't need to consult
+    /// `size`. Fields added later (upstream names a command identifier and
+    /// a "redrawn prompt" flag as likely) must go through `sized_field!`.
+    fn raw(self) -> &'t ffi::TerminalSemanticPrompt {
+        // SAFETY: We trust libghostty to give us a valid underlying ptr,
+        // which lives for the callback duration, i.e. `'t`.
+        unsafe { &*self.ptr }
+    }
+
+    /// Which step of the command this event reports.
+    ///
+    /// A kind value from a newer libghostty that these bindings don't know
+    /// yet gives [`Error::InvalidValue`].
+    pub fn kind(self) -> Result<SemanticPromptKind> {
+        self.raw().kind.try_into().map_err(|_| Error::InvalidValue)
+    }
+
+    /// Which prompt is starting. Set for
+    /// [`SemanticPromptKind::PromptStart`]. Always [`PromptKind::Primary`]
+    /// for other kinds.
+    ///
+    /// A prompt kind value from a newer libghostty that these bindings don't
+    /// know yet gives [`Error::InvalidValue`].
+    pub fn prompt_kind(self) -> Result<PromptKind> {
+        self.raw()
+            .prompt_kind
+            .try_into()
+            .map_err(|_| Error::InvalidValue)
+    }
+
+    /// The command's exit code, or `None` if the shell didn't report one.
+    /// Only ever `Some` for [`SemanticPromptKind::CommandEnd`].
+    ///
+    /// Exit codes can be negative, for example on Windows.
+    #[must_use]
+    pub fn exit_code(self) -> Option<i32> {
+        // Upstream says to trust `has_exit_code` rather than any special
+        // `exit_code` value (it writes 0 when there is none, which is also a
+        // perfectly good exit code), so that's the only thing we look at.
+        let raw = self.raw();
+        raw.has_exit_code.then_some(raw.exit_code)
+    }
+
+    /// The command line that is about to run, for
+    /// [`SemanticPromptKind::OutputStart`]. The shell sends it encoded, and
+    /// this is the decoded text. Empty if the shell didn't send one or it
+    /// couldn't be decoded.
+    #[must_use]
+    pub fn command(self) -> &'t [u8] {
+        // Upstream decodes the command line but never promises the result
+        // is UTF-8 (percent-encoding can produce any bytes), so hand out
+        // the raw bytes and let callers validate.
+        //
+        // SAFETY: The event and its strings live for the callback
+        // duration, i.e. `'t`.
+        unsafe { self.raw().command.to_bytes() }
+    }
+
+    /// A description of what went wrong, for
+    /// [`SemanticPromptKind::CommandEnd`] when the shell sent one. Empty
+    /// otherwise. Few shells send this. The [exit code](Self::exit_code) is
+    /// the usual way to tell whether a command failed.
+    #[must_use]
+    pub fn error(self) -> &'t [u8] {
+        // SAFETY: Ditto.
+        unsafe { self.raw().error.to_bytes() }
+    }
+}
+
+/// The step of a command that a shell integration event reports.
+///
+/// More kinds may be added in later versions, so ignore any kind you don't
+/// handle.
+// Upstream's `GHOSTTY_SEMANTIC_PROMPT_INVALID` (0) is left out on purpose:
+// it is "never reported" and only exists so a zeroed struct isn't mistaken
+// for a real event. If it ever shows up, `kind()` gives `Err` like any other
+// unknown value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(i32)]
+#[non_exhaustive]
+pub enum SemanticPromptKind {
+    /// The shell started drawing a prompt.
+    /// [`prompt_kind`](SemanticPrompt::prompt_kind) says which one.
+    PromptStart = ffi::SemanticPromptKind::PROMPT_START,
+    /// The prompt is drawn and the user can start typing a command.
+    InputStart = ffi::SemanticPromptKind::INPUT_START,
+    /// The user submitted the command and it started running. Anything the
+    /// terminal receives after this is the command's output.
+    OutputStart = ffi::SemanticPromptKind::OUTPUT_START,
+    /// The command finished running.
+    CommandEnd = ffi::SemanticPromptKind::COMMAND_END,
+}
+
+/// Which prompt a [`SemanticPromptKind::PromptStart`] event starts.
+///
+/// Most shells only draw a primary prompt. Some also draw a prompt on the
+/// right side of the line, or a prompt at the start of each extra line
+/// when a command spans several lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, int_enum::IntEnum)]
+#[repr(i32)]
+#[non_exhaustive]
+pub enum PromptKind {
+    /// The main prompt shown before each command. This is used when the
+    /// shell doesn't say which prompt it is drawing.
+    Primary = ffi::SemanticPromptPromptKind::PRIMARY,
+    /// A prompt drawn at the right edge of the line, such as zsh's
+    /// RPROMPT.
+    Right = ffi::SemanticPromptPromptKind::RIGHT,
+    /// A prompt at the start of an extra line of a command that spans
+    /// several lines.
+    Continuation = ffi::SemanticPromptPromptKind::CONTINUATION,
+    /// Another prompt for an extra line of input, such as bash's PS2.
+    /// Shells differ in whether they report extra lines as continuation or
+    /// secondary prompts, so most applications should treat the two the
+    /// same.
+    Secondary = ffi::SemanticPromptPromptKind::SECONDARY,
+}
+
 /// A request from the running program to resize the window.
 ///
 /// Passed to [`Terminal::on_resize_window`].
@@ -3368,9 +3517,9 @@ handlers! {
     /// - A record without an app takes it from its nearest ancestor that has
     ///   one. If the root record has app `"deploy"` and the record
     ///   `"us-east"` has none, show `"us-east"` with app `"deploy"` too.
-    /// - When a new shell prompt starts (the
-    ///   `GHOSTTY_SEMANTIC_PROMPT_PROMPT_START` shell integration event) or
-    ///   the program running in the terminal exits, remove `working` and
+    /// - When a new shell prompt starts ([`SemanticPromptKind::PromptStart`]
+    ///   from the [`Terminal::on_semantic_prompt`] callback) or the program
+    ///   running in the terminal exits, remove `working` and
     ///   `blocked` records. You may remove `idle` records too. Keep `done`
     ///   and `error` records until the user has seen them, for example until
     ///   they next focus the terminal.
@@ -3498,6 +3647,66 @@ handlers! {
         // SAFETY: The report and its strings are only valid during the
         // callback, which `ProgramStatus`'s lifetime enforces.
         func(term, unsafe { ProgramStatus::from_raw(report) });
+    }
+
+    /// Call the given function when the shell reports a step of a command:
+    /// a prompt starts, input starts, output starts, or the command ends.
+    ///
+    /// Each command goes through four steps, in this order: the prompt
+    /// starts, input starts, output starts, and the command ends. Then the
+    /// next prompt starts. See [`SemanticPromptKind`].
+    ///
+    /// Shells differ in what they report. Many don't send the command line
+    /// or the exit code, and some skip steps, so handle each event on its
+    /// own instead of expecting a strict order. A shell may also start the
+    /// same prompt more than once, for example when it redraws the prompt
+    /// after a resize, so treat a repeated
+    /// [`SemanticPromptKind::PromptStart`] as harmless.
+    ///
+    /// The terminal has already updated its screen when this is called. A
+    /// sequence the terminal rejects as malformed is never reported.
+    ///
+    /// The event and its strings are only valid during the call.
+    ///
+    /// Example, logging each command's result:
+    ///
+    /// ```rust
+    /// use std::cell::RefCell;
+    /// use libghostty_vt::{Terminal, terminal::SemanticPromptKind};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let results = RefCell::new(Vec::new());
+    ///
+    /// let mut terminal = Terminal::new(80, 24)?;
+    /// terminal.on_semantic_prompt(|_term, event| {
+    ///     // A panic in the callback aborts the process, so ignore a kind
+    ///     // these bindings don't know instead of unwrapping.
+    ///     if let Ok(SemanticPromptKind::CommandEnd) = event.kind() {
+    ///         // Many shells don't report the exit code, so this may be
+    ///         // `None` even for a command that ran.
+    ///         results.borrow_mut().push(event.exit_code());
+    ///     }
+    /// })?;
+    ///
+    /// // The shell reports a command that exited with 1, then one that
+    /// // didn't say how it went.
+    /// terminal.vt_write(b"\x1b]133;D;1\x07");
+    /// terminal.vt_write(b"\x1b]133;D\x07");
+    /// assert_eq!(*results.borrow(), [Some(1), None]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn on_semantic_prompt(
+        &mut self,
+        tag = SEMANTIC_PROMPT,
+        from = TerminalSemanticPromptFn(
+            event: *const ffi::TerminalSemanticPrompt
+        ),
+        to = <'t>SemanticPromptFn(SemanticPrompt<'t>),
+    ) |term, func| {
+        // SAFETY: The event and its strings are only valid during the
+        // callback, which `SemanticPrompt`'s lifetime enforces.
+        func(term, unsafe { SemanticPrompt::from_raw(event) });
     }
 
     /// Call the given function when the running program asks to resize the
@@ -4818,6 +5027,145 @@ mod tests {
         terminal.vt_write(b"\x1b]7501;?\x1b\\");
         drop(terminal);
         assert!(output.into_inner().is_empty());
+    }
+
+    /// What a semantic prompt callback observed about one event, copied out
+    /// since the event is only valid during the callback.
+    ///
+    /// `kind` and `prompt_kind` are `None` when the raw value didn't
+    /// convert, so that shows up as a failed comparison outside the
+    /// callback.
+    #[derive(Debug, PartialEq, Eq)]
+    struct SeenPrompt {
+        kind: Option<SemanticPromptKind>,
+        prompt_kind: Option<PromptKind>,
+        exit_code: Option<i32>,
+        command: Vec<u8>,
+        error: Vec<u8>,
+    }
+
+    impl SeenPrompt {
+        /// An event with only `kind` set, as upstream leaves every other
+        /// field zero or empty (and `prompt_kind` primary) unless the kind
+        /// carries it.
+        fn bare(kind: SemanticPromptKind) -> Self {
+            Self {
+                kind: Some(kind),
+                prompt_kind: Some(PromptKind::Primary),
+                exit_code: None,
+                command: Vec::new(),
+                error: Vec::new(),
+            }
+        }
+    }
+
+    /// Feed `input` to a terminal with a semantic prompt callback, returning
+    /// the events it saw.
+    ///
+    /// Assertions happen outside the callback: a panic inside it would
+    /// abort the whole test binary instead of failing the test.
+    fn semantic_prompt(input: &[u8]) -> Vec<SeenPrompt> {
+        let seen = RefCell::new(Vec::new());
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .on_semantic_prompt(|_, event| {
+                seen.borrow_mut().push(SeenPrompt {
+                    kind: event.kind().ok(),
+                    prompt_kind: event.prompt_kind().ok(),
+                    exit_code: event.exit_code(),
+                    command: event.command().to_vec(),
+                    error: event.error().to_vec(),
+                });
+            })
+            .unwrap();
+        terminal.vt_write(input);
+        drop(terminal);
+        seen.into_inner()
+    }
+
+    #[test]
+    fn semantic_prompt_reports_each_command_step() {
+        // Mirrors upstream's "set semantic_prompt callback" test in
+        // src/terminal/c/terminal.zig, plus a few cases from the stream
+        // handler test: OSC 133 A/P/N start a prompt (P's `k=` picks right,
+        // continuation or secondary, and an unknown kind falls back to
+        // primary), B/I start input, C starts output with a percent-encoded
+        // `cmdline_url`, and D ends the command with an optional exit code
+        // and `err=`.
+        let seen = semantic_prompt(
+            b"\x1b]133;A\x07\
+              \x1b]133;P;k=r\x07\
+              \x1b]133;P;k=c\x07\
+              \x1b]133;P;k=s\x07\
+              \x1b]133;P;k=x\x07\
+              \x1b]133;N\x07\
+              \x1b]133;B\x07\
+              \x1b]133;I\x07\
+              \x1b]133;C;cmdline_url=ls%20-la\x07\
+              \x1b]133;D;0\x07\
+              \x1b]133;D;-1;err=boom\x07\
+              \x1b]133;D\x07",
+        );
+        assert_eq!(
+            seen,
+            [
+                SeenPrompt::bare(SemanticPromptKind::PromptStart),
+                SeenPrompt {
+                    prompt_kind: Some(PromptKind::Right),
+                    ..SeenPrompt::bare(SemanticPromptKind::PromptStart)
+                },
+                SeenPrompt {
+                    prompt_kind: Some(PromptKind::Continuation),
+                    ..SeenPrompt::bare(SemanticPromptKind::PromptStart)
+                },
+                SeenPrompt {
+                    prompt_kind: Some(PromptKind::Secondary),
+                    ..SeenPrompt::bare(SemanticPromptKind::PromptStart)
+                },
+                SeenPrompt::bare(SemanticPromptKind::PromptStart),
+                SeenPrompt::bare(SemanticPromptKind::PromptStart),
+                SeenPrompt::bare(SemanticPromptKind::InputStart),
+                SeenPrompt::bare(SemanticPromptKind::InputStart),
+                SeenPrompt {
+                    command: b"ls -la".to_vec(),
+                    ..SeenPrompt::bare(SemanticPromptKind::OutputStart)
+                },
+                // 0 is a real exit code, distinct from "not reported".
+                SeenPrompt {
+                    exit_code: Some(0),
+                    ..SeenPrompt::bare(SemanticPromptKind::CommandEnd)
+                },
+                SeenPrompt {
+                    exit_code: Some(-1),
+                    error: b"boom".to_vec(),
+                    ..SeenPrompt::bare(SemanticPromptKind::CommandEnd)
+                },
+                SeenPrompt::bare(SemanticPromptKind::CommandEnd),
+            ]
+        );
+    }
+
+    #[test]
+    fn semantic_prompt_command_is_raw_bytes() {
+        // Percent-decoding can produce any bytes, and upstream makes no
+        // UTF-8 promise, so non-UTF-8 command lines come through untouched.
+        // An undecodable command line and a fresh line alone (OSC 133 L,
+        // layout rather than a command step) are covered too.
+        let seen = semantic_prompt(
+            b"\x1b]133;C;cmdline_url=%ff%fe\x07\
+              \x1b]133;C;cmdline='bad\x07\
+              \x1b]133;L\x07",
+        );
+        assert_eq!(
+            seen,
+            [
+                SeenPrompt {
+                    command: b"\xff\xfe".to_vec(),
+                    ..SeenPrompt::bare(SemanticPromptKind::OutputStart)
+                },
+                SeenPrompt::bare(SemanticPromptKind::OutputStart),
+            ]
+        );
     }
 
     /// Feed `input` to an 80x24 terminal with a resize window callback,
