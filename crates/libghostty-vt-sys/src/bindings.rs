@@ -3156,31 +3156,31 @@ pub mod SemanticPromptKind {
     #[doc = " The step of a command that a shell integration event reports.\n\n More kinds may be added in later versions, so ignore any kind you don't\n handle.\n"]
     pub type Type = ::std::os::raw::c_int;
     #[doc = " Never reported. This exists so that a zeroed value is not mistaken\n for a real event."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_INVALID: Type = 0;
+    pub const INVALID: Type = 0;
     #[doc = " The shell started drawing a prompt. `prompt_kind` says which one."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_PROMPT_START: Type = 1;
+    pub const PROMPT_START: Type = 1;
     #[doc = " The prompt is drawn and the user can start typing a command."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_INPUT_START: Type = 2;
+    pub const INPUT_START: Type = 2;
     #[doc = " The user submitted the command and it started running. Anything the\n terminal receives after this is the command's output."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_OUTPUT_START: Type = 3;
+    pub const OUTPUT_START: Type = 3;
     #[doc = " The command finished running."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_COMMAND_END: Type = 4;
+    pub const COMMAND_END: Type = 4;
     #[doc = " The command finished running."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_MAX_VALUE: Type = 2147483647;
+    pub const MAX_VALUE: Type = 2147483647;
 }
 pub mod SemanticPromptPromptKind {
     #[doc = " Which prompt a `GHOSTTY_SEMANTIC_PROMPT_PROMPT_START` event starts.\n\n Most shells only draw a primary prompt. Some also draw a prompt on the\n right side of the line, or a prompt at the start of each extra line\n when a command spans several lines.\n"]
     pub type Type = ::std::os::raw::c_int;
     #[doc = " The main prompt shown before each command. This is used when the\n shell doesn't say which prompt it is drawing."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_PROMPT_PRIMARY: Type = 0;
+    pub const PRIMARY: Type = 0;
     #[doc = " A prompt drawn at the right edge of the line, such as zsh's\n RPROMPT."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_PROMPT_RIGHT: Type = 1;
+    pub const RIGHT: Type = 1;
     #[doc = " A prompt at the start of an extra line of a command that spans\n several lines."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_PROMPT_CONTINUATION: Type = 2;
+    pub const CONTINUATION: Type = 2;
     #[doc = " Another prompt for an extra line of input, such as bash's PS2.\n Shells differ in whether they report extra lines as continuation or\n secondary prompts, so most applications should treat the two the\n same."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_PROMPT_SECONDARY: Type = 3;
+    pub const SECONDARY: Type = 3;
     #[doc = " Another prompt for an extra line of input, such as bash's PS2.\n Shells differ in whether they report extra lines as continuation or\n secondary prompts, so most applications should treat the two the\n same."]
-    pub const GHOSTTY_SEMANTIC_PROMPT_PROMPT_MAX_VALUE: Type = 2147483647;
+    pub const MAX_VALUE: Type = 2147483647;
 }
 #[doc = " A shell integration event, passed to the\n `GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT` callback.\n\n `kind` says which step of the command this is. The other fields only\n carry information for the kinds listed on each field, and are zero or\n empty otherwise.\n\n Strings are only valid during the callback. Copy them if you need them\n later.\n\n This is a sized struct. Later versions may add fields at the end, and\n `size` tells you which fields are present. Every field below has been\n present since this struct was introduced, so you only need to check\n `size` before reading fields added later. Two fields are likely to be\n added in the future:\n\n - An identifier the shell assigns to each command.\n - A flag on `GHOSTTY_SEMANTIC_PROMPT_PROMPT_START` that says the shell\n   redrew a prompt it had already drawn, instead of starting a new one.\n\n Neither exists yet.\n"]
 #[repr(C)]
