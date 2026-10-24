@@ -970,8 +970,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         // the title and pwd storage when processing input, resetting, or
         // through the TITLE and PWD options. These bindings expose the first
         // two only through `&mut self` methods (`vt_write`,
-        // `vt_write_until_ground`, `reset`) and don't wrap the options yet;
-        // a future setter for them must take `&mut self` too. No UTF-8 or
+        // `vt_write_until_ground`, `reset`), and the options only through
+        // `set_title` and `set_pwd`, which take `&mut self` too. No UTF-8 or
         // NUL-termination is assumed; we only read `len` bytes.
         Ok(unsafe { str.to_bytes() })
     }
@@ -992,6 +992,98 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         // SAFETY: Ditto (see `title`): only `&mut self` methods can rewrite
         // the pwd storage, and only `len` bytes are read.
         Ok(unsafe { str.to_bytes() })
+    }
+
+    /// Set the terminal title manually.
+    ///
+    /// The string data is copied into the terminal. An empty title clears
+    /// it. Read it back with [`Terminal::title`].
+    ///
+    /// On `Err(Error::OutOfMemory)`, the previous title is left unchanged.
+    ///
+    /// ```
+    /// use libghostty_vt::Terminal;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut terminal = Terminal::new(80, 24)?;
+    ///
+    /// // Most titles are plain strings, which pass straight in.
+    /// terminal.set_title("vim — main.rs")?;
+    /// assert_eq!(terminal.title()?, "vim — main.rs".as_bytes());
+    ///
+    /// // Titles are bytes, not UTF-8 strings: this one is Latin-1.
+    /// terminal.set_title(b"caf\xe9")?;
+    /// assert_eq!(terminal.title()?, b"caf\xe9");
+    ///
+    /// // So the bytes `title` returns can be set again unchanged.
+    /// let mut other = Terminal::new(80, 24)?;
+    /// other.set_title(terminal.title()?)?;
+    /// assert_eq!(other.title()?, b"caf\xe9");
+    ///
+    /// // An empty title clears it.
+    /// terminal.set_title("")?;
+    /// assert!(terminal.title()?.is_empty());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_title(&mut self, title: impl AsRef<[u8]>) -> Result<&mut Self> {
+        // Take `AsRef<[u8]>` rather than `&str`: strings are the common
+        // case, but upstream accepts arbitrary bytes and `title` returns
+        // bytes, so any value read back must be settable again as-is.
+        let title = title.as_ref();
+        // The `From` impl on `ffi::String` only takes `str`, but upstream
+        // accepts arbitrary bytes, so build it from the slice by hand.
+        // Upstream copies the bytes before returning, so the pointer only
+        // has to live for this call. An empty slice may carry a dangling
+        // (non-NULL) pointer; that's fine, since upstream reads `len` bytes
+        // and clears the title for a zero length.
+        let raw = ffi::String {
+            ptr: title.as_ptr(),
+            len: title.len(),
+        };
+        self.set(Opt::TITLE, &raw)?;
+        Ok(self)
+    }
+
+    /// Set the terminal working directory manually.
+    ///
+    /// The string data is copied into the terminal. An empty pwd clears it.
+    /// Read it back with [`Terminal::pwd`].
+    ///
+    /// On `Err(Error::OutOfMemory)`, the previous pwd is left unchanged.
+    ///
+    /// ```
+    /// use libghostty_vt::Terminal;
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut terminal = Terminal::new(80, 24)?;
+    ///
+    /// // Most paths are plain strings, which pass straight in.
+    /// terminal.set_pwd("/home/user/src")?;
+    /// assert_eq!(terminal.pwd()?, "/home/user/src".as_bytes());
+    ///
+    /// // The pwd is stored as-is: neither parsed as a URI nor required to be
+    /// // UTF-8.
+    /// terminal.set_pwd(b"/home/caf\xe9")?;
+    /// assert_eq!(terminal.pwd()?, b"/home/caf\xe9");
+    ///
+    /// // An empty pwd clears it.
+    /// terminal.set_pwd("")?;
+    /// assert!(terminal.pwd()?.is_empty());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn set_pwd(&mut self, pwd: impl AsRef<[u8]>) -> Result<&mut Self> {
+        // Ditto (see `set_title`): `AsRef<[u8]>` so values from `pwd`
+        // round-trip, and upstream copies the bytes, so the slice only has
+        // to outlive this call.
+        let pwd = pwd.as_ref();
+        let raw = ffi::String {
+            ptr: pwd.as_ptr(),
+            len: pwd.len(),
+        };
+        self.set(Opt::PWD, &raw)?;
+        Ok(self)
     }
     /// The total number of rows in the active screen including scrollback.
     pub fn total_rows(&self) -> Result<usize> {
