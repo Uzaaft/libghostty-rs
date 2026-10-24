@@ -15,7 +15,7 @@ use crate::{
 };
 
 #[doc(inline)]
-pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
+pub use ffi::{SizeReportSize, TerminalMemoryUsage as MemoryUsage, TerminalScrollbar as Scrollbar};
 
 /// Complete terminal emulator state and rendering.
 ///
@@ -596,6 +596,30 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         };
         from_result(result)?;
         Ok(CompressionActivity(value))
+    }
+
+    /// How much memory the terminal holds. See [`MemoryUsage`] for what each
+    /// field means.
+    ///
+    /// This never decompresses scrollback, but it does look at every page, so
+    /// avoid reading it after every write.
+    pub fn memory_usage(&self) -> Result<MemoryUsage> {
+        // This can't go through `Self::get`: that zero-fills the output, so
+        // `size` would be 0 and upstream rejects any size smaller than the
+        // struct it knows with `INVALID_VALUE`. `sized!` stamps in the size
+        // of the struct we were compiled against instead.
+        let mut usage = ffi::sized!(ffi::TerminalMemoryUsage);
+        // SAFETY: `usage` is a live, properly sized `TerminalMemoryUsage`,
+        // which is exactly the output type upstream documents for this key.
+        let result = unsafe {
+            ffi::ghostty_terminal_get(
+                self.inner.as_raw(),
+                Data::MEMORY_USAGE,
+                (&raw mut usage).cast(),
+            )
+        };
+        from_result(result)?;
+        Ok(usage)
     }
 
     /// The configured maximum retained VT continuation size in bytes.
@@ -4144,6 +4168,37 @@ mod tests {
         // The alternate screen never counts as a prompt.
         terminal.vt_write(b"\x1b[?1049h");
         assert!(!terminal.is_cursor_at_prompt().unwrap());
+    }
+
+    #[test]
+    fn memory_usage_reports_each_screen() {
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+
+        // Upstream: the alternate screen's fields "are all zero until a
+        // program first switches to it".
+        let fresh = terminal.memory_usage().expect("memory usage should read");
+        assert_eq!(fresh.alternate_pages, 0);
+        assert_eq!(fresh.alternate_virtual_bytes, 0);
+        assert_eq!(fresh.alternate_resident_bytes, 0);
+        assert_eq!(fresh.alternate_compressed_pages, 0);
+        assert_eq!(fresh.alternate_compressed_bytes, 0);
+        assert_eq!(fresh.alternate_image_bytes, 0);
+
+        // The primary screen always has its visible rows in at least one page.
+        assert!(fresh.primary_pages >= 1);
+        assert!(fresh.primary_resident_bytes > 0);
+        // Upstream: virtual bytes are "always at least
+        // `primary_resident_bytes`".
+        assert!(fresh.primary_virtual_bytes >= fresh.primary_resident_bytes);
+        // Upstream: compressed bytes are "already included in
+        // `primary_resident_bytes`". That holds whether or not this platform
+        // supports compression (the compressed fields are zero if it doesn't).
+        assert!(fresh.primary_compressed_bytes <= fresh.primary_resident_bytes);
+
+        // Once a program switches to the alternate screen, it gets pages.
+        terminal.vt_write(b"\x1b[?1049h");
+        let alternate = terminal.memory_usage().expect("memory usage should read");
+        assert!(alternate.alternate_pages >= 1);
     }
 
     #[test]
