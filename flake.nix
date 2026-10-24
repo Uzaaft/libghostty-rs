@@ -67,7 +67,9 @@
           targets = rustTargets;
         };
 
-        miriToolchain = pkgs.rust-bin.selectLatestNightlyWith (
+        # Miri and AddressSanitizer need nightly. Both build their own std
+        # from rust-src.
+        nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (
           toolchain:
             toolchain.default.override {
               extensions = ["rust-src" "rust-std" "miri"];
@@ -88,10 +90,11 @@
             ++ ["${ghostty}/nix/patches/zig-0.17-ios-process-replace.patch"];
         });
         ghosttyLib = ghostty.packages.${system}.libghostty-vt;
+        ghosttyDebugLib = ghostty.packages.${system}.libghostty-vt-debug;
 
         miriCommand = pkgs.writeShellApplication {
           name = "libghostty-miri";
-          runtimeInputs = [miriToolchain];
+          runtimeInputs = [nightlyToolchain];
           text = ''
             cargo miri test --locked -p libghostty-vt-sys --lib
             cargo miri test --locked -p libghostty-vt --lib alloc::tests::
@@ -101,6 +104,56 @@
             # process at the first UB it finds, so a broken tree reports only
             # the first failing test.
             cargo miri test --locked -p libghostty-vt --lib miri_soundness
+          '';
+        };
+
+        # AddressSanitizer instruments Rust code only: Zig has no ASan, so
+        # libghostty's own loads and stores go unchecked (that is what
+        # alloc::testing::Guard is for). It still checks every access the
+        # wrapper makes to memory libghostty allocates through its default
+        # allocator, which is malloc, since ASan replaces malloc. On Linux, it
+        # also runs LeakSanitizer, which catches a Drop that forgets to free
+        # a libghostty object.
+        #
+        # Terminal pages (the cells, styles and graphemes behind grid refs
+        # and render rows) are the exception: libghostty maps them straight
+        # from the OS, so a view outliving them goes unnoticed. Checking
+        # libghostty's side with Valgrind is deliberately left for later.
+        #
+        # There is no MemorySanitizer app: it needs every store instrumented,
+        # and Zig can't be. Run over this suite on Linux, it flagged 15 of
+        # the 84 tests, every one a report about bytes libghostty wrote:
+        # buffers filled through Zig's memcpy, heap blocks Zig reused after
+        # a free, callback arguments from a Zig caller. Unpoisoning those at
+        # the FFI boundary would hide exactly what MSan is there to check,
+        # and the tests that stay in Rust are already Miri's.
+        asanCommand = pkgs.writeShellApplication {
+          name = "libghostty-asan";
+          runtimeInputs =
+            [nightlyToolchain pkgs.pkg-config]
+            # Linux reports are bare addresses without llvm-symbolizer on
+            # PATH. macOS symbolizes with atos instead, and links with the
+            # system cc like the dev shell does.
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [pkgs.stdenv.cc pkgs.llvm];
+          text = ''
+            # The same prebuilt ReleaseFast library the cargo-test check
+            # links. A Debug build bundles Zig's UBSan runtime, whose weak
+            # handlers the ASan runtime's own would silently replace; the
+            # cargo-test-ubsan check covers that build instead.
+            export PKG_CONFIG_PATH=${ghosttyLib.dev}/share/pkgconfig
+            export RUSTFLAGS=-Zsanitizer=address
+            # rustdoc builds the doctests and doesn't read RUSTFLAGS.
+            export RUSTDOCFLAGS=-Zsanitizer=address
+            # -Zbuild-std instruments std too, so std code the wrapper passes
+            # pointers and lengths to is checked as well. Cargo only allows it
+            # with an explicit --target, which also keeps RUSTFLAGS away from
+            # the build scripts.
+            args=(
+              --locked -Zbuild-std --target "$(rustc --print host-tuple)"
+              --features libghostty-vt-sys/pkg-config --features libghostty-vt/png
+            )
+            cargo test "''${args[@]}" -p libghostty-vt-sys -p libghostty-vt --lib --tests
+            cargo test "''${args[@]}" -p libghostty-vt --doc
           '';
         };
 
@@ -280,10 +333,48 @@
               cargoTestExtraArgs = "--workspace --all-targets";
             }
           );
+
+          # The UndefinedBehaviorSanitizer counterpart. rustc has no UBSan;
+          # the dev profile's debug assertions, overflow checks and std's
+          # checks of unsafe preconditions play its part. Zig has none for
+          # Zig code either; its Debug safety checks (bounds, overflow,
+          # unreachable code, bad casts) play it there, along with Ghostty's
+          # own integrity checks, which only Debug runs. Debug also builds
+          # Ghostty's own C and C++ (src/simd and wuffs) with
+          # -fsanitize-c=full, and libghostty bundles Zig's UBSan runtime,
+          # which panics on the first report. simdutf and highway opt out of
+          # it upstream.
+          #
+          # This is the libghostty-vt-debug package rather than
+          # LIBGHOSTTY_VT_SYS_OPTIMIZE=Debug because that only affects
+          # building Ghostty from source, which the sandbox can't fetch. It
+          # needs no nightly or network either, so it runs here on every
+          # platform rather than as an app.
+          cargo-test-ubsan = craneLib.mkCargoDerivation (
+            commonArgs
+            // {
+              # The shared dependency artifacts are built in the release
+              # profile, so this would only unpack and then ignore them.
+              cargoArtifacts = null;
+              pnameSuffix = "-ubsan";
+              CARGO_PROFILE = "dev";
+              buildInputs = [ghosttyDebugLib] ++ pkgs.lib.remove ghosttyLib commonArgs.buildInputs;
+              buildPhaseCargoCommand = ''
+                cargoWithProfile test ${commonArgs.cargoExtraArgs} --workspace --all-targets
+                cargoWithProfile test ${commonArgs.cargoExtraArgs} -p libghostty-vt --doc
+              '';
+              doInstallCargoArtifacts = false;
+              installPhaseCommand = "touch $out";
+            }
+          );
         };
 
         apps.miri = flake-utils.lib.mkApp {
           drv = miriCommand;
+        };
+
+        apps.asan = flake-utils.lib.mkApp {
+          drv = asanCommand;
         };
 
         devShells.default = craneLib.devShell {
@@ -329,7 +420,7 @@
         };
 
         devShells.miri = pkgs.mkShell {
-          packages = [miriToolchain];
+          packages = [nightlyToolchain];
         };
       }
     );
