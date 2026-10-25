@@ -1,10 +1,33 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use bindgen::EnumVariation;
 use bindgen::callbacks::{EnumVariantValue, IntKind, ItemInfo, ItemKind, ParseCallbacks};
 
 use heck::ToShoutySnakeCase;
+use quote::ToTokens;
+
+// Match the vendored targets in build.rs, including the iOS xcframeworks.
+// Clang spells the simulator and Windows GNU LLVM targets differently.
+const TARGETS: &[(&str, &str)] = &[
+    ("x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"),
+    ("x86_64-unknown-linux-musl", "x86_64-unknown-linux-musl"),
+    ("aarch64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"),
+    ("aarch64-unknown-linux-musl", "aarch64-unknown-linux-musl"),
+    ("aarch64-apple-darwin", "arm64-apple-darwin"),
+    ("x86_64-apple-darwin", "x86_64-apple-darwin"),
+    ("aarch64-apple-ios", "arm64-apple-ios"),
+    ("aarch64-apple-ios-sim", "arm64-apple-ios-simulator"),
+    ("x86_64-pc-windows-gnu", "x86_64-pc-windows-gnu"),
+    ("aarch64-pc-windows-gnullvm", "aarch64-pc-windows-gnu"),
+    ("x86_64-pc-windows-msvc", "x86_64-pc-windows-msvc"),
+    ("aarch64-pc-windows-msvc", "aarch64-pc-windows-msvc"),
+    ("aarch64-linux-android", "aarch64-linux-android"),
+    ("x86_64-linux-android", "x86_64-linux-android"),
+    ("wasm32-unknown-unknown", "wasm32-unknown-unknown"),
+    ("wasm64-unknown-unknown", "wasm64-unknown-unknown"),
+];
 
 fn main() {
     // The headers this crate's build script installed for this very build,
@@ -34,11 +57,15 @@ fn main() {
     let header = include_dir.join("ghostty").join("vt.h");
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
-    let out = manifest_dir.join("src").join("bindings.rs");
 
-    let mut builder = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(header.to_string_lossy())
         .clang_arg(format!("-I{}", include_dir.to_string_lossy()))
+        // These headers only need freestanding C headers. Use Clang's builtins
+        // instead of the host libc headers when parsing a different ABI.
+        .clang_arg("-ffreestanding")
+        // Wasm only adds utility functions; the C types are shared.
+        .clang_arg("-D__wasm__")
         .allowlist_function("[Gg]hostty.*")
         .allowlist_type("[Gg]hostty.*")
         .allowlist_var("GHOSTTY_.*")
@@ -50,20 +77,140 @@ fn main() {
         .generate_cstr(true)
         .derive_default(true)
         .size_t_is_usize(true)
+        .layout_tests(true)
         .default_enum_style(EnumVariation::ModuleConsts)
         .parse_callbacks(Box::new(Callbacks));
 
-    if cfg!(target_os = "linux") {
-        builder = builder.clang_arg("-I/usr/include");
+    let mut declarations = None;
+    let mut layouts: Vec<(String, Vec<syn::Meta>)> = Vec::new();
+    for &(rust_target, clang_target) in TARGETS {
+        let bindings = builder
+            .clone()
+            .clang_arg(format!("--target={clang_target}"))
+            .generate()
+            .unwrap_or_else(|error| panic!("failed to generate {rust_target} bindings: {error}"));
+        let mut bindings =
+            syn::parse_file(&bindings.to_string()).expect("bindgen must generate valid Rust");
+        let mut checks = Vec::new();
+        // Bindgen emits layout checks as anonymous consts. Keep them separate
+        // so shared declarations never inherit the generator host's ABI.
+        bindings.items.retain(|item| {
+            if matches!(item, syn::Item::Const(item) if item.ident == "_") {
+                checks.push(item.clone());
+                false
+            } else {
+                true
+            }
+        });
+        assert!(!checks.is_empty(), "no layout checks for {rust_target}");
+        let checks = quote::quote!(#(#checks)*).to_string();
+        let cfg = target_cfg(rust_target);
+        // Share checks only when Clang actually produced identical layouts,
+        // not just because two targets happen to have the same pointer width.
+        if let Some((_, targets)) = layouts.iter_mut().find(|(value, _)| *value == checks) {
+            targets.push(cfg);
+        } else {
+            layouts.push((checks, vec![cfg]));
+        }
+
+        let bindings = bindings.into_token_stream().to_string();
+        if let Some(shared) = &declarations {
+            assert_eq!(shared, &bindings, "declarations differ for {rust_target}");
+        } else {
+            declarations = Some(bindings);
+        }
     }
 
-    let bindings = builder
-        .generate()
-        .expect("failed to generate bindings from include/ghostty/vt.h");
+    // Defining __wasm__ exposes these declarations to bindgen, but upstream
+    // only exports the functions on Wasm. Bindgen's attribute callback only
+    // supports types, so attach the target gates to the generated functions
+    // here. Parse Rust rather than depending on bindgen's whitespace or docs.
+    let mut bindings = syn::parse_file(&declarations.unwrap()).unwrap();
+    for item in &mut bindings.items {
+        if let syn::Item::ForeignMod(block) = item {
+            for item in &mut block.items {
+                if let syn::ForeignItem::Fn(function) = item
+                    && function.sig.ident.to_string().starts_with("ghostty_wasm_")
+                {
+                    function
+                        .attrs
+                        .push(syn::parse_quote!(#[cfg(target_family = "wasm")]));
+                }
+            }
+        }
+    }
+    write_generated(&manifest_dir.join("src/bindings.rs"), bindings);
+    let mut checks = syn::File {
+        shebang: None,
+        attrs: Vec::new(),
+        items: Vec::new(),
+    };
+    for (index, (layout, targets)) in layouts.into_iter().enumerate() {
+        let name = quote::format_ident!("layout_{index}");
+        let items = syn::parse_file(&layout).unwrap().items;
+        let cfg = if targets.len() == 1 {
+            targets.into_iter().next().unwrap()
+        } else {
+            syn::parse_quote!(any(#(#targets),*))
+        };
+        checks.items.push(syn::parse_quote! {
+            #[cfg(#cfg)]
+            mod #name {
+                use crate::bindings::*;
+                #(#items)*
+            }
+        });
+    }
+    write_generated(&manifest_dir.join("src/layouts.rs"), checks);
+}
 
-    bindings
-        .write_to_file(&out)
-        .unwrap_or_else(|error| panic!("failed to write bindings to {}: {error}", out.display()));
+fn target_cfg(target: &str) -> syn::Meta {
+    // Ask rustc for the ABI identity; this needs no installed target std or SDK.
+    // Do not include CPU features or atomics: these do not select C layouts.
+    let output = Command::new("rustc")
+        .args(["--print", "cfg", "--target", target])
+        .output()
+        .expect("failed to run rustc");
+    assert!(output.status.success(), "failed to query cfg for {target}");
+    let cfg = String::from_utf8(output.stdout).unwrap();
+    let fields: Vec<syn::Meta> = cfg
+        .lines()
+        .filter(|line| {
+            matches!(
+                line.split_once('=').map(|(name, _)| name),
+                Some(
+                    "target_arch"
+                        | "target_os"
+                        | "target_env"
+                        | "target_vendor"
+                        | "target_abi"
+                        | "target_pointer_width"
+                        | "target_endian"
+                )
+            )
+        })
+        .map(|line| syn::parse_str(line).unwrap())
+        .collect();
+    syn::parse_quote!(all(#(#fields),*))
+}
+
+fn write_generated(out: &Path, file: syn::File) {
+    std::fs::write(
+        out,
+        format!(
+            "/* automatically generated by gen-bindings */\n\n{}",
+            file.into_token_stream()
+        ),
+    )
+    .unwrap_or_else(|error| panic!("failed to write bindings to {}: {error}", out.display()));
+    // Keep doc attributes and the existing Rust formatting, rather than
+    // rewriting all upstream documentation into block comments.
+    let status = Command::new("rustfmt")
+        .args(["--edition", "2024"])
+        .arg(out)
+        .status()
+        .expect("failed to run rustfmt");
+    assert!(status.success(), "rustfmt failed: {status}");
 }
 
 const PREFIXES: &[(&str, &str)] = &[

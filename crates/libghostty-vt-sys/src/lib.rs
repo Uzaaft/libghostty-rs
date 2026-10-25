@@ -5,6 +5,9 @@
 #![allow(rustdoc::all)]
 
 mod bindings;
+// Generated checks select the C ABI of the compilation target, not the host
+// that last regenerated the shared declarations.
+mod layouts;
 
 use std::ops::Deref;
 
