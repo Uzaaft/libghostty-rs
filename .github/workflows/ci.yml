@@ -77,7 +77,33 @@ jobs:
       # The examples are their own workspace, so the flake checks above never
       # build them. `--locked` also fails if example/Cargo.lock is stale.
       - name: Build examples
-        run: nix develop -c cargo build --locked --manifest-path example/Cargo.toml --workspace
+        run: |
+          nix develop -c cargo build --locked --manifest-path example/Cargo.toml --workspace
+          nix develop -c cargo test --locked --manifest-path example/Cargo.toml -p wasm_rs
+
+      # Link and execute Rust + Zig together. cargo check cannot catch ABI,
+      # callback table, allocator, or unexpected host-import failures.
+      - name: Test wasm32
+        if: matrix.name == 'Linux x86_64'
+        run: |
+          nix develop -c bash -euc '
+            for profile in dev release; do
+              cargo build --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm32-unknown-unknown --profile "$profile"
+              out="example/target/wasm32-unknown-unknown/${profile/dev/debug}"
+              node example/wasm_rs/run.mjs "$out/examples/smoke.wasm" "$out/wasm_rs.wasm"
+            done
+          '
+
+      - name: Test wasm64
+        if: matrix.name == 'Linux x86_64'
+        run: |
+          nix develop .#wasm64 -c bash -euc '
+            for profile in dev release; do
+              cargo build -Zbuild-std=std,panic_abort --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm64-unknown-unknown --profile "$profile"
+              out="example/target/wasm64-unknown-unknown/${profile/dev/debug}"
+              node example/wasm_rs/run.mjs "$out/examples/smoke.wasm" "$out/wasm_rs.wasm"
+            done
+          '
 
   miri:
     name: Linux Miri
