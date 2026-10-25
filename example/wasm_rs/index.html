@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<!--
+Ported from ghostty/example/wasm-vt at 521cf2c. See README.md.
+Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors
+SPDX-License-Identifier: MIT
+See ../../LICENSE for the MIT permission and warranty notice.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ghostty VT Terminal - WebAssembly Example</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+            line-height: 1.6;
+        }
+        h1 {
+            color: #333;
+        }
+        .input-section {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .input-section h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        textarea {
+            width: 100%;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+        button {
+            background: #0066cc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #0052a3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .output {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            font-size: 14px;
+        }
+        .error {
+            background: #fee;
+            border-color: #faa;
+            color: #c00;
+        }
+        .status {
+            color: #666;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        .size-controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        .size-controls label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .size-controls input[type="number"] {
+            width: 60px;
+            padding: 4px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Ghostty VT Terminal - WebAssembly Example</h1>
+    <p>This example demonstrates initializing a terminal, writing VT-encoded data to it, and formatting the output using the Ghostty VT WebAssembly module.</p>
+
+    <div class="status" id="status">Loading WebAssembly module...</div>
+
+    <div class="input-section">
+        <h3>Terminal Size</h3>
+        <div class="size-controls">
+            <label>Cols: <input type="number" id="cols" value="80" min="1" max="500" disabled></label>
+            <label>Rows: <input type="number" id="rows" value="24" min="1" max="500" disabled></label>
+        </div>
+        <h3>VT Input</h3>
+        <textarea id="vtInput" rows="6" disabled>Hello, World!\r\n\x1b[1;32mGreen Bold\x1b[0m and \x1b[4mUnderline\x1b[0m\r\nLine 3: placeholder\r\n\x1b[3;1H\x1b[2KLine 3: Overwritten!</textarea>
+        <p style="font-size: 13px; color: #666; margin-top: 5px;">Use \x1b for ESC, \r\n for CR+LF. Press "Run" to process.</p>
+        <button id="runBtn" disabled>Run</button>
+    </div>
+
+    <div id="output" class="output">Waiting for input...</div>
+
+    <p><strong>Note:</strong> This example must be served via HTTP (not opened directly as a file). See the README for instructions.</p>
+
+    <script type="module">
+        import { loadTerminal, parseEscapes } from './terminal.mjs';
+
+        let format = null;
+
+        async function loadWasm() {
+            try {
+                const response = await fetch('../target/wasm32-unknown-unknown/release/wasm_rs.wasm');
+                const wasmBytes = await response.arrayBuffer();
+                format = await loadTerminal(wasmBytes);
+                return true;
+            } catch (e) {
+                console.error('Failed to load WASM:', e);
+                if (window.location.protocol === 'file:') {
+                    throw new Error('Cannot load WASM from file:// protocol. Please serve via HTTP (see README)');
+                }
+                return false;
+            }
+        }
+
+        function run() {
+            const outputDiv = document.getElementById('output');
+
+            try {
+                const cols = parseInt(document.getElementById('cols').value, 10);
+                const rows = parseInt(document.getElementById('rows').value, 10);
+                const vtText = parseEscapes(document.getElementById('vtInput').value);
+                const result = format(cols, rows, vtText);
+
+                let output = `Terminal: ${cols}x${rows}\n`;
+                output += `Input: ${result.inputLength} bytes\n`;
+                output += `Output: ${result.outputLength} bytes\n\n`;
+                output += result.text;
+
+                outputDiv.className = 'output';
+                outputDiv.textContent = output;
+            } catch (e) {
+                console.error('Error:', e);
+                outputDiv.className = 'output error';
+                outputDiv.textContent = `Error: ${e.message}\n\nStack trace:\n${e.stack}`;
+            }
+        }
+
+        async function init() {
+            const statusDiv = document.getElementById('status');
+            const vtInput = document.getElementById('vtInput');
+            const colsInput = document.getElementById('cols');
+            const rowsInput = document.getElementById('rows');
+            const runBtn = document.getElementById('runBtn');
+
+            try {
+                statusDiv.textContent = 'Loading WebAssembly module...';
+
+                const loaded = await loadWasm();
+                if (!loaded) {
+                    throw new Error('Failed to load WebAssembly module');
+                }
+
+                statusDiv.textContent = '';
+                vtInput.disabled = false;
+                colsInput.disabled = false;
+                rowsInput.disabled = false;
+                runBtn.disabled = false;
+
+                runBtn.addEventListener('click', run);
+
+                // Run the default example on load
+                run();
+                return;
+            } catch (e) {
+                statusDiv.textContent = `Error: ${e.message}`;
+                statusDiv.style.color = '#c00';
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
