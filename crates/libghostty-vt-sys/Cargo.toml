@@ -17,13 +17,15 @@ default = ["vendored"]
 vendored = []
 pkg-config = ["dep:pkg-config"]
 link-dynamic = []
-bindgen-tool = ["dep:bindgen", "dep:libc", "dep:heck"]
+bindgen-tool = ["dep:bindgen", "dep:libc", "dep:heck", "dep:syn", "dep:quote"]
 kitty-graphics = []
 
 [dependencies]
 bindgen = {version = "0.72.1", optional = true}
 libc = {version = "0.2", optional = true}
 heck = {version = "0.5", optional = true}
+syn = {version = "2", features = ["full"], optional = true}
+quote = {version = "1", optional = true}
 
 [build-dependencies]
 pkg-config = { version = "0.3", optional = true }

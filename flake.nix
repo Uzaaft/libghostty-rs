@@ -47,7 +47,8 @@
           targets = rustTargets;
         };
         rustTargets =
-          pkgs.lib.optionals pkgs.stdenv.isLinux [
+          ["wasm32-unknown-unknown"]
+          ++ pkgs.lib.optionals pkgs.stdenv.isLinux [
             "x86_64-unknown-linux-gnu"
             "x86_64-unknown-linux-musl"
           ]
@@ -229,13 +230,15 @@
                 cargo run --locked --features libghostty-vt-sys/pkg-config -p libghostty-vt-sys \
                   --features libghostty-vt-sys/bindgen-tool --bin gen-bindings
                 cargo fmt -p libghostty-vt-sys
-                if ! diff -u ${src}/crates/libghostty-vt-sys/src/bindings.rs \
-                  crates/libghostty-vt-sys/src/bindings.rs; then
-                  echo "error: crates/libghostty-vt-sys/src/bindings.rs is out of date." >&2
-                  echo "Regenerate it from the dev shell with:" >&2
-                  echo "  cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings && cargo fmt -p libghostty-vt-sys" >&2
-                  exit 1
-                fi
+                for file in bindings.rs layouts.rs; do
+                  if ! diff -u ${src}/crates/libghostty-vt-sys/src/$file \
+                    crates/libghostty-vt-sys/src/$file; then
+                    echo "error: crates/libghostty-vt-sys/src/$file is out of date." >&2
+                    echo "Regenerate it from the dev shell with:" >&2
+                    echo "  cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings && cargo fmt -p libghostty-vt-sys" >&2
+                    exit 1
+                  fi
+                done
               '';
               doInstallCargoArtifacts = false;
               installPhaseCommand = "touch $out";
@@ -290,6 +293,7 @@
           packages = [
             devToolchain
             zigPkg
+            pkgs.nodejs
             pkgs.clang
             pkgs.libclang
             pkgs.pkg-config
@@ -330,6 +334,12 @@
 
         devShells.miri = pkgs.mkShell {
           packages = [miriToolchain];
+        };
+
+        # Rust ships no wasm64 std; reuse the nightly toolchain with rust-src
+        # to build it with -Zbuild-std, without changing the native MSRV.
+        devShells.wasm64 = pkgs.mkShell {
+          packages = [miriToolchain zigPkg pkgs.nodejs];
         };
       }
     );

@@ -98,8 +98,8 @@ cargo build --manifest-path example/Cargo.toml --workspace
 
 ### Regenerating bindings
 
-`crates/libghostty-vt-sys/src/bindings.rs` is checked in and must match the
-Ghostty commit pinned in both `crates/libghostty-vt-sys/build.rs` and
+`bindings.rs` and `layouts.rs` in `crates/libghostty-vt-sys/src/` are checked
+in and must match the Ghostty commit pinned in `crates/libghostty-vt-sys/build.rs` and
 `flake.nix` (run `nix flake update ghostty` after changing the latter); the
 `bindings-fresh` Nix check fails otherwise. After bumping the pin, regenerate
 the bindings from the dev shell:
@@ -110,7 +110,14 @@ cargo run -p libghostty-vt-sys --features bindgen-tool --bin gen-bindings && car
 
 The generator reads the headers from `GHOSTTY_INCLUDE_DIR`, or from
 `GHOSTTY_SOURCE_DIR/include`, and otherwise from the headers the build script
-installed for that same build.
+installed for that same build. It parses them for each vendored target using
+explicit Clang targets and verifies that the API declarations are identical.
+`layouts.rs` holds compile-time size, alignment and field-offset assertions,
+gated by the target ABI reported by `rustc`. Targets share checks only when
+Clang generated identical assertions. Adding a vendored target also requires
+adding it to the generator's `TARGETS` list; unlisted targets receive no layout
+checks. Regeneration needs no target SDKs or installed cross-target Rust standard
+libraries, and ordinary builds need neither Clang nor the generator.
 
 ### Miri Verification
 

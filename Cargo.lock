@@ -169,6 +169,8 @@ dependencies = [
  "heck",
  "libc",
  "pkg-config",
+ "quote",
+ "syn",
 ]
 
 [[package]]

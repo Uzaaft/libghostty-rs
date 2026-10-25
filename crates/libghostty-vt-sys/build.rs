@@ -86,6 +86,13 @@ fn main() {
     // hand it to whichever path runs rather than re-reading it per call site.
     let target = env::var("TARGET").expect("TARGET must be set");
 
+    // Wasm consumers link the archive into their own module, not a native
+    // shared library. Check before pkg-config as well as the source build.
+    assert!(
+        !target.starts_with("wasm") || matches!(link_mode, LinkMode::Static),
+        "Wasm targets support static linking only; disable the link-dynamic feature"
+    );
+
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_CPU");
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
@@ -138,13 +145,20 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
 
     // Build libghostty-vt via zig.
     let install_prefix = out_dir.join("ghostty-install");
+    // Upstream installs the Wasm archive and standalone module, but not
+    // headers. Use the same source revision rather than a host installation.
+    let include_dir = if target.starts_with("wasm") {
+        ghostty_dir.join("include")
+    } else {
+        install_prefix.join("include")
+    };
     // Tell the gen-bindings tool, a binary of this crate, which headers
-    // this exact build installed. Cargo keeps one build output per feature
+    // belong to this exact build. Cargo keeps one build output per feature
     // set and profile, and ones from before a pin bump still hold the old
     // headers, so scanning the target directory can find stale ones.
     println!(
         "cargo:rustc-env=LIBGHOSTTY_VT_SYS_INCLUDE_DIR={}",
-        install_prefix.join("include").display()
+        include_dir.display()
     );
     let zig_cache_dir = out_dir.join("zig-cache");
     let zig_global_cache_dir = out_dir.join("zig-global-cache");
@@ -255,7 +269,6 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
     }
 
     let lib_dir = install_prefix.join("lib");
-    let include_dir = install_prefix.join("include");
     let search_dirs = library_search_dirs(target, &install_prefix);
     if ios_platform.is_none() {
         warn_unused_xcframework(&lib_dir);
@@ -576,6 +589,8 @@ fn zig_target(target: &str) -> String {
         "aarch64-pc-windows-msvc" => "aarch64-windows-msvc",
         "aarch64-linux-android" => "aarch64-linux-android",
         "x86_64-linux-android" => "x86_64-linux-android",
+        "wasm32-unknown-unknown" => "wasm32-freestanding",
+        "wasm64-unknown-unknown" => "wasm64-freestanding",
         other => panic!("unsupported Rust target for vendored build: {other}"),
     };
     value.to_owned()
