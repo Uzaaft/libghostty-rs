@@ -134,6 +134,51 @@ Ghostty FFI backend.
 
 Use `nix develop .#miri` when working interactively with the same toolchain.
 
+### WebAssembly
+
+Wasm support is selected by the Rust target, not a Cargo feature. The existing
+Rust API links Ghostty's static archive into the application's Wasm module;
+no JavaScript bindings or browser dependencies are added to either library crate.
+Do not enable `link-dynamic` on Wasm.
+
+| Rust target | Zig target | Toolchain |
+| --- | --- | --- |
+| `wasm32-unknown-unknown` | `wasm32-freestanding` | Stable Rust, including the MSRV |
+| `wasm64-unknown-unknown` | `wasm64-freestanding` | Nightly with `rust-src` and `-Zbuild-std=std,panic_abort`; a Memory64-capable runtime |
+
+The pinned Ghostty revision builds both freestanding architectures. Its
+`wasm32-wasi` build fails because its panic/stderr path requires libc without
+linking it, and its standalone Emscripten module fails to link libc. WASI
+(including Rust's preview variants) and Emscripten are not supported by this
+integration until those upstream build paths work. `wasm32v1-none` is a
+`no_std` Rust target; these crates require `std`. Wasm does not imply support
+for Rust threads, filesystem access, or networking.
+
+The [browser example](example/wasm_rs/README.md) ports upstream's `wasm-vt`
+demo to the Rust API. Its ABI and allocator smoke tests are separate from
+the demo. Run both with Node.js (provided by the dev shells):
+
+```sh
+nix develop -c cargo build --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm32-unknown-unknown --release
+nix develop -c node example/wasm_rs/run.mjs example/target/wasm32-unknown-unknown/release/examples/smoke.wasm example/target/wasm32-unknown-unknown/release/wasm_rs.wasm
+
+nix develop .#wasm64 -c cargo build -Zbuild-std=std,panic_abort --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm64-unknown-unknown --release
+nix develop .#wasm64 -c node example/wasm_rs/run.mjs example/target/wasm64-unknown-unknown/release/examples/smoke.wasm example/target/wasm64-unknown-unknown/release/wasm_rs.wasm
+```
+
+CI also executes Debug builds. Ghostty's Debug Wasm build imports
+`env.log(pointer, length)`; the example runner supplies it. Its release build
+discards logs instead of calling the native logger hook. Embedders must
+register a cryptographically secure source through
+`sys::set_secure_random_source` before using operations that require entropy;
+freestanding Ghostty has no platform entropy source. Browser applications can
+supply Web Crypto from their own host integration.
+
+The raw `ghostty_wasm_*` allocation helpers are available through
+`libghostty-vt-sys` on Wasm. Rust callers normally use the existing owned types
+and allocator APIs instead; the helpers are intended for hosts managing raw
+Wasm memory. Do not mix their allocations with `ghostty_free` or Rust's heap.
+
 ### Running the example
 
 The examples live in their own workspace under `example/`. To run one, enter
