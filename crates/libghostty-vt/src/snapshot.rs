@@ -280,7 +280,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// following FINISH are left unread. On success this returns a
     /// caller-owned terminal with its persistent VT stream restored.
     /// Continuation tracking on the returned terminal is disabled by default.
-    /// When [`Self::set_retain_continuation`] is enabled, the decoder's
+    /// When continuation retention is enabled with
+    /// [`Self::set_retain_continuation_enabled`], the decoder's
     /// maximum continuation size is applied to the terminal, and the terminal
     /// continuation APIs export the exact current continuation when that limit
     /// is nonzero. Tracking remains enabled even if the exported continuation
@@ -311,7 +312,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// The restored parser state may be unfinished. By default, terminal
     /// continuation tracking is disabled and
     /// [`Terminal::continuation_max_bytes`] returns zero.
-    /// When [`Self::set_retain_continuation`] is enabled, the decoder's
+    /// When continuation retention is enabled with
+    /// [`Self::set_retain_continuation_enabled`], the decoder's
     /// maximum continuation size is applied to the terminal, and the terminal
     /// continuation APIs export the exact current continuation when that limit
     /// is nonzero. Tracking remains enabled even if the exported continuation
@@ -378,9 +380,10 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// state. The decoder default matches the largest built-in APC protocol
     /// buffer limit, currently 65 MiB.
     ///
-    /// This is primarily an input validation limit. When
-    /// [`Self::set_retain_continuation`] is enabled, the same value also
-    /// becomes the continuation tracking limit on the returned terminal.
+    /// This is primarily an input validation limit. When continuation
+    /// retention is enabled with [`Self::set_retain_continuation_enabled`], the
+    /// same value also becomes the continuation tracking limit on the returned
+    /// terminal.
     pub fn set_max_continuation_bytes(&mut self, v: usize) -> Result<&mut Self> {
         self.set(Opt::MAX_CONTINUATION_BYTES, &v)?;
         Ok(self)
@@ -390,7 +393,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// terminals.
     ///
     /// This value is available in every non-failed decoder state.
-    pub fn retain_continuation(&self) -> Result<bool> {
+    pub fn is_retain_continuation_enabled(&self) -> Result<bool> {
         self.get(Data::RETAIN_CONTINUATION)
     }
 
@@ -408,8 +411,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// continuation does not disable it. Callers that do not need ongoing
     /// tracking must still call [`Terminal::set_continuation_max_bytes`] with
     /// zero after export and before writing post-snapshot input.
-    pub fn set_retain_continuation(&mut self, value: bool) -> Result<&mut Self> {
-        self.set(Opt::RETAIN_CONTINUATION, &value)?;
+    pub fn set_retain_continuation_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
+        self.set(Opt::RETAIN_CONTINUATION, &enabled)?;
         Ok(self)
     }
 
@@ -695,7 +698,7 @@ mod tests {
     fn decoded_continuation_is_not_retained_by_default() {
         let bytes = unfinished_snapshot();
         let decoder = Decoder::new_buf(&bytes).unwrap();
-        assert!(!decoder.retain_continuation().unwrap());
+        assert!(!decoder.is_retain_continuation_enabled().unwrap());
         let restored = decoder.decode().unwrap();
         assert_eq!(restored.continuation_max_bytes().unwrap(), 0);
     }
@@ -707,9 +710,9 @@ mod tests {
         decoder
             .set_max_continuation_bytes(1024)
             .unwrap()
-            .set_retain_continuation(true)
+            .set_retain_continuation_enabled(true)
             .unwrap();
-        assert!(decoder.retain_continuation().unwrap());
+        assert!(decoder.is_retain_continuation_enabled().unwrap());
 
         let mut restored = decoder.decode().unwrap();
         assert_eq!(restored.continuation_max_bytes().unwrap(), 1024);
@@ -727,7 +730,7 @@ mod tests {
     fn ready_retains_continuation_before_history_is_restored() {
         let bytes = unfinished_snapshot();
         let mut decoder = Decoder::new_buf(&bytes).unwrap();
-        decoder.set_retain_continuation(true).unwrap();
+        decoder.set_retain_continuation_enabled(true).unwrap();
         // The tracking limit is the decoder's, not the encoder's.
         let limit = decoder.max_continuation_bytes().unwrap();
         let mut incremental = decoder.ready().unwrap();
@@ -753,7 +756,7 @@ mod tests {
         decoder
             .set_max_continuation_bytes(1024)
             .unwrap()
-            .set_retain_continuation(true)
+            .set_retain_continuation_enabled(true)
             .unwrap();
         let mut restored = decoder.decode().unwrap();
 
@@ -779,7 +782,7 @@ mod tests {
         decoder
             .set_max_continuation_bytes(0)
             .unwrap()
-            .set_retain_continuation(true)
+            .set_retain_continuation_enabled(true)
             .unwrap();
         let restored = decoder.decode().unwrap();
         assert_eq!(restored.continuation_max_bytes().unwrap(), 0);
