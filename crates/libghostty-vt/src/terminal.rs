@@ -1557,6 +1557,49 @@ impl Mode {
         }
     }
 
+    /// Encode a DECRPM (DEC Private Mode Report) response sequence.
+    ///
+    /// Writes a mode report escape sequence into the provided buffer.
+    /// The generated sequence has the form:
+    /// - DEC private mode: `CSI ? Ps1 ; Ps2 $ y`
+    /// - ANSI mode: `CSI Ps1 ; Ps2 $ y`
+    ///
+    /// If the buffer is too small, returns [`Error::OutOfSpace`] with the
+    /// required buffer size. The caller can then retry with a sufficiently
+    /// sized buffer.
+    ///
+    /// ```
+    /// use libghostty_vt::terminal::{Mode, ModeReportState};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut buf = [0u8; 32];
+    ///
+    /// // Report DECCKM (DEC private mode 1) as set.
+    /// let len = Mode::DECCKM.encode_report(ModeReportState::Set, &mut buf)?;
+    /// assert_eq!(&buf[..len], b"\x1b[?1;1$y");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn encode_report(self, state: ModeReportState, buf: &mut [u8]) -> Result<usize> {
+        let mut written = 0;
+        // SAFETY: The pointer and length describe `buf`, a valid writable
+        // region, and upstream only writes within `buf_len`, even when it
+        // runs out of space partway through (an empty `buf` is fine too:
+        // upstream accepts a zero-length or NULL buffer as a size query).
+        let result = unsafe {
+            ffi::ghostty_mode_report_encode(
+                self.0,
+                state.into(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &raw mut written,
+            )
+        };
+        // `written` doubles as the required size on `OUT_OF_SPACE`, so it
+        // must be threaded into the error rather than dropped.
+        from_result_with_len(result, written)
+    }
+
     pub const KAM: Self = Self::new(2, ModeKind::Ansi);
     pub const INSERT: Self = Self::new(4, ModeKind::Ansi);
     pub const SRM: Self = Self::new(12, ModeKind::Ansi);
@@ -1609,6 +1652,26 @@ pub enum ModeKind {
     Dec,
     /// ANSI terminal mode.
     Ansi,
+}
+
+/// DECRPM report state values.
+///
+/// These correspond to the Ps2 parameter in a DECRPM response
+/// sequence (`CSI ? Ps1 ; Ps2 $ y`).
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum ModeReportState {
+    /// Mode is not recognized
+    NotRecognized = ffi::ModeReportState::NOT_RECOGNIZED,
+    /// Mode is set (enabled)
+    Set = ffi::ModeReportState::SET,
+    /// Mode is reset (disabled)
+    Reset = ffi::ModeReportState::RESET,
+    /// Mode is permanently set
+    PermanentlySet = ffi::ModeReportState::PERMANENTLY_SET,
+    /// Mode is permanently reset
+    PermanentlyReset = ffi::ModeReportState::PERMANENTLY_RESET,
 }
 
 impl From<Mode> for ffi::Mode {
@@ -5848,6 +5911,52 @@ mod tests {
             .set_xt_checksum_extension(XtChecksumExtension::FULL_CODEPOINTS)
             .expect("valid extension should be accepted");
         assert_eq!(request(&mut terminal, row2), b"\x1bP7!~2C00\x1b\\");
+    }
+
+    /// DECRPM reports follow the forms in the header: `CSI ? Ps1 ; Ps2 $ y`
+    /// for DEC private modes and `CSI Ps1 ; Ps2 $ y` for ANSI modes, where
+    /// Ps2 is the numeric report state.
+    #[test]
+    fn mode_encode_report() {
+        let mut buf = [0u8; 32];
+
+        let len = Mode::new(1, ModeKind::Dec)
+            .encode_report(ModeReportState::Set, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[?1;1$y");
+
+        // ANSI modes drop the `?`.
+        let len = Mode::INSERT
+            .encode_report(ModeReportState::Reset, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[4;2$y");
+
+        let len = Mode::DECCKM
+            .encode_report(ModeReportState::PermanentlyReset, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[?1;4$y");
+
+        let len = Mode::INSERT
+            .encode_report(ModeReportState::PermanentlySet, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[4;3$y");
+
+        // Mirrors upstream's "encode not recognized" test.
+        let len = Mode::new(9999, ModeKind::Dec)
+            .encode_report(ModeReportState::NotRecognized, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[?9999;0$y");
+    }
+
+    /// A short (or empty) buffer reports how much space the sequence needs,
+    /// so callers can retry with a big enough one.
+    #[test]
+    fn mode_encode_report_out_of_space() {
+        let result = Mode::DECCKM.encode_report(ModeReportState::Set, &mut [0u8; 2]);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 8 })));
+
+        let result = Mode::DECCKM.encode_report(ModeReportState::Set, &mut []);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 8 })));
     }
 }
 
