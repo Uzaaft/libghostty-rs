@@ -239,7 +239,9 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// Create a snapshot decoder over a borrowed byte buffer.
     ///
     /// The bytes are not copied. Bytes after FINISH are not consumed;
-    /// query [`Decoder::source_offset`] to locate them.
+    /// query [`Decoder::source_offset`] to locate them. To do so, decode with
+    /// [`Decoder::ready`] and read it through [`IncrementalDecoder::decoder`]
+    /// after FINISH.
     pub fn new_buf(buf: &'r [u8]) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_buf_inner(std::ptr::null(), buf) }
@@ -249,7 +251,9 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// with a custom allocator.
     ///
     /// The bytes are not copied. Bytes after FINISH are not consumed;
-    /// query [`Decoder::source_offset`] to locate them.
+    /// query [`Decoder::source_offset`] to locate them. To do so, decode with
+    /// [`Decoder::ready`] and read it through [`IncrementalDecoder::decoder`]
+    /// after FINISH.
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
@@ -572,6 +576,18 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
         )
     }
 
+    /// Get a reference to the underlying decoder.
+    ///
+    /// It can be queried between pages and after FINISH, e.g. for
+    /// [`Decoder::source_offset`] and the history row counts. After a
+    /// decoding error only the history row counts remain available; the other
+    /// values return [`Error::InvalidValue`].
+    #[must_use]
+    pub fn decoder(&self) -> &Decoder<'alloc, 'r> {
+        // Shared only: the setters need `&mut`, and upstream rejects options
+        // once READY has run anyway.
+        &self.decoder
+    }
     /// Return a shared reference to the terminal being decoded.
     #[must_use]
     pub fn terminal(&self) -> &Terminal<'alloc, 'cb> {
@@ -877,6 +893,44 @@ mod tests {
         } else {
             assert_eq!(compressed.primary_compressed_pages, 0);
         }
+    }
+
+    /// The decoder stays reachable through the whole incremental decode, so
+    /// READY metadata can be read before the first page and the end of the
+    /// snapshot can be located after FINISH.
+    #[test]
+    fn decoder_is_queryable_before_history_and_after_finish() {
+        // Same cheap history-bearing terminal as
+        // `decode_compresses_history_when_enabled`: several history pages
+        // remain to be decoded after READY.
+        let mut terminal = Terminal::new(215, 2).unwrap();
+        terminal.set_scrollback_max_bytes(None).unwrap();
+        terminal.vt_write(&b"x\r\n".repeat(215 * 3));
+        let history = terminal.scrollback_rows().unwrap();
+        let mut buf = Vec::new();
+        terminal.encode_snapshot(&mut buf).unwrap();
+        // Record the length before appending, so the expected offset doesn't
+        // come from the decoder itself. The trailing bytes make the end of
+        // the snapshot differ from the end of the buffer.
+        let snapshot_len = buf.len();
+        buf.extend_from_slice(b"trailing");
+
+        let mut incremental = Decoder::new_buf(&buf).unwrap().ready().unwrap();
+        // No page has been decoded yet, so there is no `Progress` to reach the
+        // decoder through.
+        assert_eq!(
+            incremental.decoder().history_rows_primary().unwrap(),
+            history as u64
+        );
+        let mut pages = 0;
+        while incremental.next().unwrap().is_some() {
+            pages += 1;
+        }
+        assert!(pages > 0);
+
+        let offset = incremental.decoder().source_offset().unwrap();
+        assert_eq!(offset, snapshot_len);
+        assert_eq!(&buf[offset..], b"trailing");
     }
 
     /// Length of a record header: u16 tag, u32 payload length, u32 CRC32C.
