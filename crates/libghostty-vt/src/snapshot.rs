@@ -416,6 +416,47 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
         Ok(self)
     }
 
+    /// Whether history is compressed while it is restored.
+    ///
+    /// See [`Self::set_compress_history_enabled`]. This value is available in
+    /// every non-failed decoder state.
+    pub fn is_compress_history_enabled(&self) -> Result<bool> {
+        self.get(Data::COMPRESS_HISTORY)
+    }
+
+    /// Compress scrollback history while it is restored.
+    ///
+    /// By default, restoring a snapshot leaves all of its scrollback history
+    /// uncompressed, even if the terminal that produced the snapshot had
+    /// compressed it. The history stays that size until the application calls
+    /// [`Terminal::compress`]. For a terminal with a lot of scrollback, that
+    /// can be many times more memory than the terminal needed before.
+    ///
+    /// When this option is true, the decoder compresses each history page
+    /// right after restoring it. The restored terminal starts out compressed,
+    /// and the decode never holds more than one uncompressed history page at a
+    /// time. The result is the same as decoding normally and then calling
+    /// [`Terminal::compress`] with
+    /// [`CompressionMode::Full`](crate::terminal::CompressionMode::Full),
+    /// without the memory spike in between.
+    ///
+    /// A history page that is on screen when it is restored stays
+    /// uncompressed. This only happens if the viewport is scrolled to the top
+    /// of the scrollback during an incremental decode. Compressed history is
+    /// uncompressed automatically when it is accessed later, for example by
+    /// scrolling or searching.
+    ///
+    /// This only changes how the restored terminal stores its history in
+    /// memory. The snapshot format is unchanged, so it works with any
+    /// snapshot. On platforms that do not support scrollback compression, this
+    /// option is accepted and has no effect.
+    ///
+    /// This is false by default.
+    pub fn set_compress_history_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
+        self.set(Opt::COMPRESS_HISTORY, &enabled)?;
+        Ok(self)
+    }
+
     /// Number of snapshot source bytes consumed so far.
     ///
     /// At FINISH this identifies the first byte after the snapshot. Trailing
@@ -495,6 +536,10 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
     /// calls. If a history page can no longer be applied safely, it is still
     /// consumed and validated and progress reports zero rows. The decoder
     /// applies history to the terminal produced by its READY operation.
+    ///
+    /// If [`Decoder::set_compress_history_enabled`] is enabled, the page is
+    /// compressed before this returns, unless it is visible in the terminal's
+    /// viewport.
     ///
     /// If that terminal has been replaced through
     /// [`IncrementalDecoder::terminal_mut`] (e.g. with [`std::mem::replace`]),
@@ -786,6 +831,52 @@ mod tests {
             .unwrap();
         let restored = decoder.decode().unwrap();
         assert_eq!(restored.continuation_max_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn history_compression_is_off_by_default_and_can_be_enabled() {
+        let bytes = unfinished_snapshot();
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        assert!(!decoder.is_compress_history_enabled().unwrap());
+        decoder.set_compress_history_enabled(true).unwrap();
+        assert!(decoder.is_compress_history_enabled().unwrap());
+        // Turning it back off must stick too, not just turning it on.
+        decoder.set_compress_history_enabled(false).unwrap();
+        assert!(!decoder.is_compress_history_enabled().unwrap());
+    }
+
+    /// Restoring leaves history uncompressed unless the option asks for it.
+    /// This goes through the one-shot [`Decoder::decode`], which upstream runs
+    /// as READY followed by every `next`, so the option applies there too.
+    #[test]
+    fn decode_compresses_history_when_enabled() {
+        // Mirrors upstream's own test: at 215 columns a page holds 215 rows, so
+        // 3 pages' worth of lines leaves several history pages above the
+        // active area. The restored viewport shows the active area, so every
+        // one of them is off screen and eligible. This is much cheaper than
+        // `snapshot_with_history`, which formats and writes a line at a time.
+        let mut terminal = Terminal::new(215, 2).unwrap();
+        // Lift the default byte limit, which would otherwise prune all but
+        // one of those history pages.
+        terminal.set_scrollback_max_bytes(None).unwrap();
+        terminal.vt_write(&b"x\r\n".repeat(215 * 3));
+        let mut bytes = Vec::new();
+        terminal.encode_snapshot(&mut bytes).unwrap();
+
+        // Left at its default, the option compresses nothing.
+        let plain = Decoder::new_buf(&bytes).unwrap().decode().unwrap();
+        assert_eq!(plain.memory_usage().unwrap().primary_compressed_pages, 0);
+
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        decoder.set_compress_history_enabled(true).unwrap();
+        let compressed = decoder.decode().unwrap().memory_usage().unwrap();
+        // Upstream accepts the option where compression is unsupported, but it
+        // has no effect there, so only expect compressed pages where it is.
+        if compressed.compression_supported {
+            assert!(compressed.primary_compressed_pages > 0);
+        } else {
+            assert_eq!(compressed.primary_compressed_pages, 0);
+        }
     }
 
     /// Length of a record header: u16 tag, u32 payload length, u32 CRC32C.
