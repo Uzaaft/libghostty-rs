@@ -331,16 +331,21 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// Like [`Self::vt_write`], the input is assumed to be untrusted.
     pub fn vt_write_until_ground(&mut self, data: &[u8]) -> Result<Option<usize>> {
-        let mut consumed = 0;
+        // Ground is one of the boundaries the general `vt_write_until` can
+        // stop at, so asking for it alone keeps this method's behavior: a
+        // ground stop is SUCCESS with `consumed` set, and running out of input
+        // first is NO_VALUE.
+        let mut stop = ffi::sized!(ffi::TerminalWriteStop);
         let result = unsafe {
-            ffi::ghostty_terminal_vt_write_until_ground(
+            ffi::ghostty_terminal_vt_write_until(
                 self.inner.as_raw(),
                 data.as_ptr(),
                 data.len(),
-                &raw mut consumed,
+                ffi::TerminalBoundary::GROUND as u32,
+                &raw mut stop,
             )
         };
-        from_optional_result_with_len(result, consumed)
+        from_optional_result_with_len(result, stop.consumed)
     }
 
     /// Whether VT processing is at ground.
