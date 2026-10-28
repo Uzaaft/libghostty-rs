@@ -552,6 +552,25 @@ mod layout_0 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
+        ["Size of TerminalWriteStop"][::std::mem::size_of::<TerminalWriteStop>() - 40usize];
+        ["Alignment of TerminalWriteStop"][::std::mem::align_of::<TerminalWriteStop>() - 8usize];
+        ["Offset of field: TerminalWriteStop::size"]
+            [::std::mem::offset_of!(TerminalWriteStop, size) - 0usize];
+        ["Offset of field: TerminalWriteStop::consumed"]
+            [::std::mem::offset_of!(TerminalWriteStop, consumed) - 8usize];
+        ["Offset of field: TerminalWriteStop::reached"]
+            [::std::mem::offset_of!(TerminalWriteStop, reached) - 16usize];
+        ["Offset of field: TerminalWriteStop::kind"]
+            [::std::mem::offset_of!(TerminalWriteStop, kind) - 20usize];
+        ["Offset of field: TerminalWriteStop::introducer"]
+            [::std::mem::offset_of!(TerminalWriteStop, introducer) - 24usize];
+        ["Offset of field: TerminalWriteStop::end"]
+            [::std::mem::offset_of!(TerminalWriteStop, end) - 28usize];
+        ["Offset of field: TerminalWriteStop::byte"]
+            [::std::mem::offset_of!(TerminalWriteStop, byte) - 32usize];
+    };
+    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
+    const _: () = {
         ["Size of TerminalScrollbar"][::std::mem::size_of::<TerminalScrollbar>() - 24usize];
         ["Alignment of TerminalScrollbar"][::std::mem::align_of::<TerminalScrollbar>() - 8usize];
         ["Offset of field: TerminalScrollbar::total"]
@@ -1500,6 +1519,25 @@ mod layout_1 {
             [::std::mem::offset_of!(TerminalScrollViewport, tag) - 0usize];
         ["Offset of field: TerminalScrollViewport::value"]
             [::std::mem::offset_of!(TerminalScrollViewport, value) - 8usize];
+    };
+    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
+    const _: () = {
+        ["Size of TerminalWriteStop"][::std::mem::size_of::<TerminalWriteStop>() - 28usize];
+        ["Alignment of TerminalWriteStop"][::std::mem::align_of::<TerminalWriteStop>() - 4usize];
+        ["Offset of field: TerminalWriteStop::size"]
+            [::std::mem::offset_of!(TerminalWriteStop, size) - 0usize];
+        ["Offset of field: TerminalWriteStop::consumed"]
+            [::std::mem::offset_of!(TerminalWriteStop, consumed) - 4usize];
+        ["Offset of field: TerminalWriteStop::reached"]
+            [::std::mem::offset_of!(TerminalWriteStop, reached) - 8usize];
+        ["Offset of field: TerminalWriteStop::kind"]
+            [::std::mem::offset_of!(TerminalWriteStop, kind) - 12usize];
+        ["Offset of field: TerminalWriteStop::introducer"]
+            [::std::mem::offset_of!(TerminalWriteStop, introducer) - 16usize];
+        ["Offset of field: TerminalWriteStop::end"]
+            [::std::mem::offset_of!(TerminalWriteStop, end) - 20usize];
+        ["Offset of field: TerminalWriteStop::byte"]
+            [::std::mem::offset_of!(TerminalWriteStop, byte) - 24usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
