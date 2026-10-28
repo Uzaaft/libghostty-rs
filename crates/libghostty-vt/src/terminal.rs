@@ -1619,6 +1619,7 @@ impl Mode {
     pub const REVERSE_WRAP: Self = Self::new(45, ModeKind::Dec);
     pub const ALT_SCREEN_LEGACY: Self = Self::new(47, ModeKind::Dec);
     pub const KEYPAD_KEYS: Self = Self::new(66, ModeKind::Dec);
+    pub const BACKARROW_KEY_MODE: Self = Self::new(67, ModeKind::Dec);
     pub const LEFT_RIGHT_MARGIN: Self = Self::new(69, ModeKind::Dec);
     pub const NORMAL_MOUSE: Self = Self::new(1000, ModeKind::Dec);
     pub const BUTTON_MOUSE: Self = Self::new(1002, ModeKind::Dec);
