@@ -1935,6 +1935,79 @@ impl From<ColorScheme> for ffi::ColorScheme::Type {
     }
 }
 
+/// Size report style.
+///
+/// Determines the output format for the terminal size report.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum SizeReportStyle {
+    /// In-band size report (mode 2048): `ESC [ 48 ; rows ; cols ; height ; width t`
+    Mode2048 = ffi::SizeReportStyle::MODE_2048,
+    /// XTWINOPS text area size in pixels: `ESC [ 4 ; height ; width t`
+    Csi14T = ffi::SizeReportStyle::CSI_14_T,
+    /// XTWINOPS cell size in pixels: `ESC [ 6 ; height ; width t`
+    Csi16T = ffi::SizeReportStyle::CSI_16_T,
+    /// XTWINOPS text area size in characters: `ESC [ 8 ; rows ; cols t`
+    Csi18T = ffi::SizeReportStyle::CSI_18_T,
+    /// XTWINOPS screen size in characters: `ESC [ 9 ; rows ; cols t`
+    ///
+    /// The physical screen size is not known, so this reports the text
+    /// area size in characters, the same as CSI 18 t.
+    Csi19T = ffi::SizeReportStyle::CSI_19_T,
+}
+
+impl SizeReportStyle {
+    /// Encode a terminal size report into an escape sequence.
+    ///
+    /// Encodes a size report in the format specified by `self` into the
+    /// provided buffer.
+    ///
+    /// If the buffer is too small, returns [`Error::OutOfSpace`] with the
+    /// required buffer size. The caller can then retry with a sufficiently
+    /// sized buffer.
+    ///
+    /// ```
+    /// use libghostty_vt::terminal::{SizeReportSize, SizeReportStyle};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let size = SizeReportSize {
+    ///     rows: 24,
+    ///     columns: 80,
+    ///     cell_width: 9,
+    ///     cell_height: 18,
+    /// };
+    /// let mut buf = [0u8; 32];
+    ///
+    /// // Answer an XTWINOPS text area size query (CSI 18 t).
+    /// let len = SizeReportStyle::Csi18T.encode_report(&size, &mut buf)?;
+    /// assert_eq!(&buf[..len], b"\x1b[8;24;80t");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn encode_report(self, size: &SizeReportSize, buf: &mut [u8]) -> Result<usize> {
+        let mut written = 0;
+        // SAFETY: The pointer and length describe `buf`, a valid writable
+        // region, and upstream only writes within `buf_len`, even when it
+        // runs out of space partway through (an empty `buf` is fine too:
+        // upstream accepts a zero-length or NULL buffer as a size query).
+        // `size` is a plain-old-data struct passed by value, so copying it
+        // out of the borrow is all the C side needs.
+        let result = unsafe {
+            ffi::ghostty_size_report_encode(
+                self.into(),
+                *size,
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &raw mut written,
+            )
+        };
+        // `written` doubles as the required size on `OUT_OF_SPACE`, so it
+        // must be threaded into the error rather than dropped.
+        from_result_with_len(result, written)
+    }
+}
+
 /// Amount of compression work to perform before returning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[repr(i32)]
@@ -5957,6 +6030,45 @@ mod tests {
 
         let result = Mode::DECCKM.encode_report(ModeReportState::Set, &mut []);
         assert!(matches!(result, Err(Error::OutOfSpace { required: 8 })));
+    }
+
+    /// Mirrors upstream's size report tests. Rows and columns differ, as do
+    /// cell width and height, so swapping either pair (or text-area pixels
+    /// for cell pixels) changes the output.
+    const SIZE_REPORT_SIZE: SizeReportSize = SizeReportSize {
+        rows: 24,
+        columns: 80,
+        cell_width: 9,
+        cell_height: 18,
+    };
+
+    /// Each style follows its form in the header. Mode 2048 and CSI 14 t
+    /// report the text area in pixels (rows * cell height = 432, columns *
+    /// cell width = 720), while CSI 16 t reports a single cell.
+    #[test]
+    fn size_report_encode_report() {
+        let mut buf = [0u8; 32];
+        let mut encode = |style: SizeReportStyle| {
+            let len = style.encode_report(&SIZE_REPORT_SIZE, &mut buf).unwrap();
+            buf[..len].to_vec()
+        };
+
+        assert_eq!(encode(SizeReportStyle::Mode2048), b"\x1b[48;24;80;432;720t");
+        assert_eq!(encode(SizeReportStyle::Csi14T), b"\x1b[4;432;720t");
+        assert_eq!(encode(SizeReportStyle::Csi16T), b"\x1b[6;18;9t");
+        assert_eq!(encode(SizeReportStyle::Csi18T), b"\x1b[8;24;80t");
+        assert_eq!(encode(SizeReportStyle::Csi19T), b"\x1b[9;24;80t");
+    }
+
+    /// A short (or empty) buffer reports how much space the sequence needs,
+    /// so callers can retry with a big enough one.
+    #[test]
+    fn size_report_encode_report_out_of_space() {
+        let result = SizeReportStyle::Mode2048.encode_report(&SIZE_REPORT_SIZE, &mut [0u8; 4]);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 19 })));
+
+        let result = SizeReportStyle::Mode2048.encode_report(&SIZE_REPORT_SIZE, &mut []);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 19 })));
     }
 }
 
