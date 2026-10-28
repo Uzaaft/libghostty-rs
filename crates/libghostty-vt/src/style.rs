@@ -351,6 +351,12 @@ impl PaletteMask {
         self.0.bits[index / 64] |= 1_u64 << (index % 64);
     }
 
+    /// Clear a palette index in this mask.
+    pub fn unset(&mut self, index: PaletteIndex) {
+        let index = usize::from(index.0);
+        self.0.bits[index / 64] &= !(1_u64 << (index % 64));
+    }
+
     /// Return whether a palette index is set in this mask.
     #[must_use]
     pub fn is_set(self, index: PaletteIndex) -> bool {
