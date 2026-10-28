@@ -1003,6 +1003,13 @@ impl<'t> Image<'t> {
         // SAFETY: We trust libghostty to return valid results
         Ok(Some(unsafe { std::slice::from_raw_parts(ptr, len) }))
     }
+    /// Length of the raw pixel data in bytes. Always equal to
+    /// width * height * bytes-per-pixel for the reported format. For a
+    /// pending image, this is the expected length reserved against the
+    /// storage limit even though [`Image::data`] is not available yet.
+    pub fn data_len(&self) -> Result<usize> {
+        self.get(ffi::KittyGraphicsImageData::DATA_LEN)
+    }
 }
 
 impl<'alloc> PlacementIterator<'alloc> {
