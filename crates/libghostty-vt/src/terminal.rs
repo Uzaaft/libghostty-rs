@@ -313,8 +313,193 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         unsafe { ffi::ghostty_terminal_vt_write(self.inner.as_raw(), data.as_ptr(), data.len()) }
     }
 
-    /// Write VT-encoded data, but only the shortest prefix needed to reach
-    /// ground.
+    /// Write VT-encoded data to the terminal, stopping right after the first
+    /// byte that reaches one of the requested boundaries.
+    ///
+    /// This works like [`Self::vt_write`], but it can pause at points you
+    /// care about. It tells you exactly where a control string starts or
+    /// ends, using the same parse that updates the terminal. For example, a
+    /// program that sits between a shell and a terminal can use it to:
+    ///
+    /// - Find the exact bytes of each APC, DCS or OSC string, such as a Kitty
+    ///   graphics command, a tmux control mode message or a clipboard write,
+    ///   so it can forward, rewrite or drop that string.
+    /// - Wait until the stream is at ground before inserting its own
+    ///   sequences, so it never splits a sequence from the program.
+    ///
+    /// Pass the boundaries to stop at as [`Boundary`] flags. The call
+    /// consumes input up to and including the first byte that reaches one of
+    /// them, and reports that point as a [`WriteStop`]. The terminal only
+    /// processes the consumed bytes, and callbacks only run for those bytes.
+    /// Pass the remaining bytes in your next call.
+    ///
+    /// Every byte you pass is eventually consumed in order, so the terminal
+    /// ends up in the same state as if you had called [`Self::vt_write`] with
+    /// all of it. Like [`Self::vt_write`], the input is assumed to be
+    /// untrusted.
+    ///
+    /// Returns `Ok(Some(stop))` if a boundary was reached, and `Ok(None)` if
+    /// all input was consumed without reaching a boundary.
+    /// `Err(Error::InvalidValue)` is returned if `boundaries` is empty or
+    /// contains undefined flags. No input is consumed in that case.
+    /// `Err(Error::InvalidValue)` is also returned if a newer libghostty
+    /// reports a [`StringKind`], [`StringIntroducer`] or [`StringEnd`] these
+    /// bindings don't know. In that case the input up to the stop has
+    /// already been consumed.
+    ///
+    /// # Finding string content
+    ///
+    /// After a START stop, the string's content begins at the first byte that
+    /// was not consumed. For a Kitty graphics command that byte is `G`. For an
+    /// OSC it is the first digit of the command number. An END stop consumes
+    /// the byte that ended the string, which is not part of the content. A
+    /// string can start in one call and end several calls later.
+    ///
+    /// This loop handles one chunk of output and finds the content of the APC
+    /// strings in it. DCS and OSC strings work the same way with their own
+    /// flags:
+    ///
+    /// ```
+    /// use libghostty_vt::{Terminal, terminal::Boundary};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut terminal = Terminal::new(80, 24)?;
+    /// // A Kitty graphics command surrounded by plain text.
+    /// let data = b"hi\x1b_Gf=100,s=1,v=1;AAAA\x1b\\there";
+    ///
+    /// let want = Boundary::APC_START | Boundary::APC_END;
+    /// let mut off = 0;
+    /// let mut content_start = 0;
+    /// let mut apcs = Vec::new();
+    /// while off < data.len() {
+    ///     let Some(stop) = terminal.vt_write_until(&data[off..], want)? else {
+    ///         // No boundary in the rest of the chunk. Everything was consumed.
+    ///         break;
+    ///     };
+    ///
+    ///     off += stop.consumed;
+    ///     if stop.reached.contains(Boundary::APC_START) {
+    ///         // The content starts at `data[off]`.
+    ///         content_start = off;
+    ///     }
+    ///     if stop.reached.contains(Boundary::APC_END) {
+    ///         // The ending byte is at `data[off - 1]`. The content stops
+    ///         // just before it.
+    ///         apcs.push(&data[content_start..off - 1]);
+    ///     }
+    /// }
+    ///
+    /// assert_eq!(apcs, [b"Gf=100,s=1,v=1;AAAA"]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Strings that end with ESC
+    ///
+    /// The usual string terminator is the two bytes `ESC \`. The call stops
+    /// after the ESC with [`StringEnd::StEsc`] and does not consume the `\`.
+    /// The loop above needs no special case for this. The `\` is simply the
+    /// first byte of the next call, where it completes the terminator and
+    /// brings the stream back to ground.
+    ///
+    /// # DCS strings
+    ///
+    /// A [`Boundary::DCS_START`] stop lands on the introducer, before the
+    /// header. The bytes after it are the parameters, intermediates and final
+    /// byte of the header, then the payload. For `ESC P 1 ; 2 | data ESC \`
+    /// the stop lands on `P`, and `1;2|` is the header that follows.
+    ///
+    /// The string can end in its header. CAN, SUB, 0x9C, ESC or another 8-bit
+    /// control byte there gives a [`Boundary::DCS_END`] stop for a DCS that
+    /// never had a payload. Past the header, only ESC, CAN and SUB end the
+    /// string, and every other byte is payload, 8-bit bytes included. A 0x90
+    /// in the header restarts the header without ending the string, so it
+    /// does not stop.
+    ///
+    /// # One byte that ends a string and starts another
+    ///
+    /// An 8-bit introducer of a different kind inside an APC, or inside a DCS
+    /// header, ends that string and starts the new one on the same byte. The
+    /// stop has both an END flag and a START flag in
+    /// [`reached`](WriteStop::reached), [`end`](WriteStop::end) is
+    /// [`StringEnd::Aborted`] and [`introducer`](WriteStop::introducer) is
+    /// [`StringIntroducer::C1`]. The content of the new string begins right
+    /// after the stop.
+    ///
+    /// For example, in `ESC _ a 0x9D 2 ; t BEL` the 0x9D ends the APC and
+    /// starts an OSC. Asking for [`Boundary::APC_END`] and
+    /// [`Boundary::OSC_START`] gives one stop on the 0x9D with both flags
+    /// set, [`kind`](WriteStop::kind) [`StringKind::Apc`] and
+    /// [`byte`](WriteStop::byte) 0x9D. The OSC content `2;t` begins right
+    /// after it, and the BEL then gives a [`Boundary::OSC_END`] stop.
+    /// [`WriteStop::reached`] lists which bytes do this.
+    ///
+    /// # Waiting for ground
+    ///
+    /// [`Boundary::GROUND`] is a state, not an event. If the stream is
+    /// already at ground, the call returns `Ok(Some(stop))` right away with
+    /// [`consumed`](WriteStop::consumed) set to 0. If you keep asking for
+    /// ground with the same input, you never make progress. After a ground
+    /// stop, write the next bytes without the [`Boundary::GROUND`] flag, or
+    /// with [`Self::vt_write`].
+    pub fn vt_write_until(
+        &mut self,
+        data: &[u8],
+        boundaries: Boundary,
+    ) -> Result<Option<WriteStop>> {
+        let mut stop = ffi::sized!(ffi::TerminalWriteStop);
+        // SAFETY: `data` points to `data.len()` readable bytes (never NULL,
+        // even when empty, and upstream only reads `len` bytes), and `stop`
+        // is a live sized struct, which is what upstream requires of `out`.
+        // Callbacks run synchronously in here but only get a `&Terminal`, so
+        // they can't call back into `vt_write*` and break upstream's
+        // no-reentrancy rule. Upstream rejects an empty or unknown
+        // `boundaries` with INVALID_VALUE rather than misbehaving.
+        let result = unsafe {
+            ffi::ghostty_terminal_vt_write_until(
+                self.inner.as_raw(),
+                data.as_ptr(),
+                data.len(),
+                boundaries.bits(),
+                &raw mut stop,
+            )
+        };
+        // NO_VALUE means every byte was consumed without reaching a boundary,
+        // so there is no stop to report.
+        let Some(stop) = from_optional_result(result, stop)? else {
+            return Ok(None);
+        };
+
+        // Upstream zero-fills the fields that don't apply to a stop, and zero
+        // is also a valid value for `kind` (APC), `introducer` (ESC) and
+        // `end` (ST_ESC). Reading them blindly would make, say, a ground stop
+        // look like an APC ended by ESC, so we only read the fields that
+        // `reached` says apply and return `None` for the rest.
+        let reached = Boundary::from_bits_retain(stop.reached);
+        let started =
+            reached.intersects(Boundary::APC_START | Boundary::DCS_START | Boundary::OSC_START);
+        let ended = reached.intersects(Boundary::APC_END | Boundary::DCS_END | Boundary::OSC_END);
+        let is_string = started || ended;
+
+        Ok(Some(WriteStop {
+            consumed: stop.consumed,
+            reached,
+            kind: is_string
+                .then(|| stop.kind.try_into())
+                .transpose()
+                .map_err(|_| Error::InvalidValue)?,
+            introducer: started
+                .then(|| stop.introducer.try_into())
+                .transpose()
+                .map_err(|_| Error::InvalidValue)?,
+            end: ended
+                .then(|| stop.end.try_into())
+                .transpose()
+                .map_err(|_| Error::InvalidValue)?,
+            byte: is_string.then_some(stop.byte),
+        }))
+    }
+
+    /// Whether VT processing is at ground.
     ///
     /// Ground is when the stream isn't in the middle of any type of sequence:
     /// UTF-8, ESC, CSI, OSC, etc. It is the stateless point of the stream.
@@ -324,29 +509,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// if you want to make your own changes, you can wait until the pty input
     /// reaches ground, then write yours.
     ///
-    /// If the stream is already at ground then this consumes nothing and
-    /// returns `Some(0)`. Otherwise it returns `Some(n)` with the number of
-    /// bytes consumed before reaching ground, including the byte that reaches
-    /// it, or `None` if the full slice was consumed without reaching ground.
-    ///
-    /// Like [`Self::vt_write`], the input is assumed to be untrusted.
-    pub fn vt_write_until_ground(&mut self, data: &[u8]) -> Result<Option<usize>> {
-        let mut consumed = 0;
-        let result = unsafe {
-            ffi::ghostty_terminal_vt_write_until_ground(
-                self.inner.as_raw(),
-                data.as_ptr(),
-                data.len(),
-                &raw mut consumed,
-            )
-        };
-        from_optional_result_with_len(result, consumed)
-    }
-
-    /// Whether VT processing is at ground.
-    ///
-    /// See [`Self::vt_write_until_ground`] for what ground means and why it
-    /// is useful.
+    /// Use [`Self::vt_write_until`] with [`Boundary::GROUND`] to write input
+    /// only until the stream reaches ground.
     pub fn is_vt_ground(&self) -> Result<bool> {
         self.get(Data::VT_GROUND)
     }
@@ -996,7 +1160,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         // the title and pwd storage when processing input, resetting, or
         // through the TITLE and PWD options. These bindings expose the first
         // two only through `&mut self` methods (`vt_write`,
-        // `vt_write_until_ground`, `reset`), and the options only through
+        // `vt_write_until`, `reset`), and the options only through
         // `set_title` and `set_pwd`, which take `&mut self` too. No UTF-8 or
         // NUL-termination is assumed; we only read `len` bytes.
         Ok(unsafe { str.to_bytes() })
@@ -1888,6 +2052,192 @@ bitflags::bitflags! {
         /// Use full codepoints instead of the DEC 8-bit values.
         const FULL_CODEPOINTS = 16;
     }
+}
+
+// bindgen turns `GhosttyTerminalBoundary` into `c_int` consts, while the
+// call and `GhosttyTerminalWriteStop.reached` take the flags as `uint32_t`.
+// Every flag is a small positive power of two, so the casts are lossless.
+bitflags::bitflags! {
+    /// A point in the VT stream where [`Terminal::vt_write_until`] can stop.
+    ///
+    /// The values are bit flags. Combine them with `|` to stop at any of
+    /// several boundaries.
+    ///
+    /// Most boundaries mark the first or last byte of a control string: an
+    /// APC, DCS or OSC sequence, made of an introducer, some content, and a
+    /// terminator. [`GROUND`](Self::GROUND) is different. It marks the state
+    /// between sequences rather than a byte inside one.
+    ///
+    /// Terminal protocols spell control bytes two ways, and both are
+    /// recognized. A 7-bit introducer is ESC followed by one byte, such as
+    /// `ESC ]` for OSC. The 8-bit form is a single byte in the range 0x80 to
+    /// 0x9F, such as 0x9D for OSC. The string terminator ST is `ESC \` or the
+    /// single byte 0x9C.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Boundary: u32 {
+        /// The stream is not inside any escape sequence or partial UTF-8
+        /// character. This is a safe point to insert your own sequences.
+        ///
+        /// Ground is a state, not an event. If the stream is already at
+        /// ground, the call stops immediately and consumes nothing.
+        const GROUND = ffi::TerminalBoundary::GROUND as u32;
+        /// The byte that started an APC string: `_` after ESC, or 0x9F.
+        ///
+        /// SOS (`X` or 0x98) and PM (`^` or 0x9E) strings also report this
+        /// boundary, because the parser handles all three the same way.
+        /// Check [`WriteStop::byte`] to tell them apart.
+        const APC_START = ffi::TerminalBoundary::APC_START as u32;
+        /// The byte that ended an APC, SOS or PM string.
+        const APC_END = ffi::TerminalBoundary::APC_END as u32;
+        /// The byte that started a DCS string: `P` after ESC, or 0x90.
+        ///
+        /// A DCS has a header before its payload: parameters, intermediates
+        /// and a final byte, in the same shape as a CSI sequence. The stop
+        /// lands on the introducer, so the header follows it. A 0x90 inside
+        /// the header restarts the header without leaving the string, so it
+        /// does not stop.
+        const DCS_START = ffi::TerminalBoundary::DCS_START as u32;
+        /// The byte that ended a DCS string, whether it was still in its
+        /// header or already in its payload. A DCS cut short in its header
+        /// reports this without ever having had a payload.
+        const DCS_END = ffi::TerminalBoundary::DCS_END as u32;
+        /// The byte that started an OSC string: `]` after ESC, or 0x9D.
+        const OSC_START = ffi::TerminalBoundary::OSC_START as u32;
+        /// The byte that ended an OSC string. This is reported for every OSC,
+        /// including ones the terminal does not understand.
+        const OSC_END = ffi::TerminalBoundary::OSC_END as u32;
+    }
+}
+
+/// The kind of control string that started or ended.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum StringKind {
+    /// An APC, SOS or PM string. [`WriteStop::byte`] at the start of the
+    /// string tells you which one it is:
+    ///
+    /// | Byte               | String |
+    /// |--------------------|--------|
+    /// | `_` (0x5F) or 0x9F | APC    |
+    /// | `X` (0x58) or 0x98 | SOS    |
+    /// | `^` (0x5E) or 0x9E | PM     |
+    Apc = ffi::TerminalStringKind::APC,
+    /// A DCS string, started by `P` (0x50) after ESC or by 0x90.
+    Dcs = ffi::TerminalStringKind::DCS,
+    /// An OSC string, started by `]` (0x5D) after ESC or by 0x9D.
+    Osc = ffi::TerminalStringKind::OSC,
+}
+
+/// How a control string started.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum StringIntroducer {
+    /// ESC followed by `_`, `X`, `^`, `P` or `]`. The stop's
+    /// [`consumed`](WriteStop::consumed) count includes only the final byte,
+    /// because the ESC may have arrived in an earlier call.
+    Esc = ffi::TerminalStringIntroducer::ESC,
+    /// A single 8-bit byte: 0x9F (APC), 0x98 (SOS), 0x9E (PM), 0x90 (DCS) or
+    /// 0x9D (OSC).
+    ///
+    /// When the stream is at ground, these bytes are decoded as UTF-8 and do
+    /// not start a string. They only start a string when they arrive while
+    /// the stream is already inside another escape sequence.
+    C1 = ffi::TerminalStringIntroducer::C1,
+}
+
+/// How a control string ended.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum StringEnd {
+    /// ESC, the first byte of the string terminator `ESC \`.
+    ///
+    /// The ESC is consumed but the `\` after it is not. Pass the `\` as the
+    /// first byte of your next write, where it completes the terminator. If
+    /// you forward the stream elsewhere, forward the ESC along with the
+    /// string.
+    StEsc = ffi::TerminalStringEnd::ST_ESC,
+    /// 0x9C, the 8-bit string terminator. The stream is now at ground.
+    ///
+    /// Inside an OSC, and inside a DCS once its header is complete, 0x9C is
+    /// content rather than a terminator. So this is only reported for an APC
+    /// or for a DCS still in its header.
+    StC1 = ffi::TerminalStringEnd::ST_C1,
+    /// CAN (0x18) or SUB (0x1A) cancelled the string. The stream is now at
+    /// ground.
+    ///
+    /// The terminal discards a cancelled APC or OSC. Its command does not
+    /// run and it is not passed to the unknown sequence callback. For
+    /// example, `ESC _ G a=t,i=7;AAAA` followed by CAN stores no image.
+    Cancelled = ffi::TerminalStringEnd::CANCELLED,
+    /// Another 8-bit control byte cut the string short. Most of these return
+    /// the stream to ground. CSI (0x9B) starts a CSI sequence instead. The
+    /// introducers DCS (0x90), OSC (0x9D), APC (0x9F), SOS (0x98) and PM
+    /// (0x9E) start a new string on the same byte, which the stop reports
+    /// with a START flag as well. See [`WriteStop::reached`].
+    ///
+    /// Inside an OSC, and inside a DCS once its header is complete, 8-bit
+    /// bytes are content. So this is only reported for an APC or for a DCS
+    /// still in its header.
+    ///
+    /// The terminal discards an aborted APC, just like a cancelled one.
+    Aborted = ffi::TerminalStringEnd::ABORTED,
+    /// BEL (0x07) terminated the string. Only an OSC ends this way.
+    Bel = ffi::TerminalStringEnd::BEL,
+}
+
+/// Where [`Terminal::vt_write_until`] stopped, and why.
+///
+/// Upstream leaves the fields that don't apply to a stop zeroed, and zero is
+/// also a valid value for `kind`, `introducer` and `end`. Those fields are
+/// therefore `Option`s here, and are `None` whenever [`reached`](Self::reached)
+/// says they don't apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WriteStop {
+    /// Number of input bytes consumed, including the byte that reached the
+    /// boundary. This is 0 when the stream was already at ground and you
+    /// asked for [`Boundary::GROUND`].
+    pub consumed: usize,
+    /// The [`Boundary`] flags that the stopping byte reached. Only flags you
+    /// asked for are set.
+    ///
+    /// This is usually one flag. It holds two when a single byte does two
+    /// things:
+    ///
+    /// - It ends a string and returns to ground. BEL, CAN, SUB, 0x9C and the
+    ///   other 8-bit control bytes all do this. So if you asked for both
+    ///   [`Boundary::OSC_END`] and [`Boundary::GROUND`], an `OSC_END` stop
+    ///   can include `GROUND` too.
+    /// - It ends one string and starts another. An 8-bit introducer of a
+    ///   different kind does this inside an APC, or inside a DCS header: 0x90
+    ///   or 0x9D in an APC ends it and starts a DCS or OSC, and 0x9F, 0x98,
+    ///   0x9E or 0x9D in a DCS header ends it and starts an APC or OSC. The
+    ///   stop has an END flag and a START flag, [`end`](Self::end) is
+    ///   [`StringEnd::Aborted`] and [`introducer`](Self::introducer) is
+    ///   [`StringIntroducer::C1`]. See [`Terminal::vt_write_until`] for an
+    ///   example.
+    ///
+    /// A START flag and an END flag of the same kind are never set together.
+    pub reached: Boundary,
+    /// The kind of string. `Some` when [`reached`](Self::reached) has a
+    /// START or END flag.
+    ///
+    /// When one byte both ends a string and starts another, this is the kind
+    /// of the string that ended. The START flag in `reached` names the kind
+    /// that started, since `APC_START`, `DCS_START` and `OSC_START` each
+    /// belong to one kind.
+    pub kind: Option<StringKind>,
+    /// How the string started. `Some` when [`reached`](Self::reached) has a
+    /// START flag.
+    pub introducer: Option<StringIntroducer>,
+    /// How the string ended. `Some` when [`reached`](Self::reached) has an
+    /// END flag.
+    pub end: Option<StringEnd>,
+    /// The byte that started or ended the string, such as `]`, 0x90, ESC or
+    /// BEL. `Some` when [`reached`](Self::reached) has a START or END flag.
+    pub byte: Option<u8>,
 }
 
 /// Color scheme reported in response to a CSI ? 996 n query.
@@ -3152,10 +3502,10 @@ macro_rules! handlers {
                     // SAFETY: USERDATA is the owning raw VTable pointer
                     // returned by Box::into_raw, unchanged by Terminal moves,
                     // before the callback is registered. ghostty invokes
-                    // callbacks synchronously from vt_write, reset, resize
-                    // and paste (which writes to the pty). All four take
-                    // `&mut self`, so the VTable outlives this call and
-                    // nothing outside the callbacks touches it meanwhile.
+                    // callbacks synchronously from vt_write, vt_write_until,
+                    // reset, resize and paste (which writes to the pty). All
+                    // five take `&mut self`, so the VTable outlives this call
+                    // and nothing outside the callbacks touches it meanwhile.
                     // Callbacks only get a `&Terminal`, so they can't reach
                     // any of those entry points.
                     //
@@ -3694,7 +4044,7 @@ handlers! {
     /// the terminal calls this with a [`ProgramStatusState::Clear`] report
     /// and an empty id, and then calls the [`Terminal::on_reset`] callback.
     /// This only happens when `ESC c` is processed by [`Terminal::vt_write`]
-    /// or [`Terminal::vt_write_until_ground`]. [`Terminal::reset`] doesn't
+    /// or [`Terminal::vt_write_until`]. [`Terminal::reset`] doesn't
     /// call this, so clear your records yourself after calling it.
     ///
     /// [`title`](ProgramStatus::title) and
@@ -3894,7 +4244,7 @@ handlers! {
     ///
     /// [`Terminal::reset`] doesn't call this either: only a reset the
     /// running program sends through [`Terminal::vt_write`] or
-    /// [`Terminal::vt_write_until_ground`] does.
+    /// [`Terminal::vt_write_until`] does.
     pub fn on_reset(
         &mut self,
         tag = RESET,
@@ -4269,20 +4619,45 @@ mod tests {
         output.into_inner()
     }
 
+    /// A ground stop carries no string, so every string field is `None`.
+    fn ground_stop(consumed: usize) -> WriteStop {
+        WriteStop {
+            consumed,
+            reached: Boundary::GROUND,
+            kind: None,
+            introducer: None,
+            end: None,
+            byte: None,
+        }
+    }
+
     #[test]
-    fn vt_write_until_ground_stops_at_ground() {
+    fn vt_write_until_stops_at_ground() {
         let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
-        // Already at ground: nothing is consumed.
+        // Already at ground: ground is a state, so the call stops right away
+        // and consumes nothing. Upstream zero-fills `kind`, `introducer` and
+        // `end` here, which must not be read as APC / ESC / ST_ESC.
         assert!(terminal.is_vt_ground().unwrap());
-        assert_eq!(terminal.vt_write_until_ground(b"hello").unwrap(), Some(0));
+        assert_eq!(
+            terminal.vt_write_until(b"hello", Boundary::GROUND).unwrap(),
+            Some(ground_stop(0))
+        );
         assert_eq!(terminal.cursor_x().unwrap(), 0);
 
         // An incomplete CSI sequence is only finished, not followed.
         terminal.vt_write(b"\x1b[");
         assert!(!terminal.is_vt_ground().unwrap());
-        assert_eq!(terminal.vt_write_until_ground(b"31").unwrap(), None);
+        assert_eq!(
+            terminal.vt_write_until(b"31", Boundary::GROUND).unwrap(),
+            None
+        );
         // The count includes the byte that reaches ground.
-        assert_eq!(terminal.vt_write_until_ground(b"mhello").unwrap(), Some(1));
+        assert_eq!(
+            terminal
+                .vt_write_until(b"mhello", Boundary::GROUND)
+                .unwrap(),
+            Some(ground_stop(1))
+        );
         assert!(terminal.is_vt_ground().unwrap());
         assert_eq!(terminal.cursor_x().unwrap(), 0);
 
@@ -4290,10 +4665,181 @@ mod tests {
         terminal.vt_write(b"\xe2");
         assert!(!terminal.is_vt_ground().unwrap());
         assert_eq!(
-            terminal.vt_write_until_ground(b"\x82\xac!").unwrap(),
-            Some(2)
+            terminal
+                .vt_write_until(b"\x82\xac!", Boundary::GROUND)
+                .unwrap(),
+            Some(ground_stop(2))
         );
         assert_eq!(terminal.cursor_x().unwrap(), 1);
+    }
+
+    #[test]
+    fn vt_write_until_finds_esc_apc() {
+        // Mirrors upstream's "vt_write_until kitty apc start and end" test,
+        // with plain text around the APC.
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        let input = b"ab\x1b_Gi=1\x1b\\cd";
+        let want = Boundary::APC_START | Boundary::APC_END;
+
+        // The start stop covers `a`, `b`, ESC and `_`.
+        let start = terminal.vt_write_until(input, want).unwrap();
+        assert_eq!(
+            start,
+            Some(WriteStop {
+                consumed: 4,
+                reached: Boundary::APC_START,
+                kind: Some(StringKind::Apc),
+                introducer: Some(StringIntroducer::Esc),
+                end: None,
+                byte: Some(b'_'),
+            })
+        );
+        let mut off = 4;
+        assert_eq!(input[off], b'G');
+
+        // The end stop consumes the content and the ESC of `ESC \`, but not
+        // the backslash.
+        let end = terminal.vt_write_until(&input[off..], want).unwrap();
+        assert_eq!(
+            end,
+            Some(WriteStop {
+                consumed: b"Gi=1".len() + 1,
+                reached: Boundary::APC_END,
+                kind: Some(StringKind::Apc),
+                introducer: None,
+                end: Some(StringEnd::StEsc),
+                byte: Some(0x1b),
+            })
+        );
+        off += b"Gi=1".len() + 1;
+        assert_eq!(&input[off..], b"\\cd");
+
+        // The backslash completes the terminator and the rest is plain text,
+        // so no boundary is left to reach.
+        assert_eq!(terminal.vt_write_until(&input[off..], want).unwrap(), None);
+        assert!(terminal.is_vt_ground().unwrap());
+        // Only `ab` and `cd` were printed.
+        assert_eq!(terminal.cursor_x().unwrap(), 4);
+    }
+
+    /// Mirrors the header's DCS example: the start stop lands on `P`, so the
+    /// `1;2|` header follows it, and the payload runs up to the ESC of ST.
+    #[test]
+    fn vt_write_until_finds_esc_dcs() {
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        let input = b"\x1bP1;2|data\x1b\\";
+        let want = Boundary::DCS_START | Boundary::DCS_END;
+
+        let start = terminal.vt_write_until(input, want).unwrap();
+        assert_eq!(
+            start,
+            Some(WriteStop {
+                consumed: 2,
+                reached: Boundary::DCS_START,
+                kind: Some(StringKind::Dcs),
+                introducer: Some(StringIntroducer::Esc),
+                end: None,
+                byte: Some(b'P'),
+            })
+        );
+
+        // The header and payload, then the ESC of `ESC \`.
+        let end = terminal.vt_write_until(&input[2..], want).unwrap();
+        assert_eq!(
+            end,
+            Some(WriteStop {
+                consumed: b"1;2|data".len() + 1,
+                reached: Boundary::DCS_END,
+                kind: Some(StringKind::Dcs),
+                introducer: None,
+                end: Some(StringEnd::StEsc),
+                byte: Some(0x1b),
+            })
+        );
+    }
+
+    #[test]
+    fn vt_write_until_osc_bel_end_reaches_ground() {
+        // Mirrors the BEL half of upstream's "vt_write_until osc start and
+        // bel end" test.
+        let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
+        terminal.vt_write(b"\x1b]");
+
+        // BEL ends the string and reaches ground on the same byte, so both
+        // requested flags are set.
+        let stop = terminal
+            .vt_write_until(b"2;title\x07x", Boundary::OSC_END | Boundary::GROUND)
+            .unwrap();
+        assert_eq!(
+            stop,
+            Some(WriteStop {
+                consumed: b"2;title".len() + 1,
+                reached: Boundary::OSC_END | Boundary::GROUND,
+                kind: Some(StringKind::Osc),
+                introducer: None,
+                end: Some(StringEnd::Bel),
+                byte: Some(0x07),
+            })
+        );
+        assert!(terminal.is_vt_ground().unwrap());
+        assert_eq!(terminal.title().unwrap(), b"title");
+    }
+
+    #[test]
+    fn vt_write_until_c1_ends_apc_and_starts_osc() {
+        // The same byte ends an APC and starts an OSC. Only requested
+        // metadata is exposed; with both flags, the ended string's kind wins.
+        let input = b"\x1b_a\x9d2;t\x07";
+        for (boundaries, kind, introducer, end) in [
+            (
+                Boundary::APC_END | Boundary::OSC_START,
+                StringKind::Apc,
+                Some(StringIntroducer::C1),
+                Some(StringEnd::Aborted),
+            ),
+            (
+                Boundary::OSC_START,
+                StringKind::Osc,
+                Some(StringIntroducer::C1),
+                None,
+            ),
+            (
+                Boundary::APC_END,
+                StringKind::Apc,
+                None,
+                Some(StringEnd::Aborted),
+            ),
+        ] {
+            let mut terminal = Terminal::new(8, 2).unwrap();
+            assert_eq!(
+                terminal.vt_write_until(input, boundaries).unwrap(),
+                Some(WriteStop {
+                    consumed: 4,
+                    reached: boundaries,
+                    kind: Some(kind),
+                    introducer,
+                    end,
+                    byte: Some(0x9d),
+                }),
+                "{boundaries:?}"
+            );
+            // BEL ends the OSC, but asking only for GROUND must not expose
+            // string metadata, even though the C enum fields contain zeros.
+            assert_eq!(
+                terminal
+                    .vt_write_until(&input[4..], Boundary::GROUND)
+                    .unwrap(),
+                Some(WriteStop {
+                    consumed: 4,
+                    reached: Boundary::GROUND,
+                    kind: None,
+                    introducer: None,
+                    end: None,
+                    byte: None,
+                })
+            );
+            assert_eq!(terminal.title().unwrap(), b"t");
+        }
     }
 
     #[test]
@@ -4938,9 +5484,9 @@ mod tests {
         assert_eq!(callback_count.get(), 1);
         assert_eq!(*title_in_callback.borrow(), Some(Vec::new()));
 
-        // `vt_write_until_ground` feeds the same stream, so it fires too.
+        // `vt_write_until` feeds the same stream, so it fires too.
         terminal.vt_write(b"\x1b");
-        terminal.vt_write_until_ground(b"c").unwrap();
+        terminal.vt_write_until(b"c", Boundary::GROUND).unwrap();
         assert_eq!(callback_count.get(), 2);
 
         // A soft reset (DECSTR) doesn't count as a full reset.
