@@ -15,7 +15,7 @@ use crate::{
 };
 
 #[doc(inline)]
-pub use ffi::{SizeReportSize, TerminalScrollbar as Scrollbar};
+pub use ffi::{SizeReportSize, TerminalMemoryUsage as MemoryUsage, TerminalScrollbar as Scrollbar};
 
 /// Complete terminal emulator state and rendering.
 ///
@@ -392,6 +392,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// If synchronized output was enabled, the [render hold](Self::on_render_hold)
     /// callback is invoked to report that the hold ended.
+    ///
+    /// This doesn't call the [reset](Self::on_reset) callback.
     pub fn reset(&mut self) {
         unsafe { ffi::ghostty_terminal_reset(self.inner.as_raw()) }
     }
@@ -594,6 +596,30 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         };
         from_result(result)?;
         Ok(CompressionActivity(value))
+    }
+
+    /// How much memory the terminal holds. See [`MemoryUsage`] for what each
+    /// field means.
+    ///
+    /// This never decompresses scrollback, but it does look at every page, so
+    /// avoid reading it after every write.
+    pub fn memory_usage(&self) -> Result<MemoryUsage> {
+        // This can't go through `Self::get`: that zero-fills the output, so
+        // `size` would be 0 and upstream rejects any size smaller than the
+        // struct it knows with `INVALID_VALUE`. `sized!` stamps in the size
+        // of the struct we were compiled against instead.
+        let mut usage = ffi::sized!(ffi::TerminalMemoryUsage);
+        // SAFETY: `usage` is a live, properly sized `TerminalMemoryUsage`,
+        // which is exactly the output type upstream documents for this key.
+        let result = unsafe {
+            ffi::ghostty_terminal_get(
+                self.inner.as_raw(),
+                Data::MEMORY_USAGE,
+                (&raw mut usage).cast(),
+            )
+        };
+        from_result(result)?;
+        Ok(usage)
     }
 
     /// The configured maximum retained VT continuation size in bytes.
@@ -1531,6 +1557,49 @@ impl Mode {
         }
     }
 
+    /// Encode a DECRPM (DEC Private Mode Report) response sequence.
+    ///
+    /// Writes a mode report escape sequence into the provided buffer.
+    /// The generated sequence has the form:
+    /// - DEC private mode: `CSI ? Ps1 ; Ps2 $ y`
+    /// - ANSI mode: `CSI Ps1 ; Ps2 $ y`
+    ///
+    /// If the buffer is too small, returns [`Error::OutOfSpace`] with the
+    /// required buffer size. The caller can then retry with a sufficiently
+    /// sized buffer.
+    ///
+    /// ```
+    /// use libghostty_vt::terminal::{Mode, ModeReportState};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut buf = [0u8; 32];
+    ///
+    /// // Report DECCKM (DEC private mode 1) as set.
+    /// let len = Mode::DECCKM.encode_report(ModeReportState::Set, &mut buf)?;
+    /// assert_eq!(&buf[..len], b"\x1b[?1;1$y");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn encode_report(self, state: ModeReportState, buf: &mut [u8]) -> Result<usize> {
+        let mut written = 0;
+        // SAFETY: The pointer and length describe `buf`, a valid writable
+        // region, and upstream only writes within `buf_len`, even when it
+        // runs out of space partway through (an empty `buf` is fine too:
+        // upstream accepts a zero-length or NULL buffer as a size query).
+        let result = unsafe {
+            ffi::ghostty_mode_report_encode(
+                self.0,
+                state.into(),
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &raw mut written,
+            )
+        };
+        // `written` doubles as the required size on `OUT_OF_SPACE`, so it
+        // must be threaded into the error rather than dropped.
+        from_result_with_len(result, written)
+    }
+
     pub const KAM: Self = Self::new(2, ModeKind::Ansi);
     pub const INSERT: Self = Self::new(4, ModeKind::Ansi);
     pub const SRM: Self = Self::new(12, ModeKind::Ansi);
@@ -1550,6 +1619,7 @@ impl Mode {
     pub const REVERSE_WRAP: Self = Self::new(45, ModeKind::Dec);
     pub const ALT_SCREEN_LEGACY: Self = Self::new(47, ModeKind::Dec);
     pub const KEYPAD_KEYS: Self = Self::new(66, ModeKind::Dec);
+    pub const BACKARROW_KEY_MODE: Self = Self::new(67, ModeKind::Dec);
     pub const LEFT_RIGHT_MARGIN: Self = Self::new(69, ModeKind::Dec);
     pub const NORMAL_MOUSE: Self = Self::new(1000, ModeKind::Dec);
     pub const BUTTON_MOUSE: Self = Self::new(1002, ModeKind::Dec);
@@ -1583,6 +1653,26 @@ pub enum ModeKind {
     Dec,
     /// ANSI terminal mode.
     Ansi,
+}
+
+/// DECRPM report state values.
+///
+/// These correspond to the Ps2 parameter in a DECRPM response
+/// sequence (`CSI ? Ps1 ; Ps2 $ y`).
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum ModeReportState {
+    /// Mode is not recognized
+    NotRecognized = ffi::ModeReportState::NOT_RECOGNIZED,
+    /// Mode is set (enabled)
+    Set = ffi::ModeReportState::SET,
+    /// Mode is reset (disabled)
+    Reset = ffi::ModeReportState::RESET,
+    /// Mode is permanently set
+    PermanentlySet = ffi::ModeReportState::PERMANENTLY_SET,
+    /// Mode is permanently reset
+    PermanentlyReset = ffi::ModeReportState::PERMANENTLY_RESET,
 }
 
 impl From<Mode> for ffi::Mode {
@@ -1843,6 +1933,79 @@ impl From<ColorScheme> for ffi::ColorScheme::Type {
             ColorScheme::Light => ffi::ColorScheme::LIGHT,
             ColorScheme::Dark => ffi::ColorScheme::DARK,
         }
+    }
+}
+
+/// Size report style.
+///
+/// Determines the output format for the terminal size report.
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum SizeReportStyle {
+    /// In-band size report (mode 2048): `ESC [ 48 ; rows ; cols ; height ; width t`
+    Mode2048 = ffi::SizeReportStyle::MODE_2048,
+    /// XTWINOPS text area size in pixels: `ESC [ 4 ; height ; width t`
+    Csi14T = ffi::SizeReportStyle::CSI_14_T,
+    /// XTWINOPS cell size in pixels: `ESC [ 6 ; height ; width t`
+    Csi16T = ffi::SizeReportStyle::CSI_16_T,
+    /// XTWINOPS text area size in characters: `ESC [ 8 ; rows ; cols t`
+    Csi18T = ffi::SizeReportStyle::CSI_18_T,
+    /// XTWINOPS screen size in characters: `ESC [ 9 ; rows ; cols t`
+    ///
+    /// The physical screen size is not known, so this reports the text
+    /// area size in characters, the same as CSI 18 t.
+    Csi19T = ffi::SizeReportStyle::CSI_19_T,
+}
+
+impl SizeReportStyle {
+    /// Encode a terminal size report into an escape sequence.
+    ///
+    /// Encodes a size report in the format specified by `self` into the
+    /// provided buffer.
+    ///
+    /// If the buffer is too small, returns [`Error::OutOfSpace`] with the
+    /// required buffer size. The caller can then retry with a sufficiently
+    /// sized buffer.
+    ///
+    /// ```
+    /// use libghostty_vt::terminal::{SizeReportSize, SizeReportStyle};
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let size = SizeReportSize {
+    ///     rows: 24,
+    ///     columns: 80,
+    ///     cell_width: 9,
+    ///     cell_height: 18,
+    /// };
+    /// let mut buf = [0u8; 32];
+    ///
+    /// // Answer an XTWINOPS text area size query (CSI 18 t).
+    /// let len = SizeReportStyle::Csi18T.encode_report(&size, &mut buf)?;
+    /// assert_eq!(&buf[..len], b"\x1b[8;24;80t");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn encode_report(self, size: &SizeReportSize, buf: &mut [u8]) -> Result<usize> {
+        let mut written = 0;
+        // SAFETY: The pointer and length describe `buf`, a valid writable
+        // region, and upstream only writes within `buf_len`, even when it
+        // runs out of space partway through (an empty `buf` is fine too:
+        // upstream accepts a zero-length or NULL buffer as a size query).
+        // `size` is a plain-old-data struct passed by value, so copying it
+        // out of the borrow is all the C side needs.
+        let result = unsafe {
+            ffi::ghostty_size_report_encode(
+                self.into(),
+                *size,
+                buf.as_mut_ptr().cast(),
+                buf.len(),
+                &raw mut written,
+            )
+        };
+        // `written` doubles as the required size on `OUT_OF_SPACE`, so it
+        // must be threaded into the error rather than dropped.
+        from_result_with_len(result, written)
     }
 }
 
@@ -3529,9 +3692,10 @@ handlers! {
     ///
     /// A full reset (RIS, `ESC c`) removes every record. When that happens,
     /// the terminal calls this with a [`ProgramStatusState::Clear`] report
-    /// and an empty id. This only happens when `ESC c` is processed by
-    /// [`Terminal::vt_write`]. [`Terminal::reset`] doesn't call this, so
-    /// clear your records yourself after calling it.
+    /// and an empty id, and then calls the [`Terminal::on_reset`] callback.
+    /// This only happens when `ESC c` is processed by [`Terminal::vt_write`]
+    /// or [`Terminal::vt_write_until_ground`]. [`Terminal::reset`] doesn't
+    /// call this, so clear your records yourself after calling it.
     ///
     /// [`title`](ProgramStatus::title) and
     /// [`message`](ProgramStatus::message) are already decoded and contain
@@ -3707,6 +3871,37 @@ handlers! {
         // SAFETY: The event and its strings are only valid during the
         // callback, which `SemanticPrompt`'s lifetime enforces.
         func(term, unsafe { SemanticPrompt::from_raw(event) });
+    }
+
+    /// Call the given function when the running program performs a full
+    /// reset (RIS, `ESC c`).
+    ///
+    /// A full reset clears the screen and scrollback, returns modes to their
+    /// defaults, and clears the title and working directory. Use this
+    /// callback to reset any state your application keeps about what's
+    /// running in the terminal, such as the current command.
+    ///
+    /// The terminal has already reset itself when this is called. The
+    /// [`Terminal::on_title_changed`] and [`Terminal::on_pwd_changed`]
+    /// callbacks are not called for the cleared title and working directory,
+    /// so update anything you show for them here. A full reset also removes
+    /// any progress report and program status records. If you set
+    /// [`Terminal::on_progress_report`] or [`Terminal::on_program_status`],
+    /// those callbacks are called before this one.
+    ///
+    /// A soft reset (DECSTR, `CSI ! p`) keeps the screen, title and working
+    /// directory, and doesn't call this.
+    ///
+    /// [`Terminal::reset`] doesn't call this either: only a reset the
+    /// running program sends through [`Terminal::vt_write`] or
+    /// [`Terminal::vt_write_until_ground`] does.
+    pub fn on_reset(
+        &mut self,
+        tag = RESET,
+        from = TerminalResetFn(),
+        to = ResetFn(),
+    ) |term, func| {
+        func(term);
     }
 
     /// Call the given function when the running program asks to resize the
@@ -4110,6 +4305,37 @@ mod tests {
         // The alternate screen never counts as a prompt.
         terminal.vt_write(b"\x1b[?1049h");
         assert!(!terminal.is_cursor_at_prompt().unwrap());
+    }
+
+    #[test]
+    fn memory_usage_reports_each_screen() {
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+
+        // Upstream: the alternate screen's fields "are all zero until a
+        // program first switches to it".
+        let fresh = terminal.memory_usage().expect("memory usage should read");
+        assert_eq!(fresh.alternate_pages, 0);
+        assert_eq!(fresh.alternate_virtual_bytes, 0);
+        assert_eq!(fresh.alternate_resident_bytes, 0);
+        assert_eq!(fresh.alternate_compressed_pages, 0);
+        assert_eq!(fresh.alternate_compressed_bytes, 0);
+        assert_eq!(fresh.alternate_image_bytes, 0);
+
+        // The primary screen always has its visible rows in at least one page.
+        assert!(fresh.primary_pages >= 1);
+        assert!(fresh.primary_resident_bytes > 0);
+        // Upstream: virtual bytes are "always at least
+        // `primary_resident_bytes`".
+        assert!(fresh.primary_virtual_bytes >= fresh.primary_resident_bytes);
+        // Upstream: compressed bytes are "already included in
+        // `primary_resident_bytes`". That holds whether or not this platform
+        // supports compression (the compressed fields are zero if it doesn't).
+        assert!(fresh.primary_compressed_bytes <= fresh.primary_resident_bytes);
+
+        // Once a program switches to the alternate screen, it gets pages.
+        terminal.vt_write(b"\x1b[?1049h");
+        let alternate = terminal.memory_usage().expect("memory usage should read");
+        assert!(alternate.alternate_pages >= 1);
     }
 
     #[test]
@@ -4677,6 +4903,54 @@ mod tests {
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/\xff\x1b\\");
         assert_eq!(callback_count.get(), 3);
         assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/\xff");
+    }
+
+    /// Only a full reset sent by the program (RIS) fires `on_reset`, and the
+    /// terminal has already reset itself by then.
+    #[test]
+    fn reset_callback_fires_only_on_ris() {
+        let callback_count: Cell<usize> = Cell::new(0);
+        let title_in_callback: RefCell<Option<Vec<u8>>> = RefCell::new(None);
+
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+
+        terminal
+            .on_reset(|term| {
+                callback_count.set(callback_count.get() + 1);
+                // Record rather than assert here: a panic in a callback
+                // aborts the whole test binary.
+                *title_in_callback.borrow_mut() = term.title().ok().map(<[u8]>::to_owned);
+            })
+            .expect("callback should register");
+
+        // Set a title first so we can tell whether RIS already cleared it
+        // when the callback ran, as upstream documents.
+        terminal.vt_write(b"\x1b]2;Before Reset\x1b\\");
+        assert_eq!(terminal.title().unwrap(), b"Before Reset");
+        // A progress report and a program status report fire their own
+        // callbacks, and RIS fires both again just before this one. Sending
+        // them here catches this callback being registered under either
+        // sibling's option instead.
+        terminal.vt_write(b"\x1b]9;4;1;50\x1b\\");
+        terminal.vt_write(b"\x1b]7501;state=working:id=build\x1b\\");
+        assert_eq!(callback_count.get(), 0);
+        terminal.vt_write(b"\x1bc");
+        assert_eq!(callback_count.get(), 1);
+        assert_eq!(*title_in_callback.borrow(), Some(Vec::new()));
+
+        // `vt_write_until_ground` feeds the same stream, so it fires too.
+        terminal.vt_write(b"\x1b");
+        terminal.vt_write_until_ground(b"c").unwrap();
+        assert_eq!(callback_count.get(), 2);
+
+        // A soft reset (DECSTR) doesn't count as a full reset.
+        terminal.vt_write(b"\x1b[!p");
+        assert_eq!(callback_count.get(), 2);
+
+        // Upstream's `ghostty_terminal_reset` resets the terminal directly
+        // and only the stream handling `ESC c` calls the callback.
+        terminal.reset();
+        assert_eq!(callback_count.get(), 2);
     }
 
     #[test]
@@ -5711,6 +5985,91 @@ mod tests {
             .set_xt_checksum_extension(XtChecksumExtension::FULL_CODEPOINTS)
             .expect("valid extension should be accepted");
         assert_eq!(request(&mut terminal, row2), b"\x1bP7!~2C00\x1b\\");
+    }
+
+    /// DECRPM reports follow the forms in the header: `CSI ? Ps1 ; Ps2 $ y`
+    /// for DEC private modes and `CSI Ps1 ; Ps2 $ y` for ANSI modes, where
+    /// Ps2 is the numeric report state.
+    #[test]
+    fn mode_encode_report() {
+        let mut buf = [0u8; 32];
+
+        let len = Mode::new(1, ModeKind::Dec)
+            .encode_report(ModeReportState::Set, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[?1;1$y");
+
+        // ANSI modes drop the `?`.
+        let len = Mode::INSERT
+            .encode_report(ModeReportState::Reset, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[4;2$y");
+
+        let len = Mode::DECCKM
+            .encode_report(ModeReportState::PermanentlyReset, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[?1;4$y");
+
+        let len = Mode::INSERT
+            .encode_report(ModeReportState::PermanentlySet, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[4;3$y");
+
+        // Mirrors upstream's "encode not recognized" test.
+        let len = Mode::new(9999, ModeKind::Dec)
+            .encode_report(ModeReportState::NotRecognized, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[..len], b"\x1b[?9999;0$y");
+    }
+
+    /// A short (or empty) buffer reports how much space the sequence needs,
+    /// so callers can retry with a big enough one.
+    #[test]
+    fn mode_encode_report_out_of_space() {
+        let result = Mode::DECCKM.encode_report(ModeReportState::Set, &mut [0u8; 2]);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 8 })));
+
+        let result = Mode::DECCKM.encode_report(ModeReportState::Set, &mut []);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 8 })));
+    }
+
+    /// Mirrors upstream's size report tests. Rows and columns differ, as do
+    /// cell width and height, so swapping either pair (or text-area pixels
+    /// for cell pixels) changes the output.
+    const SIZE_REPORT_SIZE: SizeReportSize = SizeReportSize {
+        rows: 24,
+        columns: 80,
+        cell_width: 9,
+        cell_height: 18,
+    };
+
+    /// Each style follows its form in the header. Mode 2048 and CSI 14 t
+    /// report the text area in pixels (rows * cell height = 432, columns *
+    /// cell width = 720), while CSI 16 t reports a single cell.
+    #[test]
+    fn size_report_encode_report() {
+        let mut buf = [0u8; 32];
+        let mut encode = |style: SizeReportStyle| {
+            let len = style.encode_report(&SIZE_REPORT_SIZE, &mut buf).unwrap();
+            buf[..len].to_vec()
+        };
+
+        assert_eq!(encode(SizeReportStyle::Mode2048), b"\x1b[48;24;80;432;720t");
+        assert_eq!(encode(SizeReportStyle::Csi14T), b"\x1b[4;432;720t");
+        assert_eq!(encode(SizeReportStyle::Csi16T), b"\x1b[6;18;9t");
+        assert_eq!(encode(SizeReportStyle::Csi18T), b"\x1b[8;24;80t");
+        assert_eq!(encode(SizeReportStyle::Csi19T), b"\x1b[9;24;80t");
+    }
+
+    /// A short (or empty) buffer reports how much space the sequence needs,
+    /// so callers can retry with a big enough one.
+    #[test]
+    fn size_report_encode_report_out_of_space() {
+        let result = SizeReportStyle::Mode2048.encode_report(&SIZE_REPORT_SIZE, &mut [0u8; 4]);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 19 })));
+
+        let result = SizeReportStyle::Mode2048.encode_report(&SIZE_REPORT_SIZE, &mut []);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 19 })));
     }
 }
 

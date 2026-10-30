@@ -239,7 +239,9 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// Create a snapshot decoder over a borrowed byte buffer.
     ///
     /// The bytes are not copied. Bytes after FINISH are not consumed;
-    /// query [`Decoder::source_offset`] to locate them.
+    /// query [`Decoder::source_offset`] to locate them. To do so, decode with
+    /// [`Decoder::ready`] and read it through [`IncrementalDecoder::decoder`]
+    /// after FINISH.
     pub fn new_buf(buf: &'r [u8]) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_buf_inner(std::ptr::null(), buf) }
@@ -249,7 +251,9 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// with a custom allocator.
     ///
     /// The bytes are not copied. Bytes after FINISH are not consumed;
-    /// query [`Decoder::source_offset`] to locate them.
+    /// query [`Decoder::source_offset`] to locate them. To do so, decode with
+    /// [`Decoder::ready`] and read it through [`IncrementalDecoder::decoder`]
+    /// after FINISH.
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
@@ -280,7 +284,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// following FINISH are left unread. On success this returns a
     /// caller-owned terminal with its persistent VT stream restored.
     /// Continuation tracking on the returned terminal is disabled by default.
-    /// When [`Self::set_retain_continuation`] is enabled, the decoder's
+    /// When continuation retention is enabled with
+    /// [`Self::set_retain_continuation_enabled`], the decoder's
     /// maximum continuation size is applied to the terminal, and the terminal
     /// continuation APIs export the exact current continuation when that limit
     /// is nonzero. Tracking remains enabled even if the exported continuation
@@ -311,7 +316,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// The restored parser state may be unfinished. By default, terminal
     /// continuation tracking is disabled and
     /// [`Terminal::continuation_max_bytes`] returns zero.
-    /// When [`Self::set_retain_continuation`] is enabled, the decoder's
+    /// When continuation retention is enabled with
+    /// [`Self::set_retain_continuation_enabled`], the decoder's
     /// maximum continuation size is applied to the terminal, and the terminal
     /// continuation APIs export the exact current continuation when that limit
     /// is nonzero. Tracking remains enabled even if the exported continuation
@@ -378,9 +384,10 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// state. The decoder default matches the largest built-in APC protocol
     /// buffer limit, currently 65 MiB.
     ///
-    /// This is primarily an input validation limit. When
-    /// [`Self::set_retain_continuation`] is enabled, the same value also
-    /// becomes the continuation tracking limit on the returned terminal.
+    /// This is primarily an input validation limit. When continuation
+    /// retention is enabled with [`Self::set_retain_continuation_enabled`], the
+    /// same value also becomes the continuation tracking limit on the returned
+    /// terminal.
     pub fn set_max_continuation_bytes(&mut self, v: usize) -> Result<&mut Self> {
         self.set(Opt::MAX_CONTINUATION_BYTES, &v)?;
         Ok(self)
@@ -390,7 +397,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// terminals.
     ///
     /// This value is available in every non-failed decoder state.
-    pub fn retain_continuation(&self) -> Result<bool> {
+    pub fn is_retain_continuation_enabled(&self) -> Result<bool> {
         self.get(Data::RETAIN_CONTINUATION)
     }
 
@@ -408,8 +415,49 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// continuation does not disable it. Callers that do not need ongoing
     /// tracking must still call [`Terminal::set_continuation_max_bytes`] with
     /// zero after export and before writing post-snapshot input.
-    pub fn set_retain_continuation(&mut self, value: bool) -> Result<&mut Self> {
-        self.set(Opt::RETAIN_CONTINUATION, &value)?;
+    pub fn set_retain_continuation_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
+        self.set(Opt::RETAIN_CONTINUATION, &enabled)?;
+        Ok(self)
+    }
+
+    /// Whether history is compressed while it is restored.
+    ///
+    /// See [`Self::set_compress_history_enabled`]. This value is available in
+    /// every non-failed decoder state.
+    pub fn is_compress_history_enabled(&self) -> Result<bool> {
+        self.get(Data::COMPRESS_HISTORY)
+    }
+
+    /// Compress scrollback history while it is restored.
+    ///
+    /// By default, restoring a snapshot leaves all of its scrollback history
+    /// uncompressed, even if the terminal that produced the snapshot had
+    /// compressed it. The history stays that size until the application calls
+    /// [`Terminal::compress`]. For a terminal with a lot of scrollback, that
+    /// can be many times more memory than the terminal needed before.
+    ///
+    /// When this option is true, the decoder compresses each history page
+    /// right after restoring it. The restored terminal starts out compressed,
+    /// and the decode never holds more than one uncompressed history page at a
+    /// time. The result is the same as decoding normally and then calling
+    /// [`Terminal::compress`] with
+    /// [`CompressionMode::Full`](crate::terminal::CompressionMode::Full),
+    /// without the memory spike in between.
+    ///
+    /// A history page that is on screen when it is restored stays
+    /// uncompressed. This only happens if the viewport is scrolled to the top
+    /// of the scrollback during an incremental decode. Compressed history is
+    /// uncompressed automatically when it is accessed later, for example by
+    /// scrolling or searching.
+    ///
+    /// This only changes how the restored terminal stores its history in
+    /// memory. The snapshot format is unchanged, so it works with any
+    /// snapshot. On platforms that do not support scrollback compression, this
+    /// option is accepted and has no effect.
+    ///
+    /// This is false by default.
+    pub fn set_compress_history_enabled(&mut self, enabled: bool) -> Result<&mut Self> {
+        self.set(Opt::COMPRESS_HISTORY, &enabled)?;
         Ok(self)
     }
 
@@ -493,6 +541,10 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
     /// consumed and validated and progress reports zero rows. The decoder
     /// applies history to the terminal produced by its READY operation.
     ///
+    /// If [`Decoder::set_compress_history_enabled`] is enabled, the page is
+    /// compressed before this returns, unless it is visible in the terminal's
+    /// viewport.
+    ///
     /// If that terminal has been replaced through
     /// [`IncrementalDecoder::terminal_mut`] (e.g. with [`std::mem::replace`]),
     /// this returns [`Error::InvalidValue`] without consuming input. Unlike a
@@ -524,6 +576,18 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
         )
     }
 
+    /// Get a reference to the underlying decoder.
+    ///
+    /// It can be queried between pages and after FINISH, e.g. for
+    /// [`Decoder::source_offset`] and the history row counts. After a
+    /// decoding error only the history row counts remain available; the other
+    /// values return [`Error::InvalidValue`].
+    #[must_use]
+    pub fn decoder(&self) -> &Decoder<'alloc, 'r> {
+        // Shared only: the setters need `&mut`, and upstream rejects options
+        // once READY has run anyway.
+        &self.decoder
+    }
     /// Return a shared reference to the terminal being decoded.
     #[must_use]
     pub fn terminal(&self) -> &Terminal<'alloc, 'cb> {
@@ -695,7 +759,7 @@ mod tests {
     fn decoded_continuation_is_not_retained_by_default() {
         let bytes = unfinished_snapshot();
         let decoder = Decoder::new_buf(&bytes).unwrap();
-        assert!(!decoder.retain_continuation().unwrap());
+        assert!(!decoder.is_retain_continuation_enabled().unwrap());
         let restored = decoder.decode().unwrap();
         assert_eq!(restored.continuation_max_bytes().unwrap(), 0);
     }
@@ -707,9 +771,9 @@ mod tests {
         decoder
             .set_max_continuation_bytes(1024)
             .unwrap()
-            .set_retain_continuation(true)
+            .set_retain_continuation_enabled(true)
             .unwrap();
-        assert!(decoder.retain_continuation().unwrap());
+        assert!(decoder.is_retain_continuation_enabled().unwrap());
 
         let mut restored = decoder.decode().unwrap();
         assert_eq!(restored.continuation_max_bytes().unwrap(), 1024);
@@ -727,7 +791,7 @@ mod tests {
     fn ready_retains_continuation_before_history_is_restored() {
         let bytes = unfinished_snapshot();
         let mut decoder = Decoder::new_buf(&bytes).unwrap();
-        decoder.set_retain_continuation(true).unwrap();
+        decoder.set_retain_continuation_enabled(true).unwrap();
         // The tracking limit is the decoder's, not the encoder's.
         let limit = decoder.max_continuation_bytes().unwrap();
         let mut incremental = decoder.ready().unwrap();
@@ -753,7 +817,7 @@ mod tests {
         decoder
             .set_max_continuation_bytes(1024)
             .unwrap()
-            .set_retain_continuation(true)
+            .set_retain_continuation_enabled(true)
             .unwrap();
         let mut restored = decoder.decode().unwrap();
 
@@ -779,10 +843,94 @@ mod tests {
         decoder
             .set_max_continuation_bytes(0)
             .unwrap()
-            .set_retain_continuation(true)
+            .set_retain_continuation_enabled(true)
             .unwrap();
         let restored = decoder.decode().unwrap();
         assert_eq!(restored.continuation_max_bytes().unwrap(), 0);
+    }
+
+    #[test]
+    fn history_compression_is_off_by_default_and_can_be_enabled() {
+        let bytes = unfinished_snapshot();
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        assert!(!decoder.is_compress_history_enabled().unwrap());
+        decoder.set_compress_history_enabled(true).unwrap();
+        assert!(decoder.is_compress_history_enabled().unwrap());
+        // Turning it back off must stick too, not just turning it on.
+        decoder.set_compress_history_enabled(false).unwrap();
+        assert!(!decoder.is_compress_history_enabled().unwrap());
+    }
+
+    /// Restoring leaves history uncompressed unless the option asks for it.
+    /// This goes through the one-shot [`Decoder::decode`], which upstream runs
+    /// as READY followed by every `next`, so the option applies there too.
+    #[test]
+    fn decode_compresses_history_when_enabled() {
+        // Mirrors upstream's own test: at 215 columns a page holds 215 rows, so
+        // 3 pages' worth of lines leaves several history pages above the
+        // active area. The restored viewport shows the active area, so every
+        // one of them is off screen and eligible. This is much cheaper than
+        // `snapshot_with_history`, which formats and writes a line at a time.
+        let mut terminal = Terminal::new(215, 2).unwrap();
+        // Lift the default byte limit, which would otherwise prune all but
+        // one of those history pages.
+        terminal.set_scrollback_max_bytes(None).unwrap();
+        terminal.vt_write(&b"x\r\n".repeat(215 * 3));
+        let mut bytes = Vec::new();
+        terminal.encode_snapshot(&mut bytes).unwrap();
+
+        // Left at its default, the option compresses nothing.
+        let plain = Decoder::new_buf(&bytes).unwrap().decode().unwrap();
+        assert_eq!(plain.memory_usage().unwrap().primary_compressed_pages, 0);
+
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        decoder.set_compress_history_enabled(true).unwrap();
+        let compressed = decoder.decode().unwrap().memory_usage().unwrap();
+        // Upstream accepts the option where compression is unsupported, but it
+        // has no effect there, so only expect compressed pages where it is.
+        if compressed.compression_supported {
+            assert!(compressed.primary_compressed_pages > 0);
+        } else {
+            assert_eq!(compressed.primary_compressed_pages, 0);
+        }
+    }
+
+    /// The decoder stays reachable through the whole incremental decode, so
+    /// READY metadata can be read before the first page and the end of the
+    /// snapshot can be located after FINISH.
+    #[test]
+    fn decoder_is_queryable_before_history_and_after_finish() {
+        // Same cheap history-bearing terminal as
+        // `decode_compresses_history_when_enabled`: several history pages
+        // remain to be decoded after READY.
+        let mut terminal = Terminal::new(215, 2).unwrap();
+        terminal.set_scrollback_max_bytes(None).unwrap();
+        terminal.vt_write(&b"x\r\n".repeat(215 * 3));
+        let history = terminal.scrollback_rows().unwrap();
+        let mut buf = Vec::new();
+        terminal.encode_snapshot(&mut buf).unwrap();
+        // Record the length before appending, so the expected offset doesn't
+        // come from the decoder itself. The trailing bytes make the end of
+        // the snapshot differ from the end of the buffer.
+        let snapshot_len = buf.len();
+        buf.extend_from_slice(b"trailing");
+
+        let mut incremental = Decoder::new_buf(&buf).unwrap().ready().unwrap();
+        // No page has been decoded yet, so there is no `Progress` to reach the
+        // decoder through.
+        assert_eq!(
+            incremental.decoder().history_rows_primary().unwrap(),
+            history as u64
+        );
+        let mut pages = 0;
+        while incremental.next().unwrap().is_some() {
+            pages += 1;
+        }
+        assert!(pages > 0);
+
+        let offset = incremental.decoder().source_offset().unwrap();
+        assert_eq!(offset, snapshot_len);
+        assert_eq!(&buf[offset..], b"trailing");
     }
 
     /// Length of a record header: u16 tag, u32 payload length, u32 CRC32C.
