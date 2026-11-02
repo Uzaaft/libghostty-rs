@@ -125,7 +125,16 @@ use crate::{
 /// [`Terminal::paste`] applies the terminal-state-aware rule itself (line terminators are safe
 /// inside a bracketed paste); use this to apply the stricter rule on top.
 #[must_use]
-pub fn is_safe(data: &str) -> bool {
+pub fn is_safe(data: impl AsRef<[u8]>) -> bool {
+    // Take `AsRef<[u8]>` rather than `&str`: strings are the common case,
+    // but paste data is whatever bytes the clipboard holds and upstream
+    // takes a `(ptr, len)` byte buffer with no UTF-8 promise, as `encode`
+    // does. So bytes that aren't valid UTF-8 must be checkable as-is,
+    // without validating them first.
+    let data = data.as_ref();
+    // Upstream only reads `len` bytes for this call. An empty slice may
+    // carry a dangling (non-NULL) pointer; that's fine, since upstream
+    // slices zero bytes from it.
     unsafe { ffi::ghostty_paste_is_safe(data.as_ptr().cast(), data.len()) }
 }
 
@@ -483,6 +492,11 @@ mod tests {
         );
         assert!(matches!(result, Err(Error::Rejected)));
         assert!(output.borrow().is_empty());
+
+        // Upstream scans raw bytes and never checks UTF-8: invalid UTF-8 on
+        // its own is safe, and the terminator is still caught amid it.
+        assert!(is_safe(b"\xff\xfe"));
+        assert!(!is_safe(b"\xff\x1b[201~\xfe"));
     }
 
     #[test]
