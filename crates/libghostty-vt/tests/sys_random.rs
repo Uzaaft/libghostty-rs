@@ -49,7 +49,7 @@ fn paste_event() -> (Result<bool, Error>, Vec<u8>) {
         })
         .unwrap();
     terminal.vt_write(b"\x1b[?5522h");
-    let mimes = [ClipboardMime::new("text/plain")];
+    let mimes = [ClipboardMime::new(b"text/plain")];
     let result = terminal.paste(Options::new(), &mimes, |_mime, _out| Ok(()));
     drop(terminal);
     (result, output.into_inner())

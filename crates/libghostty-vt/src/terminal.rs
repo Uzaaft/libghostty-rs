@@ -2807,11 +2807,18 @@ pub struct ClipboardReplyContent<'a> {
 }
 
 impl<'a> ClipboardReplyContent<'a> {
-    /// A representation of the clipboard contents with the given MIME type.
+    /// A representation of the clipboard contents with the given MIME type,
+    /// such as `b"text/plain"`.
     ///
-    /// The data is binary-safe.
+    /// The data is binary-safe. libghostty takes the MIME type as a
+    /// `GhosttyString` with no UTF-8 promise, so it is raw bytes too, and a
+    /// MIME type read from [`ClipboardRead::mimes`] can be passed straight
+    /// back.
     #[must_use]
-    pub const fn new(mime: &'a str, data: &'a [u8]) -> Self {
+    // Both slices are borrowed into the struct for `'a` by a `const fn`, so
+    // they're `&'a [u8]` rather than `impl AsRef<[u8]>`: trait methods can't
+    // run in a `const fn`.
+    pub const fn new(mime: &'a [u8], data: &'a [u8]) -> Self {
         Self {
             raw: ffi::ClipboardContent {
                 mime: ffi::String {
@@ -2834,13 +2841,19 @@ impl<'a> ClipboardReplyContent<'a> {
 #[repr(transparent)]
 pub struct ClipboardMime<'a> {
     raw: ffi::String,
-    _phan: PhantomData<&'a str>,
+    _phan: PhantomData<&'a [u8]>,
 }
 
 impl<'a> ClipboardMime<'a> {
-    /// A MIME type such as `text/plain`.
+    /// A MIME type such as `b"text/plain"`.
+    ///
+    /// libghostty takes MIME types as a `GhosttyString` with no UTF-8
+    /// promise, so they are raw bytes, and a MIME type read from
+    /// [`ClipboardRead::mimes`] can be passed straight back.
     #[must_use]
-    pub const fn new(mime: &'a str) -> Self {
+    // Borrowed into the struct for `'a` by a `const fn`, so `&'a [u8]` rather
+    // than `impl AsRef<[u8]>`, as in `ClipboardReplyContent::new`.
+    pub const fn new(mime: &'a [u8]) -> Self {
         Self {
             raw: ffi::String {
                 ptr: mime.as_ptr(),
@@ -4534,7 +4547,7 @@ mod tests {
     fn osc52_clipboard_read() {
         let (seen, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
             request.reply(
-                Ok(&[ClipboardReplyContent::new("text/plain", b"hello")]),
+                Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]),
                 &[],
                 false,
             );
@@ -4567,13 +4580,16 @@ mod tests {
             |request| {
                 request.reply(
                     Ok(&[
-                        ClipboardReplyContent::new("text/plain", b"hello"),
+                        ClipboardReplyContent::new(b"text/plain", b"hello"),
                         // Not requested, so it must be ignored.
-                        ClipboardReplyContent::new("image/png", b"png"),
+                        ClipboardReplyContent::new(b"image/png", b"png"),
                     ]),
                     &[
-                        ClipboardMime::new("text/plain"),
-                        ClipboardMime::new("image/png"),
+                        ClipboardMime::new(b"text/plain"),
+                        ClipboardMime::new(b"image/png"),
+                        // Not UTF-8: libghostty lists MIME types verbatim,
+                        // so this must reach the program unchanged.
+                        ClipboardMime::new(b"\xFF"),
                     ],
                     false,
                 );
@@ -4593,8 +4609,8 @@ mod tests {
             output,
             concat!(
                 "\x1b]5522;type=read:status=OK:id=r1\x1b\\",
-                // "text/plain image/png\n"
-                "\x1b]5522;type=read:status=DATA:id=r1:mime=Lg==;dGV4dC9wbGFpbiBpbWFnZS9wbmcK\x1b\\",
+                // "text/plain image/png \xFF\n"
+                "\x1b]5522;type=read:status=DATA:id=r1:mime=Lg==;dGV4dC9wbGFpbiBpbWFnZS9wbmcg/wo=\x1b\\",
                 "\x1b]5522;type=read:status=DATA:id=r1:mime=dGV4dC9wbGFpbg==;aGVsbG8=\x1b\\",
                 "\x1b]5522;type=read:status=DONE:id=r1\x1b\\",
             )
@@ -4622,7 +4638,7 @@ mod tests {
         let read = "\x1b]5522;type=read:id=a:name=YXBw:pw=c2VjcmV0;dGV4dC9wbGFpbg==\x1b\\";
         let (seen, _) = clipboard_read(read.repeat(2).as_bytes(), |request| {
             request.reply(
-                Ok(&[ClipboardReplyContent::new("text/plain", b"hi")]),
+                Ok(&[ClipboardReplyContent::new(b"text/plain", b"hi")]),
                 &[],
                 true,
             );
@@ -5094,10 +5110,10 @@ mod tests {
             |request| {
                 request.reply(
                     Ok(&[
-                        ClipboardReplyContent::new("", b""),
-                        ClipboardReplyContent::new("text/plain", b""),
+                        ClipboardReplyContent::new(b"", b""),
+                        ClipboardReplyContent::new(b"text/plain", b""),
                     ]),
-                    &[ClipboardMime::new("")],
+                    &[ClipboardMime::new(b"")],
                     false,
                 );
             },
@@ -5113,7 +5129,7 @@ mod tests {
 
         // OSC 52 has no text representation to use, so the clipboard is empty.
         let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request.reply(Ok(&[ClipboardReplyContent::new("", b"")]), &[], false);
+            request.reply(Ok(&[ClipboardReplyContent::new(b"", b"")]), &[], false);
         });
         assert_eq!(output, b"\x1b]52;c;\x1b\\");
     }
@@ -5139,7 +5155,7 @@ mod tests {
     fn clipboard_read_primary_location() {
         let reply = |request: ClipboardRead<'_>| {
             request.reply(
-                Ok(&[ClipboardReplyContent::new("text/plain", b"hello")]),
+                Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]),
                 &[],
                 false,
             );

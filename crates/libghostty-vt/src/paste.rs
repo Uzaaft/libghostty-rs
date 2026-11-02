@@ -51,8 +51,8 @@
 //! })?;
 //!
 //! let clipboard = "echo hello\n";
-//! let mimes = [ClipboardMime::new("text/plain")];
-//! let read = |_mime: &str, out: &mut dyn Write| out.write_all(clipboard.as_bytes());
+//! let mimes = [ClipboardMime::new(b"text/plain")];
+//! let read = |_mime: &[u8], out: &mut dyn Write| out.write_all(clipboard.as_bytes());
 //!
 //! match terminal.paste(Options::new(), &mimes, read) {
 //!     // Ask the user whether the paste should go ahead, then retry.
@@ -290,7 +290,7 @@ impl Terminal<'_, '_> {
         reader: F,
     ) -> Result<bool>
     where
-        F: FnOnce(&str, &mut dyn Write) -> std::io::Result<()>,
+        F: FnOnce(&[u8], &mut dyn Write) -> std::io::Result<()>,
     {
         unsafe extern "C" fn read<F>(
             userdata: *mut c_void,
@@ -298,7 +298,7 @@ impl Terminal<'_, '_> {
             writer: ffi::Writer,
         ) -> bool
         where
-            F: FnOnce(&str, &mut dyn Write) -> std::io::Result<()>,
+            F: FnOnce(&[u8], &mut dyn Write) -> std::io::Result<()>,
         {
             // SAFETY: `userdata` is the reader, which `paste` exclusively
             // borrows for the duration of the call.
@@ -308,9 +308,11 @@ impl Terminal<'_, '_> {
                 return false;
             };
             // SAFETY: libghostty passes back an entry of `mimes` exactly as
-            // given (the same pointer and length), and every `ClipboardMime`
-            // was created from a `&str`.
-            let mime = unsafe { mime.to_str() };
+            // given (the same pointer and length), and those outlive the
+            // `ghostty_terminal_paste` call this reader runs inside. The
+            // entries are arbitrary bytes (`ClipboardMime` takes `&[u8]`), so
+            // hand them over as bytes rather than claiming they're UTF-8.
+            let mime = unsafe { mime.to_bytes() };
             let mut writer = PasteWriter {
                 writer,
                 refused: false,
@@ -382,7 +384,7 @@ mod tests {
     };
     use std::cell::{Cell, RefCell};
 
-    const TEXT: [ClipboardMime<'static>; 1] = [ClipboardMime::new("text/plain")];
+    const TEXT: [ClipboardMime<'static>; 1] = [ClipboardMime::new(b"text/plain")];
 
     /// What a paste wrote to the pty and which MIME types it read.
     ///
@@ -394,7 +396,7 @@ mod tests {
         options: Options,
         mimes: &[ClipboardMime<'_>],
         data: &[u8],
-    ) -> (Result<bool>, Vec<String>) {
+    ) -> (Result<bool>, Vec<Vec<u8>>) {
         output.borrow_mut().clear();
         let mut reads = Vec::new();
         let result = terminal.paste(options, mimes, |mime, out| {
@@ -412,34 +414,34 @@ mod tests {
             .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
             .unwrap();
         let mimes = [
-            ClipboardMime::new("image/png"),
-            ClipboardMime::new("text/plain"),
+            ClipboardMime::new(b"image/png"),
+            ClipboardMime::new(b"text/plain"),
         ];
 
         // Unbracketed: unsafe control bytes become spaces. Only the text
         // representation is read.
         let (result, reads) = paste(&mut terminal, &output, Options::new(), &mimes, b"a\0b");
         assert!(result.unwrap());
-        assert_eq!(reads, ["text/plain"]);
+        assert_eq!(reads, [b"text/plain"]);
         assert_eq!(*output.borrow(), b"a b");
 
         // With several text representations, only the first one is read.
         let mimes = [
-            ClipboardMime::new("image/png"),
-            ClipboardMime::new("UTF8_STRING"),
-            ClipboardMime::new("text/plain"),
+            ClipboardMime::new(b"image/png"),
+            ClipboardMime::new(b"UTF8_STRING"),
+            ClipboardMime::new(b"text/plain"),
         ];
         let (result, reads) = paste(&mut terminal, &output, Options::new(), &mimes, b"hi");
         assert!(result.unwrap());
-        assert_eq!(reads, ["UTF8_STRING"]);
+        assert_eq!(reads, [b"UTF8_STRING"]);
         assert_eq!(*output.borrow(), b"hi");
 
         // The reader gets the very string it was given, not a copy.
-        let mime = String::from("text/plain");
+        let mime = b"text/plain".to_vec();
         let mut same = false;
         terminal
             .paste(Options::new(), &[ClipboardMime::new(&mime)], |read, out| {
-                same = std::ptr::eq(read, mime.as_str());
+                same = std::ptr::eq(read, mime.as_slice());
                 out.write_all(b"hi")
             })
             .unwrap();
@@ -501,7 +503,7 @@ mod tests {
         let (result, reads) = paste(&mut terminal, &output, Options::new(), &[], b"");
         assert!(!result.unwrap());
         assert!(reads.is_empty());
-        let png = [ClipboardMime::new("image/png")];
+        let png = [ClipboardMime::new(b"image/png")];
         let (result, reads) = paste(&mut terminal, &output, Options::new(), &png, b"png");
         assert!(!result.unwrap());
         assert!(reads.is_empty());
@@ -579,8 +581,8 @@ mod tests {
             })
             .unwrap();
         let mimes = [
-            ClipboardMime::new("text/plain"),
-            ClipboardMime::new("image/png"),
+            ClipboardMime::new(b"text/plain"),
+            ClipboardMime::new(b"image/png"),
         ];
         output.borrow_mut().clear();
         let result = terminal.paste(Options::new(), &mimes, |_mime, _out| {
@@ -646,7 +648,7 @@ mod tests {
         let options = Options::new().with_source(Source::Text);
         let (result, reads) = paste(&mut terminal, &output, options, &TEXT, b"hi");
         assert!(result.unwrap());
-        assert_eq!(reads, ["text/plain"]);
+        assert_eq!(reads, [b"text/plain"]);
         assert_eq!(*output.borrow(), b"hi");
     }
 }
