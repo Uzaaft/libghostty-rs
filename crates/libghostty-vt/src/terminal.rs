@@ -1439,8 +1439,16 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// If this is unset then nothing is reported for an XTGETTCAP `TN` query,
     /// because libghostty doesn't know what the embedding terminal advertises
     /// itself as.
-    pub fn set_terminfo_name(&mut self, name: &str) -> Result<&mut Self> {
-        self.set(Opt::TERMINFO_NAME, &ffi::String::from(name))?;
+    pub fn set_terminfo_name(&mut self, name: impl AsRef<[u8]>) -> Result<&mut Self> {
+        // Ditto (see `set_title`): `AsRef<[u8]>` since upstream takes the
+        // name as arbitrary bytes with no UTF-8 promise, and upstream copies
+        // the bytes, so the slice only has to outlive this call.
+        let name = name.as_ref();
+        let raw = ffi::String {
+            ptr: name.as_ptr(),
+            len: name.len(),
+        };
+        self.set(Opt::TERMINFO_NAME, &raw)?;
         Ok(self)
     }
 
@@ -4918,6 +4926,16 @@ mod tests {
             // "xterm-256color" in hex.
             b"\x1bP1+r544E=787465726D2D323536636F6C6F72\x1b\\"
         );
+        // Upstream doesn't require UTF-8: the bytes are hex-encoded as-is.
+        assert_eq!(
+            pty_output(
+                |terminal| {
+                    terminal.set_terminfo_name(b"x\xff").unwrap();
+                },
+                query
+            ),
+            b"\x1bP1+r544E=78FF\x1b\\"
+        );
         // An empty name clears it again.
         assert_eq!(
             pty_output(
@@ -4932,7 +4950,7 @@ mod tests {
 
         let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
         assert!(matches!(
-            terminal.set_terminfo_name(&"x".repeat(129)),
+            terminal.set_terminfo_name("x".repeat(129)),
             Err(Error::InvalidValue)
         ));
     }
