@@ -590,6 +590,12 @@ pub use ffi::KittyGraphicsPlacementRenderInfo as PlacementRenderInfo;
 #[derive(Debug)]
 pub struct Graphics<'t> {
     inner: Ref<'t, ffi::KittyGraphicsImpl>,
+    /// The `Terminal::id` of the terminal this storage belongs to.
+    ///
+    /// The lifetime only says that some terminal is borrowed, not which one,
+    /// so [`PlacementIteration::rect`] compares this with the terminal it's
+    /// given to make sure they're the same one.
+    terminal: u64,
 }
 
 /// Opaque reference to a Kitty graphics image.
@@ -682,7 +688,12 @@ pub struct PlacementIterator<'alloc> {
 /// borrowed from the storage with lifetime `'t` and remains valid until
 /// the next mutating terminal call.
 #[derive(Debug)]
-pub struct PlacementIteration<'t, 'alloc>(&'t mut PlacementIterator<'alloc>);
+pub struct PlacementIteration<'t, 'alloc> {
+    iterator: &'t mut PlacementIterator<'alloc>,
+    /// The `Terminal::id` of the terminal whose storage is being iterated,
+    /// copied from [`Graphics`]. See [`PlacementIteration::rect`].
+    terminal: u64,
+}
 
 /// Methods related to the [Kitty graphics protocol](crate::kitty::graphics).
 impl Terminal<'_, '_> {
@@ -695,6 +706,7 @@ impl Terminal<'_, '_> {
         let inner = self.get::<ffi::KittyGraphics>(ffi::TerminalData::KITTY_GRAPHICS)?;
         Ok(Graphics {
             inner: Ref::new(inner)?,
+            terminal: self.id,
         })
     }
 
@@ -1103,7 +1115,10 @@ impl<'alloc> PlacementIterator<'alloc> {
             )
         };
         from_result(result)?;
-        Ok(PlacementIteration(self))
+        Ok(PlacementIteration {
+            iterator: self,
+            terminal: graphics.terminal,
+        })
     }
 }
 
@@ -1125,7 +1140,7 @@ impl<'t> PlacementIteration<'t, '_> {
         reason = "a lending iterator: each placement borrows the iteration"
     )]
     pub fn next(&mut self) -> Option<&Self> {
-        if unsafe { ffi::ghostty_kitty_graphics_placement_next(self.0.inner.as_raw()) } {
+        if unsafe { ffi::ghostty_kitty_graphics_placement_next(self.iterator.inner.as_raw()) } {
             Some(self)
         } else {
             None
@@ -1139,7 +1154,7 @@ impl<'t> PlacementIteration<'t, '_> {
     ) -> Result<()> {
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_iterator_set(
-                self.0.inner.as_raw(),
+                self.iterator.inner.as_raw(),
                 tag,
                 std::ptr::from_ref(value).cast(),
             )
@@ -1150,7 +1165,7 @@ impl<'t> PlacementIteration<'t, '_> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_get(
-                self.0.inner.as_raw(),
+                self.iterator.inner.as_raw(),
                 tag,
                 value.as_mut_ptr().cast(),
             )
@@ -1182,7 +1197,7 @@ impl<'t> PlacementIteration<'t, '_> {
         let mut size = PixelSize::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_pixel_size(
-                self.0.inner.as_raw(),
+                self.iterator.inner.as_raw(),
                 image.inner.as_raw(),
                 terminal.inner.as_raw(),
                 &raw mut size.width,
@@ -1202,7 +1217,7 @@ impl<'t> PlacementIteration<'t, '_> {
         let mut size = GridSize::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_grid_size(
-                self.0.inner.as_raw(),
+                self.iterator.inner.as_raw(),
                 image.inner.as_raw(),
                 terminal.inner.as_raw(),
                 &raw mut size.cols,
@@ -1239,7 +1254,7 @@ impl<'t> PlacementIteration<'t, '_> {
         let mut pos = ViewportPos::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_viewport_pos(
-                self.0.inner.as_raw(),
+                self.iterator.inner.as_raw(),
                 image.inner.as_raw(),
                 terminal.inner.as_raw(),
                 &raw mut pos.col,
@@ -1259,7 +1274,7 @@ impl<'t> PlacementIteration<'t, '_> {
         let mut rect = SourceRect::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_source_rect(
-                self.0.inner.as_raw(),
+                self.iterator.inner.as_raw(),
                 image.inner.as_raw(),
                 &raw mut rect.x,
                 &raw mut rect.y,
@@ -1282,15 +1297,34 @@ impl<'t> PlacementIteration<'t, '_> {
     /// relative to one, if its pin was garbage collected, if it covers no
     /// cells (e.g. no cell pixel size is set), or if Kitty graphics are
     /// disabled at build time.
+    ///
+    /// Returns [`Error::InvalidValue`] if `terminal` isn't the terminal whose
+    /// [`Graphics`] this placement came from.
     pub fn rect(
         &self,
         image: &Image<'t>,
         terminal: &'t Terminal<'_, '_>,
     ) -> Result<Option<Selection<'t>>> {
+        // Upstream takes the corners from the placement's pin, which lives in
+        // the pages of the terminal the placement came from, but clamps the
+        // end column to `terminal`'s width. With another, wider terminal the
+        // end could point past the end of the placement's page, and reading
+        // its cell would be out of bounds. Lifetimes can't tell two terminals
+        // apart, so check at runtime, like `IncrementalDecoder::next` does
+        // for the same reason (libghostty would touch the wrong terminal).
+        //
+        // `image` needs no check: upstream only reads its width and height,
+        // so an image from another terminal gives a wrong size, but the
+        // corners still come from the placement's pin, the bottom row stops
+        // at the end of its pages and the end column is clamped to the width
+        // of `terminal`, which we know is the placement's terminal.
+        if self.terminal != terminal.id {
+            return Err(Error::InvalidValue);
+        }
         let mut sel = ffi::sized!(ffi::Selection);
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_rect(
-                self.0.inner.as_raw(),
+                self.iterator.inner.as_raw(),
                 image.inner.as_raw(),
                 terminal.inner.as_raw(),
                 &raw mut sel,
@@ -1300,19 +1334,15 @@ impl<'t> PlacementIteration<'t, '_> {
         // error, since a virtual placement has no position of its own:
         // only the placeholder cells know where it is.
         let sel = from_optional_result(result, sel)?;
-        // NOTE: Nothing ties this placement to `terminal`. Upstream takes
-        // the corners from the placement's pin, which lives in the pages of
-        // the terminal the placement came from, but clamps the end column
-        // to `terminal`'s width. A placement and a terminal that don't
-        // belong together (e.g. a wider terminal) can therefore give grid
-        // refs past the end of the placement's page.
-        //
         // SAFETY: On success, upstream writes the whole struct. Both
         // endpoints point into the pages of the placement's terminal, which
-        // stays borrowed for `'t` through `Image<'t>` and `Placement<'t>`,
-        // and `terminal` is borrowed for `'t` too. Neither can be mutated
-        // (which would invalidate these untracked grid refs) while the
-        // selection is alive, so the selection is bound by `'t`.
+        // we checked above is `terminal`: every `Terminal`, including the
+        // views passed to callbacks, carries the id of the terminal it refers
+        // to, and no two terminals share one. Upstream clamps the end column to
+        // that same terminal's width, so both endpoints are in bounds of
+        // their pages. `terminal` is borrowed for `'t`, so it can't be
+        // mutated (which would invalidate these untracked grid refs) while
+        // the selection is alive, so the selection is bound by `'t`.
         Ok(sel.map(|sel| unsafe { Selection::from_raw(sel) }))
     }
 
@@ -1339,7 +1369,7 @@ impl<'t> PlacementIteration<'t, '_> {
         let mut info = ffi::sized!(PlacementRenderInfo);
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_render_info(
-                self.0.inner.as_raw(),
+                self.iterator.inner.as_raw(),
                 image.inner.as_raw(),
                 terminal.inner.as_raw(),
                 &raw mut info,
@@ -1743,9 +1773,12 @@ pub struct DecodedImage<'alloc> {
 
 #[cfg(all(test, not(miri)))]
 mod placement_tests {
+    use std::cell::Cell;
+
     use super::PlacementIterator;
     use crate::{
         Terminal,
+        error::Error,
         terminal::{PointCoordinate, PointSpace},
     };
 
@@ -1800,6 +1833,83 @@ mod placement_tests {
             }
         }
         assert_eq!((normal, virtual_), (1, 1));
+    }
+
+    #[test]
+    fn rect_rejects_another_terminal() {
+        let narrow = narrow();
+        let mut wide = Terminal::new(80, 24).unwrap();
+        wide.resize(80, 24, 10, 20).unwrap();
+
+        let graphics = narrow.kitty_graphics().unwrap();
+        let mut iterator = PlacementIterator::new().unwrap();
+        let mut placements = iterator.update(&graphics).unwrap();
+        let placement = placements.next().unwrap();
+        let image = graphics.image(1).unwrap();
+
+        // Don't touch the refs of a mismatched call: if the check is missing,
+        // the end is at column 39 of a 10 column page. Matching on the
+        // variant is enough.
+        assert!(matches!(
+            placement.rect(&image, &wide),
+            Err(Error::InvalidValue)
+        ));
+        // With its own terminal, upstream clamps the end to column 9.
+        assert!(matches!(placement.rect(&image, &narrow), Ok(Some(_))));
+    }
+
+    #[test]
+    fn rect_rejects_another_terminal_in_callbacks() {
+        // Same as above, but every terminal is a view passed to a callback,
+        // and `wide`'s callback runs inside `narrow`'s. Views are built by
+        // the callback trampolines rather than `Terminal::new`, so this
+        // checks that they carry their own terminal's id too.
+        // Declared first so they outlive `narrow`, whose callback borrows
+        // them.
+        let (same, other) = (Cell::new(false), Cell::new(false));
+        let mut narrow = narrow();
+        narrow
+            .on_bell(|a| {
+                let graphics = a.kitty_graphics().unwrap();
+                let mut iterator = PlacementIterator::new().unwrap();
+                let mut placements = iterator.update(&graphics).unwrap();
+                let placement = placements.next().unwrap();
+                let image = graphics.image(1).unwrap();
+                same.set(matches!(placement.rect(&image, a), Ok(Some(_))));
+
+                let mut wide = Terminal::new(80, 24).unwrap();
+                wide.resize(80, 24, 10, 20).unwrap();
+                wide.on_bell(|b| {
+                    // Don't touch the refs, as above.
+                    other.set(matches!(
+                        placement.rect(&image, b),
+                        Err(Error::InvalidValue)
+                    ));
+                })
+                .unwrap();
+                wide.vt_write(b"\x07");
+            })
+            .unwrap();
+        narrow.vt_write(b"\x07");
+        assert!(same.get());
+        assert!(other.get());
+    }
+
+    /// A narrow terminal holding a placement wider than the terminal.
+    ///
+    /// Upstream clamps the end column of a rect to the width of the terminal
+    /// it is given, so asking with a wider terminal would give a grid ref
+    /// past the end of this terminal's page.
+    fn narrow<'cb>() -> Terminal<'static, 'cb> {
+        let mut narrow = Terminal::new(10, 24).unwrap();
+        narrow.resize(10, 24, 10, 20).unwrap();
+        narrow
+            .set_kitty_image_storage_limit(64 * 1024 * 1024)
+            .unwrap();
+        // A 1x2 RGB image at the cursor (0,0), 40 columns wide and 1 row
+        // tall.
+        narrow.vt_write(b"\x1b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=40,r=1;////////\x1b\\");
+        narrow
     }
 }
 

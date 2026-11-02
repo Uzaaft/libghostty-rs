@@ -231,9 +231,12 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
     // reconstructs the Box only after freeing the native terminal.
     vtable: *mut VTable<'alloc, 'cb>,
     // Unique for the life of the process, unlike the handle's address, which
-    // the allocator may hand to a later terminal. The incremental snapshot
-    // decoder uses it to tell whether it still holds the terminal it decodes
-    // into. Zero for the borrowed views passed to callbacks.
+    // the allocator may hand to a later terminal. Every handle carries the id
+    // of the terminal it refers to, including the borrowed views passed to
+    // callbacks (which copy it from the VTable), and distinct terminals never
+    // share one. The incremental snapshot decoder uses it to tell whether it
+    // still holds the terminal it decodes into, and Kitty placement rects use
+    // it to tell whether a placement belongs to the terminal they're given.
     pub(crate) id: u64,
 }
 
@@ -289,10 +292,15 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
     pub(crate) unsafe fn from_raw(raw: ffi::Terminal) -> Result<Self> {
         static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let inner = Object::new(raw)?;
+        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
-            inner: Object::new(raw)?,
-            vtable: Box::into_raw(Box::new(VTable::default())),
-            id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            inner,
+            // The VTable keeps a copy of the id so the callback trampolines,
+            // which only get the raw handle and the VTable, can give the
+            // views they build the same id as this terminal.
+            vtable: Box::into_raw(Box::new(VTable::new(id))),
+            id,
         })
     }
 
@@ -3522,10 +3530,16 @@ macro_rules! handlers {
                     let obj = $crate::alloc::Object::new(t).expect("received null terminal ptr in callback - this is a bug!");
                     // Build a temporary borrowed Terminal view for the callback
                     // without taking ownership of the underlying ghostty terminal.
+                    //
+                    // The view must carry the real terminal's id, not a
+                    // placeholder: checks such as `PlacementIteration::rect`
+                    // compare ids to tell terminals apart, and a shared
+                    // placeholder would make views of different terminals
+                    // look like the same one.
                     let term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
                         inner: obj,
                         vtable: ud.cast(),
-                        id: 0,
+                        id: vtable.id,
                     });
                     let $t: &$crate::terminal::Terminal = &term;
                     let $func = vtable.$name.as_deref_mut()
@@ -3595,6 +3609,9 @@ macro_rules! handlers {
         )*
 
         struct VTable<'alloc, 'cb> {
+            // The `Terminal::id` of the terminal owning this VTable, for the
+            // callback views. See the trampoline above.
+            id: u64,
             $($name: Option<::std::boxed::Box<dyn $fnty<'alloc, 'cb>>>),*
         }
 
@@ -3604,9 +3621,10 @@ macro_rules! handlers {
             }
         }
 
-        impl ::core::default::Default for VTable<'_, '_> {
-            fn default() -> Self {
+        impl VTable<'_, '_> {
+            fn new(id: u64) -> Self {
                 Self {
+                    id,
                     $($name: None),*
                 }
             }
