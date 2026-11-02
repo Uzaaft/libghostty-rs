@@ -53,14 +53,20 @@
 //! | active-screen manifest                   |
 //! +------------------ PAGE ------------------+  repeated per manifest
 //! | active screen rows                       |
+//! +---------- KITTY_IMAGE_STORAGE -----------+  optional, per screen
+//! | images, placements, in-progress load     |
 //! +------------- CONTINUATION ---------------+
 //! | unfinished VT/UTF-8 input, or ground     |
 //! +------------------ READY -----------------+
 //! | empty renderable-state marker            |  ready() returns here
+//! +---------- KITTY_IMAGE_PAYLOAD -----------+  optional, anywhere until FINISH,
+//! | one image's or frame's pixels            |  next() consumes one
 //! +----------------- HISTORY ----------------+  repeated per screen
 //! | scrollback manifest                      |
 //! +------------------ PAGE ------------------+  next() consumes one page
 //! | older screen rows                        |
+//! +------ KITTY_IMAGE_PAGE_PLACEMENTS -------+  optional, after a PAGE
+//! | placements pinned to that page           |
 //! +------------------ FINISH ----------------+
 //! | empty end-of-snapshot marker             |  next() returns NO_VALUE
 //! +------------------------------------------+
@@ -72,6 +78,39 @@
 //! FINISH terminates the record sequence. Both are empty records protected by
 //! CRC32C, like every other record. Declared record counts, tags, and strict
 //! decoding enforce the stream's ordering and completeness.
+//!
+//! A decoder skips any record whose tag it does not know, wherever it
+//! appears. This lets a newer library add optional kinds of records that
+//! older libraries ignore, without changing the snapshot version. Skipped
+//! records are still checked, so a damaged record fails decoding even when
+//! its tag is unknown.
+//!
+//! The Kitty graphics records are optional in this way. A library built
+//! without Kitty graphics skips them and restores the same terminal without
+//! its images, and a terminal without images writes none of them.
+//!
+//! Images are restored at READY with their pixels pending, and the pixels
+//! arrive later through [`IncrementalDecoder::next`].
+// The Kitty graphics items only exist with the `kitty-graphics` feature, so
+// only link to them then; otherwise the links would be broken.
+#![cfg_attr(
+    feature = "kitty-graphics",
+    doc = "A pending image can be placed and queried, but \
+           [`Image::data`](crate::kitty::graphics::Image::data) has no pixels \
+           for it until they arrive. When they do, the image \
+           keeps its [`Image::generation`](crate::kitty::graphics::Image::generation), \
+           but [`Graphics::generation`](crate::kitty::graphics::Graphics::generation) \
+           changes, so a renderer that watches that value picks up the new \
+           pixels on its next frame."
+)]
+#![cfg_attr(
+    not(feature = "kitty-graphics"),
+    doc = "A pending image can be placed and queried, but `Image::data` \
+           has no pixels for it until they arrive. When they do, \
+           the image keeps its `Image::generation`, but `Graphics::generation` \
+           changes, so a renderer that watches that value picks up the new \
+           pixels on its next frame."
+)]
 //!
 //! Snapshot format version 1 is a work in progress and does not yet carry a
 //! binary-compatibility guarantee.
@@ -491,11 +530,12 @@ impl Drop for Decoder<'_, '_> {
     }
 }
 
-/// A [`Decoder`] that incrementally decodes history and appends it to the
-/// terminal, obtained by calling [`Decoder::ready`].
+/// A [`Decoder`] that incrementally decodes history pages, and the pixels of
+/// Kitty graphics images, into the terminal, obtained by calling
+/// [`Decoder::ready`].
 ///
 /// Call [`IncrementalDecoder::next`] repeatedly until `Ok(None)` is returned
-/// to keep decoding history from the snapshot.
+/// to keep decoding history and image pixels from the snapshot.
 ///
 /// The terminal is accessible for use during the decode process via methods
 /// like [`IncrementalDecoder::terminal`] and [`IncrementalDecoder::terminal_mut`],
@@ -524,19 +564,74 @@ pub struct IncrementalDecoder<'alloc, 'r, 'cb> {
 }
 
 impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
-    /// Decode one history page into the terminal returned by READY.
+    /// Decode one history page, or the pixels of one Kitty graphics image,
+    /// into the terminal returned by READY.
     ///
-    /// Each `Ok(Some(progress))` result consumes and validates one PAGE
-    /// record. Query the values on the returned `progress` before
-    /// calling [`IncrementalDecoder::next`] again.
+    /// Each `Ok(Some(progress))` result consumes and validates one record: a
+    /// history page together with the Kitty graphics placements pinned to
+    /// it, or the pixels of one image or animation frame. Pixels may arrive
+    /// at any point, even between history pages. Query [`Progress::kind`]
+    /// and the progress values for that kind on the returned `progress`
+    /// before calling [`IncrementalDecoder::next`] again. `Ok(None)` means
+    /// FINISH was validated; repeated calls after FINISH also return
+    /// `Ok(None)`.
     ///
-    /// `Ok(None)` means FINISH was validated; repeated calls after FINISH
-    /// also return `Ok(None)`.
+    /// ```rust
+    /// use libghostty_vt::{
+    ///     Terminal,
+    ///     screen::Screen,
+    ///     snapshot::{Decoder, ProgressKind},
+    /// };
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let mut source = Terminal::new(80, 24)?;
+    /// # for i in 0..5000 {
+    /// #     source.vt_write(format!("line {i}\r\n").as_bytes());
+    /// # }
+    /// # // A 2x1 RGBA image: 2 * 1 * 4 = 8 bytes of pixels.
+    /// # source.vt_write(b"\x1b_Ga=T,f=32,s=2,v=1,i=7,q=2;AAAA/wAAAP8=\x1b\\");
+    /// # let mut snapshot = Vec::new();
+    /// # source.encode_snapshot(&mut snapshot)?;
+    /// let mut incremental = Decoder::new_buf(&snapshot)?.ready()?;
+    ///
+    /// // How many scrollback rows were restored, and how many image bytes the
+    /// // primary screen received, to show progress while they arrive.
+    /// let mut restored = 0;
+    /// let mut received = 0;
+    ///
+    /// while let Some(progress) = incremental.next()? {
+    ///     match progress.kind()? {
+    ///         // Scrollback grew by this many rows.
+    ///         ProgressKind::Page { rows, .. } => restored += rows,
+    ///         // An image's pixels arrived.
+    ///         ProgressKind::Image { bytes, .. } => {
+    ///             if progress.screen()? == Screen::Primary {
+    ///                 received += bytes;
+    ///             }
+    ///         }
+    ///         // `ProgressKind` is non-exhaustive, so a later version of
+    ///         // this crate may decode more kinds of records.
+    ///         _ => {}
+    ///     }
+    /// }
+    ///
+    /// // `Ok(None)` means the snapshot is complete. Dropped pixels report
+    /// // zero bytes, so `received` can end up below what was sent.
+    /// # assert!(restored > 0);
+    /// # // A library built without Kitty graphics skips the image.
+    /// # #[cfg(feature = "kitty-graphics")]
+    /// # assert_eq!(received, 8);
+    /// # Ok(())
+    /// # }
+    /// ```
     ///
     /// The terminal may be rendered, resized, and fed live PTY input between
     /// calls. If a history page can no longer be applied safely, it is still
-    /// consumed and validated and progress reports zero rows. The decoder
-    /// applies history to the terminal produced by its READY operation.
+    /// consumed and validated and progress reports zero rows. Image pixels
+    /// work the same way: if live input deleted the image, or sent a new
+    /// image with the same ID, the pixels are consumed and validated and
+    /// progress reports zero bytes. The decoder applies history and pixels to
+    /// the terminal produced by its READY operation.
     ///
     /// If [`Decoder::set_compress_history_enabled`] is enabled, the page is
     /// compressed before this returns, unless it is visible in the terminal's
@@ -604,31 +699,52 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
     }
 }
 
-/// The current progress of the decode process.
+/// The current progress of the decode process: what the most recent
+/// successful [`IncrementalDecoder::next`] call decoded, a history page or the
+/// pixels of a Kitty graphics image.
 #[derive(Debug, Clone, Copy)]
 pub struct Progress<'alloc, 'r, 'd> {
     decoder: &'d Decoder<'alloc, 'r>,
 }
 
 impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
-    /// Screen associated with the most recently decoded history page.
+    /// Screen associated with the most recently decoded history page or
+    /// image pixels.
     pub fn screen(&self) -> Result<Screen> {
         self.decoder
             .get::<ffi::TerminalScreen::Type>(Data::PROGRESS_SCREEN)
             .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
-    /// Rows prepended by the most recently decoded history page.
+
+    /// What the most recent successful [`IncrementalDecoder::next`] call
+    /// decoded: a history page or the pixels of a Kitty graphics image.
     ///
-    /// Zero means the page was consumed and validated but could not be
-    /// applied to the live terminal.
-    pub fn rows(&self) -> Result<usize> {
-        self.decoder.get(Data::PROGRESS_ROWS)
-    }
-    /// Page records remaining in the same screen's HISTORY sequence.
-    ///
-    /// This is not a count of all pages remaining in the snapshot.
-    pub fn remaining(&self) -> Result<u32> {
-        self.decoder.get(Data::PROGRESS_REMAINING)
+    /// A kind these bindings don't know yet returns [`Error::InvalidValue`].
+    pub fn kind(&self) -> Result<ProgressKind> {
+        use ffi::SnapshotDecoderProgressKind as Kind;
+
+        // Upstream only gives the page keys a value for a page and the image
+        // keys a value for an image; the others return NO_VALUE. So read the
+        // tag first, then only the keys that apply to it, the same way
+        // `osc::Command::command_type` does. Every key read here has a value
+        // for its kind, so plain `get` is enough: a NO_VALUE would be an
+        // upstream bug, and surfaces as an error rather than a made-up zero.
+        match self.decoder.get::<Kind::Type>(Data::PROGRESS_KIND)? {
+            Kind::PAGE => Ok(ProgressKind::Page {
+                rows: self.decoder.get(Data::PROGRESS_ROWS)?,
+                remaining: self.decoder.get(Data::PROGRESS_REMAINING)?,
+            }),
+            Kind::IMAGE => Ok(ProgressKind::Image {
+                id: self.decoder.get(Data::PROGRESS_IMAGE_ID)?,
+                frame: self.decoder.get(Data::PROGRESS_IMAGE_FRAME)?,
+                bytes: self.decoder.get(Data::PROGRESS_IMAGE_BYTES)?,
+            }),
+            // A newer libghostty may decode records we have no variant for.
+            // Unlike `osc::CommandType`, which has an `Invalid` variant to
+            // fall back to, this already returns a `Result`, so say so
+            // there instead of guessing at a variant.
+            _ => Err(Error::InvalidValue),
+        }
     }
 
     /// Get a reference to the underlying decoder.
@@ -636,6 +752,48 @@ impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
     pub fn as_decoder(self) -> &'d Decoder<'alloc, 'r> {
         self.decoder
     }
+}
+
+/// What the most recent successful [`IncrementalDecoder::next`] call
+/// decoded.
+///
+/// Query it with [`Progress::kind`]; each variant carries the progress values
+/// that apply to that kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ProgressKind {
+    /// One history page, together with the Kitty graphics placements pinned
+    /// to it. `rows` and `remaining` describe it.
+    Page {
+        /// Rows prepended by the most recently decoded history page.
+        ///
+        /// Zero means the page was consumed and validated but could not be
+        /// applied to the live terminal.
+        rows: usize,
+        /// Page records remaining in the same screen's HISTORY sequence.
+        ///
+        /// This is not a count of all pages remaining in the snapshot.
+        remaining: u32,
+    },
+    /// The pixels of one Kitty graphics image or animation frame. `id`,
+    /// `frame`, and `bytes` describe it.
+    Image {
+        /// ID of the Kitty graphics image whose pixels the most recent
+        /// [`IncrementalDecoder::next`] call decoded.
+        id: u32,
+        /// Which frame of the image those pixels are for, numbered as the
+        /// Kitty graphics protocol numbers frames. 1 is the image itself, and
+        /// 2 and up are its animation frames.
+        frame: u32,
+        /// Number of pixel bytes the most recent [`IncrementalDecoder::next`]
+        /// call attached to its image.
+        ///
+        /// Zero means the pixels were consumed and validated but dropped.
+        /// That happens when live input deleted the image or sent a new image
+        /// with the same ID, when the image did not fit the storage limit, or
+        /// when its screen was removed or replaced.
+        bytes: usize,
+    },
 }
 
 #[cfg(all(test, not(miri)))]
@@ -671,15 +829,88 @@ mod tests {
         bytes
     }
 
+    /// Decode the rest of the history and return the rows it restored.
+    ///
+    /// A snapshot without Kitty images has only pages after READY, and with a
+    /// single (primary) screen they form one HISTORY sequence, so `remaining`
+    /// counts down by one per page and reaches zero on the last.
+    fn decode_pages(incremental: &mut IncrementalDecoder<'_, '_, '_>) -> usize {
+        let mut rows = 0;
+        let mut last_remaining = None;
+        while let Some(progress) = incremental.next().unwrap() {
+            assert_eq!(progress.screen().unwrap(), Screen::Primary);
+            let ProgressKind::Page {
+                rows: page_rows,
+                remaining,
+            } = progress.kind().unwrap()
+            else {
+                panic!("expected only history pages");
+            };
+            if let Some(last) = last_remaining {
+                assert_eq!(remaining + 1, last);
+            }
+            last_remaining = Some(remaining);
+            rows += page_rows;
+        }
+        assert_eq!(last_remaining, Some(0));
+        rows
+    }
+
     #[test]
     fn next_restores_history() {
         let bytes = snapshot_with_history();
         let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
-        let mut rows = 0;
-        while let Some(progress) = incremental.next().unwrap() {
-            rows += progress.rows().unwrap();
+        assert!(decode_pages(&mut incremental) > 0);
+    }
+
+    /// The pixels of a Kitty image arrive through `next` as their own
+    /// progress step, among the history pages.
+    #[test]
+    #[cfg(feature = "kitty-graphics")]
+    fn next_reports_kitty_image_pixels() {
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        for i in 0..5000 {
+            terminal.vt_write(format!("line {i}\r\n").as_bytes());
         }
-        assert!(rows > 0);
+        // A 2x1 RGBA image (f=32), placed on the active screen after the
+        // history so no scrollback pruning can take it with it. Its pixels
+        // are 2 * 1 * 4 = 8 bytes: two opaque black pixels. The decoder's
+        // default storage limit (that of a new terminal) easily fits them.
+        terminal.vt_write(b"\x1b_Ga=T,f=32,s=2,v=1,i=7,q=2;AAAA/wAAAP8=\x1b\\");
+        let mut bytes = Vec::new();
+        terminal.encode_snapshot(&mut bytes).unwrap();
+
+        let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
+        let mut images = Vec::new();
+        let mut pages = 0;
+        while let Some(progress) = incremental.next().unwrap() {
+            // Upstream only promises that pixels arrive somewhere before
+            // FINISH, so don't depend on where among the pages they are.
+            match progress.kind().unwrap() {
+                ProgressKind::Page { .. } => pages += 1,
+                image => images.push((image, progress.screen().unwrap())),
+            }
+        }
+        assert!(pages > 0);
+        assert_eq!(
+            images,
+            [(
+                ProgressKind::Image {
+                    id: 7,
+                    frame: 1,
+                    bytes: 8,
+                },
+                Screen::Primary,
+            )]
+        );
+
+        // The reported bytes are the pixels that were attached to the image.
+        let graphics = incremental.terminal().kitty_graphics().unwrap();
+        let image = graphics.image(7).unwrap();
+        assert_eq!(
+            image.data().unwrap(),
+            Some(&[0, 0, 0, 255, 0, 0, 0, 255][..])
+        );
     }
 
     /// Swapping the READY terminal out of the incremental decoder and dropping
@@ -730,11 +961,7 @@ mod tests {
         // The rejected call consumed nothing, so decoding carries on as if the
         // swap never happened.
         *incremental.terminal_mut() = original;
-        let mut rows = 0;
-        while let Some(progress) = incremental.next().unwrap() {
-            rows += progress.rows().unwrap();
-        }
-        assert!(rows > 0);
+        assert!(decode_pages(&mut incremental) > 0);
     }
 
     /// The allocator usually hands a terminal created right after the
