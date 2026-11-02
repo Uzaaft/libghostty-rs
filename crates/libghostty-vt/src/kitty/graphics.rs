@@ -574,7 +574,7 @@ use std::{
 use crate::{
     Terminal,
     alloc::{Allocator, Bytes, Object, Ref},
-    error::{Error, Result, from_optional_result_uninit, from_result},
+    error::{Error, Result, from_optional_result, from_optional_result_uninit, from_result},
     ffi,
     selection::Selection,
 };
@@ -1271,25 +1271,49 @@ impl<'t> PlacementIteration<'t, '_> {
         Ok(rect)
     }
 
-    /// Get the resolved source rectangle for the current placement.
+    /// Compute the grid rectangle occupied by the current placement.
     ///
-    /// Applies kitty protocol semantics: a width or height of 0 in the
-    /// placement means "use the full image dimension", and the resulting
-    /// rectangle is clamped to the actual image bounds. The returned values
-    /// are in pixels and are ready to use for texture sampling.
-    pub fn rect(&self, image: &Image<'t>, terminal: &'t Terminal<'_, '_>) -> Result<Selection<'t>> {
-        let mut sel = MaybeUninit::<ffi::Selection>::zeroed();
+    /// Uses the placement's pin, the image dimensions, and the terminal's
+    /// cell/pixel geometry to calculate the bounding rectangle. The rectangle
+    /// is returned as a [`Selection`] with
+    /// [`is_rectangle`](Selection::is_rectangle) set to `true`.
+    ///
+    /// Returns `None` if it is a virtual placement (unicode placeholder) or
+    /// relative to one, if its pin was garbage collected, if it covers no
+    /// cells (e.g. no cell pixel size is set), or if Kitty graphics are
+    /// disabled at build time.
+    pub fn rect(
+        &self,
+        image: &Image<'t>,
+        terminal: &'t Terminal<'_, '_>,
+    ) -> Result<Option<Selection<'t>>> {
+        let mut sel = ffi::sized!(ffi::Selection);
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_rect(
                 self.0.inner.as_raw(),
                 image.inner.as_raw(),
                 terminal.inner.as_raw(),
-                sel.as_mut_ptr(),
+                &raw mut sel,
             )
         };
-        from_result(result)?;
-        // SAFETY: Selection should be initialized and valid on success
-        Ok(unsafe { Selection::from_raw(sel.assume_init()) })
+        // Upstream reports "no rectangle" as `NO_VALUE` rather than an
+        // error, since a virtual placement has no position of its own:
+        // only the placeholder cells know where it is.
+        let sel = from_optional_result(result, sel)?;
+        // NOTE: Nothing ties this placement to `terminal`. Upstream takes
+        // the corners from the placement's pin, which lives in the pages of
+        // the terminal the placement came from, but clamps the end column
+        // to `terminal`'s width. A placement and a terminal that don't
+        // belong together (e.g. a wider terminal) can therefore give grid
+        // refs past the end of the placement's page.
+        //
+        // SAFETY: On success, upstream writes the whole struct. Both
+        // endpoints point into the pages of the placement's terminal, which
+        // stays borrowed for `'t` through `Image<'t>` and `Placement<'t>`,
+        // and `terminal` is borrowed for `'t` too. Neither can be mutated
+        // (which would invalidate these untracked grid refs) while the
+        // selection is alive, so the selection is bound by `'t`.
+        Ok(sel.map(|sel| unsafe { Selection::from_raw(sel) }))
     }
 
     /// Get all of the geometry of the current placement in one call.
@@ -1715,6 +1739,68 @@ pub struct DecodedImage<'alloc> {
     /// The decoded RGBA pixels, allocated with the allocator passed to
     /// [`DecodePng::decode_png`].
     pub data: Bytes<'alloc>,
+}
+
+#[cfg(all(test, not(miri)))]
+mod placement_tests {
+    use super::PlacementIterator;
+    use crate::{
+        Terminal,
+        terminal::{PointCoordinate, PointSpace},
+    };
+
+    #[test]
+    fn rect_is_none_for_virtual_placements() {
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        // Same geometry as upstream's "placement_rect with transmit and
+        // display" test, so the expected rectangle below matches theirs:
+        // 80 cols * 10px = 800px, 24 rows * 20px = 480px.
+        terminal.resize(80, 24, 10, 20).unwrap();
+        terminal
+            .set_kitty_image_storage_limit(64 * 1024 * 1024)
+            .unwrap();
+
+        // Upstream's sequence: a 1x2 RGB image placed at the cursor (0,0),
+        // 10 columns wide and 1 row tall.
+        terminal.vt_write(b"\x1b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=10,r=1;////////\x1b\\");
+        // The same image data with a virtual placement (U=1), as in
+        // upstream's render tests, under another image ID so it doesn't
+        // replace the first. It has no position of its own, so upstream
+        // returns NO_VALUE for its rect.
+        terminal.vt_write(b"\x1b_Ga=T,t=d,f=24,i=2,p=1,s=1,v=2,U=1,c=2,r=1,q=2;////////\x1b\\");
+
+        let graphics = terminal.kitty_graphics().unwrap();
+        let mut iterator = PlacementIterator::new().unwrap();
+        let mut placements = iterator.update(&graphics).unwrap();
+
+        // Placements come out in storage order, which isn't specified, so
+        // check each one by kind and count that we saw both.
+        let (mut normal, mut virtual_) = (0, 0);
+        while let Some(placement) = placements.next() {
+            let image = graphics.image(placement.image_id().unwrap()).unwrap();
+            let rect = placement.rect(&image, &terminal).unwrap();
+
+            if placement.is_virtual().unwrap() {
+                virtual_ += 1;
+                assert!(rect.is_none());
+            } else {
+                normal += 1;
+                let rect = rect.unwrap();
+                let point = |grid_ref| {
+                    terminal
+                        .point_from_grid_ref(&grid_ref, PointSpace::Active)
+                        .unwrap()
+                        .unwrap()
+                };
+                // Starts at the cursor origin, and 10 columns by 1 row
+                // means the inclusive bottom-right corner is (9, 0).
+                assert_eq!(point(rect.start()), PointCoordinate { x: 0, y: 0 });
+                assert_eq!(point(rect.end()), PointCoordinate { x: 9, y: 0 });
+                assert!(rect.is_rectangle());
+            }
+        }
+        assert_eq!((normal, virtual_), (1, 1));
+    }
 }
 
 #[cfg(all(test, not(miri)))]
