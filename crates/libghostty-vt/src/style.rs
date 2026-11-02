@@ -267,7 +267,13 @@ impl Palette {
     /// from 0 to 255 in decimal or in `0x`, `0o`, or `0b`-prefixed form. Spaces and
     /// tabs around `N` and `COLOR` are ignored. `COLOR` accepts the same syntax as
     /// [`RgbColor::parse`].
-    pub fn parse_palette_entry(value: &str) -> Result<(PaletteIndex, RgbColor)> {
+    pub fn parse_palette_entry(value: impl AsRef<[u8]>) -> Result<(PaletteIndex, RgbColor)> {
+        // Take `AsRef<[u8]>` rather than `&str`: upstream takes a byte
+        // buffer and length with no UTF-8 promise, so strings pass straight
+        // in, and so do byte strings (e.g. read from a config file) without
+        // a UTF-8 check first. Input that isn't valid syntax, non-ASCII
+        // included, is rejected by upstream as `Error::InvalidValue`.
+        let value = value.as_ref();
         let mut index = MaybeUninit::uninit();
         let mut rgb = MaybeUninit::uninit();
         let result = unsafe {
@@ -377,7 +383,9 @@ impl RgbColor {
     /// The color name is resolved from Ghostty's embedded rgb.txt table. Leading
     /// and trailing spaces and tabs are trimmed, and matching is ASCII
     /// case-insensitive. Hex values are not accepted by this function.
-    pub fn parse_x11_color(name: &str) -> Result<Self> {
+    pub fn parse_x11_color(name: impl AsRef<[u8]>) -> Result<Self> {
+        // Ditto (see `Palette::parse_palette_entry`): upstream takes bytes.
+        let name = name.as_ref();
         let mut out = MaybeUninit::uninit();
         let result = unsafe {
             ffi::ghostty_color_parse_x11(name.as_ptr().cast(), name.len(), out.as_mut_ptr())
@@ -393,7 +401,9 @@ impl RgbColor {
     /// values), and `rgb:<red>/<green>/<blue>` or
     /// `rgbi:<red>/<green>/<blue>` specifications. Leading and trailing spaces and
     /// tabs are trimmed.
-    pub fn parse(value: &str) -> Result<Self> {
+    pub fn parse(value: impl AsRef<[u8]>) -> Result<Self> {
+        // Ditto (see `Palette::parse_palette_entry`): upstream takes bytes.
+        let value = value.as_ref();
         let mut out = MaybeUninit::uninit();
         let result = unsafe {
             ffi::ghostty_color_parse(value.as_ptr().cast(), value.len(), out.as_mut_ptr())
