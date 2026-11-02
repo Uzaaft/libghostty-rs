@@ -96,8 +96,8 @@
 #![cfg_attr(
     feature = "kitty-graphics",
     doc = "A pending image can be placed and queried, but \
-           [`Image::data`](crate::kitty::graphics::Image::data) has no pixels \
-           for it until they arrive. When they do, the image \
+           [`Image::data`](crate::kitty::graphics::Image::data) returns \
+           `Ok(None)` for it until its pixels arrive. When they do, the image \
            keeps its [`Image::generation`](crate::kitty::graphics::Image::generation), \
            but [`Graphics::generation`](crate::kitty::graphics::Graphics::generation) \
            changes, so a renderer that watches that value picks up the new \
@@ -106,7 +106,7 @@
 #![cfg_attr(
     not(feature = "kitty-graphics"),
     doc = "A pending image can be placed and queried, but `Image::data` \
-           has no pixels for it until they arrive. When they do, \
+           returns `Ok(None)` for it until its pixels arrive. When they do, \
            the image keeps its `Image::generation`, but `Graphics::generation` \
            changes, so a renderer that watches that value picks up the new \
            pixels on its next frame."
@@ -905,6 +905,42 @@ mod tests {
         );
 
         // The reported bytes are the pixels that were attached to the image.
+        let graphics = incremental.terminal().kitty_graphics().unwrap();
+        let image = graphics.image(7).unwrap();
+        assert_eq!(
+            image.data().unwrap(),
+            Some(&[0, 0, 0, 255, 0, 0, 0, 255][..])
+        );
+    }
+
+    /// A Kitty image restored at READY has its pixels pending, and
+    /// [`Image::data`](crate::kitty::graphics::Image::data) reports that as
+    /// `Ok(None)` rather than an error until `next` attaches them.
+    #[test]
+    #[cfg(feature = "kitty-graphics")]
+    fn pending_kitty_image_has_no_data_until_next() {
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        // The same 2x1 RGBA image as in `next_reports_kitty_image_pixels`:
+        // 8 bytes, two opaque black pixels.
+        terminal.vt_write(b"\x1b_Ga=T,f=32,s=2,v=1,i=7,q=2;AAAA/wAAAP8=\x1b\\");
+        let mut bytes = Vec::new();
+        terminal.encode_snapshot(&mut bytes).unwrap();
+
+        let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
+
+        // Scoped so the borrow of the terminal ends before `next`, which
+        // needs it mutably.
+        {
+            let graphics = incremental.terminal().kitty_graphics().unwrap();
+            let image = graphics.image(7).unwrap();
+            let data = image.data();
+            assert!(matches!(data, Ok(None)), "{data:?}");
+            // The expected length is known even while the pixels are pending.
+            assert_eq!(image.data_len().unwrap(), 8);
+        }
+
+        while incremental.next().unwrap().is_some() {}
+
         let graphics = incremental.terminal().kitty_graphics().unwrap();
         let image = graphics.image(7).unwrap();
         assert_eq!(
