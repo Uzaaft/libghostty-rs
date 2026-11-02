@@ -922,6 +922,21 @@ impl<'t> Image<'t> {
         // SAFETY: Value should be initialized after successful call.
         Ok(unsafe { value.assume_init() })
     }
+    /// Like [`Image::get`], but for keys upstream documents as able to
+    /// return `NO_VALUE` for a valid image. That code means "no value right
+    /// now" rather than a failure, so it becomes `Ok(None)`. Every other
+    /// error, such as `INVALID_VALUE` for a bad handle, stays an `Err`.
+    fn get_optional<T>(&self, tag: ffi::KittyGraphicsImageData::Type) -> Result<Option<T>> {
+        let mut value = MaybeUninit::<T>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_kitty_graphics_image_get(
+                self.inner.as_raw(),
+                tag,
+                value.as_mut_ptr().cast(),
+            )
+        };
+        from_optional_result_uninit(result, value)
+    }
 
     /// The image ID.
     pub fn id(&self) -> Result<u32> {
@@ -992,15 +1007,40 @@ impl<'t> Image<'t> {
     /// is the pixel data of the current animation frame. The image's
     /// [generation](Image::generation) changes whenever the current frame
     /// changes, so generation-keyed caches remain coherent.
+    ///
+    /// Pending pixels only arrive while their source is still delivering
+    /// them. For example, the images of a snapshot get their pixels from
+    /// [`IncrementalDecoder::next`](crate::snapshot::IncrementalDecoder::next).
+    /// If decoding stops early or fails, or the snapshot was taken while the
+    /// image was still pending, the image can stay pending and this keeps
+    /// returning `None`.
     pub fn data(&self) -> Result<Option<&'t [u8]>> {
-        let ptr = self.get::<*const u8>(ffi::KittyGraphicsImageData::DATA_PTR)?;
+        // A pending payload is reported as `NO_VALUE`, which `get` would
+        // turn into `Err(Error::InvalidValue)`. Pending is a normal state
+        // for a stored image, so read the pointer with `get_optional`.
+        let Some(ptr) = self.get_optional::<*const u8>(ffi::KittyGraphicsImageData::DATA_PTR)?
+        else {
+            return Ok(None);
+        };
+        // Upstream never reports success with a NULL pointer: the pointer
+        // comes from a Zig slice, whose pointer can't be NULL. But
+        // `slice::from_raw_parts` needs a non-NULL pointer even for an empty
+        // slice, and a NULL slipping through would be UB rather than an
+        // error, so keep this cheap check rather than rely on a property
+        // the header doesn't spell out. A NULL pointer has no pixels to
+        // borrow, so report it the same way as a pending payload.
         if ptr.is_null() {
             return Ok(None);
         }
 
         let len = self.get::<usize>(ffi::KittyGraphicsImageData::DATA_LEN)?;
 
-        // SAFETY: We trust libghostty to return valid results
+        // SAFETY: `ptr` is non-NULL (checked above) and, per the header,
+        // points to the `DATA_LEN` bytes of the image's pixel data. `u8`
+        // has an alignment of 1, so any non-NULL pointer is aligned. The
+        // header says the data stays valid as long as the terminal is not
+        // mutated, and `'t` borrows the terminal immutably, so the bytes
+        // outlive the returned slice.
         Ok(Some(unsafe { std::slice::from_raw_parts(ptr, len) }))
     }
     /// Length of the raw pixel data in bytes. Always equal to
