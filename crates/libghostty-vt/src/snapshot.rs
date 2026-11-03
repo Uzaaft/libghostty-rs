@@ -497,6 +497,40 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
         Ok(self)
     }
 
+    // The storage limit pair is gated on `kitty-graphics` like its terminal
+    // counterparts in `kitty::graphics`, which the docs below link to. The
+    // -sys keys exist either way, but without the feature there's no
+    // `Terminal` API to read or change a restored terminal's limit, so the
+    // decoder option would be the odd one out.
+
+    /// Kitty graphics image storage limit applied to each restored screen.
+    ///
+    /// See [`Self::set_kitty_image_storage_limit`]. This value is available
+    /// in every non-failed decoder state.
+    #[cfg(feature = "kitty-graphics")]
+    pub fn kitty_image_storage_limit(&self) -> Result<u64> {
+        self.get(Data::KITTY_IMAGE_STORAGE_LIMIT)
+    }
+
+    /// Kitty graphics image storage limit, in bytes, for each restored
+    /// screen.
+    ///
+    /// The limit of the terminal that wrote the snapshot is not part of the
+    /// snapshot, so the decoder always applies this one. Images are restored
+    /// oldest first, and an image that does not fit evicts older images,
+    /// exactly as a live transmission would. The newest images are kept, and
+    /// the placements of evicted images are dropped with them. Zero disables
+    /// Kitty graphics on the restored terminal.
+    ///
+    /// The default is the storage limit of a new terminal. Change the limit
+    /// of a restored terminal later with
+    /// [`Terminal::set_kitty_image_storage_limit`].
+    #[cfg(feature = "kitty-graphics")]
+    pub fn set_kitty_image_storage_limit(&mut self, limit: u64) -> Result<&mut Self> {
+        self.set(Opt::KITTY_IMAGE_STORAGE_LIMIT, &limit)?;
+        Ok(self)
+    }
+
     /// Number of snapshot source bytes consumed so far.
     ///
     /// At FINISH this identifies the first byte after the snapshot. Trailing
@@ -1147,6 +1181,77 @@ mod tests {
         } else {
             assert_eq!(compressed.primary_compressed_pages, 0);
         }
+    }
+
+    /// The decoder starts with a new terminal's storage limit, not some
+    /// value of its own, and whatever limit it holds is the one the restored
+    /// terminal ends up with.
+    #[test]
+    #[cfg(feature = "kitty-graphics")]
+    fn kitty_image_storage_limit_defaults_to_a_new_terminals_and_is_applied() {
+        // Taken from a fresh terminal rather than the decoder, so a decoder
+        // that made up its own default would fail here.
+        let default = Terminal::new(8, 2)
+            .unwrap()
+            .kitty_image_storage_limit()
+            .unwrap();
+        let bytes = unfinished_snapshot();
+
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        assert_eq!(decoder.kitty_image_storage_limit().unwrap(), default);
+        // Anything but the default, so a setter that did nothing, or a
+        // restore that ignored it, can't pass by accident.
+        let limit = default / 2 + 1;
+        decoder.set_kitty_image_storage_limit(limit).unwrap();
+        assert_eq!(decoder.kitty_image_storage_limit().unwrap(), limit);
+
+        let restored = decoder.decode().unwrap();
+        assert_eq!(restored.kitty_image_storage_limit().unwrap(), limit);
+    }
+
+    /// Images are restored oldest first, so when they don't all fit within
+    /// the decoder's storage limit, the newest evicts the older ones, exactly
+    /// as a live transmission would. Mirrors upstream's "decode with a
+    /// smaller limit keeps the newest images" test in
+    /// `src/terminal/snapshot/kitty.zig`.
+    ///
+    /// This also checks that the limit is in force *while* images are
+    /// restored, not just set on the terminal afterwards: the two orders
+    /// evict different images. Upstream evicts unplaced images before placed
+    /// ones, and oldest first among equals. The decoder restores every image
+    /// before any placement, so while 8 is restored neither image is placed
+    /// yet and the older 7 goes. Lowering the limit after the restore, with
+    /// 7 placed and 8 not, would evict 8 instead.
+    #[test]
+    #[cfg(feature = "kitty-graphics")]
+    fn kitty_image_storage_limit_keeps_the_newest_images() {
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        // Two copies of the 2x1 RGBA image from
+        // `next_reports_kitty_image_pixels`, 8 bytes each, sent oldest (7)
+        // first. 7 is transmitted and placed (`a=T`), 8 only transmitted
+        // (`a=t`), so that a limit applied after the restore would keep 7.
+        terminal.vt_write(b"\x1b_Ga=T,f=32,s=2,v=1,i=7,q=2;AAAA/wAAAP8=\x1b\\");
+        terminal.vt_write(b"\x1b_Ga=t,f=32,s=2,v=1,i=8,q=2;AAAA/wAAAP8=\x1b\\");
+        let mut bytes = Vec::new();
+        terminal.encode_snapshot(&mut bytes).unwrap();
+
+        // The control: at the default limit both images survive, placed or
+        // not, so the absence below is down to the limit and not the
+        // snapshot.
+        let kept = Decoder::new_buf(&bytes).unwrap().decode().unwrap();
+        let graphics = kept.kitty_graphics().unwrap();
+        assert!(graphics.image(7).is_some());
+        assert!(graphics.image(8).is_some());
+
+        // Room for exactly one image: nonzero, so Kitty graphics stay
+        // enabled, and big enough that the newer image fits on its own, so
+        // losing the older one can only be eviction.
+        let mut decoder = Decoder::new_buf(&bytes).unwrap();
+        decoder.set_kitty_image_storage_limit(8).unwrap();
+        let restored = decoder.decode().unwrap();
+        let graphics = restored.kitty_graphics().unwrap();
+        assert!(graphics.image(7).is_none());
+        assert!(graphics.image(8).is_some());
     }
 
     /// The decoder stays reachable through the whole incremental decode, so
