@@ -4365,7 +4365,8 @@ handlers! {
     ///
     /// These are not reported:
     ///
-    /// - Sequences the program cancelled partway through with CAN or SUB.
+    /// - Sequences cut short before their terminator, either cancelled by CAN
+    ///   or SUB or aborted by another 8-bit control byte.
     /// - Sequences libghostty-vt implements, even when their contents are
     ///   malformed.
     /// - Supported protocols that the embedder turned off.
