@@ -915,6 +915,17 @@ mod tests {
         terminal.encode_snapshot(&mut bytes).unwrap();
 
         let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
+        // READY restores image metadata before `next` attaches the pixels.
+        {
+            let graphics = incremental
+                .terminal()
+                .kitty_graphics()
+                .unwrap()
+                .expect("kitty graphics enabled");
+            let image = graphics.image(7).unwrap();
+            assert_eq!(image.data().unwrap(), None);
+            assert_eq!(image.data_len().unwrap(), 8);
+        }
         let mut images = Vec::new();
         let mut pages = 0;
         while let Some(progress) = incremental.next().unwrap() {
@@ -939,43 +950,11 @@ mod tests {
         );
 
         // The reported bytes are the pixels that were attached to the image.
-        let graphics = incremental.terminal().kitty_graphics().unwrap();
-        let image = graphics.image(7).unwrap();
-        assert_eq!(
-            image.data().unwrap(),
-            Some(&[0, 0, 0, 255, 0, 0, 0, 255][..])
-        );
-    }
-
-    /// A Kitty image restored at READY has its pixels pending, and
-    /// [`Image::data`](crate::kitty::graphics::Image::data) reports that as
-    /// `Ok(None)` rather than an error until `next` attaches them.
-    #[test]
-    #[cfg(feature = "kitty-graphics")]
-    fn pending_kitty_image_has_no_data_until_next() {
-        let mut terminal = Terminal::new(80, 24).unwrap();
-        // The same 2x1 RGBA image as in `next_reports_kitty_image_pixels`:
-        // 8 bytes, two opaque black pixels.
-        terminal.vt_write(b"\x1b_Ga=T,f=32,s=2,v=1,i=7,q=2;AAAA/wAAAP8=\x1b\\");
-        let mut bytes = Vec::new();
-        terminal.encode_snapshot(&mut bytes).unwrap();
-
-        let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
-
-        // Scoped so the borrow of the terminal ends before `next`, which
-        // needs it mutably.
-        {
-            let graphics = incremental.terminal().kitty_graphics().unwrap();
-            let image = graphics.image(7).unwrap();
-            let data = image.data();
-            assert!(matches!(data, Ok(None)), "{data:?}");
-            // The expected length is known even while the pixels are pending.
-            assert_eq!(image.data_len().unwrap(), 8);
-        }
-
-        while incremental.next().unwrap().is_some() {}
-
-        let graphics = incremental.terminal().kitty_graphics().unwrap();
+        let graphics = incremental
+            .terminal()
+            .kitty_graphics()
+            .unwrap()
+            .expect("kitty graphics enabled");
         let image = graphics.image(7).unwrap();
         assert_eq!(
             image.data().unwrap(),
@@ -1194,7 +1173,8 @@ mod tests {
         let default = Terminal::new(8, 2)
             .unwrap()
             .kitty_image_storage_limit()
-            .unwrap();
+            .unwrap()
+            .expect("kitty graphics enabled");
         let bytes = unfinished_snapshot();
 
         let mut decoder = Decoder::new_buf(&bytes).unwrap();
@@ -1206,7 +1186,7 @@ mod tests {
         assert_eq!(decoder.kitty_image_storage_limit().unwrap(), limit);
 
         let restored = decoder.decode().unwrap();
-        assert_eq!(restored.kitty_image_storage_limit().unwrap(), limit);
+        assert_eq!(restored.kitty_image_storage_limit().unwrap(), Some(limit));
     }
 
     /// Images are restored oldest first, so when they don't all fit within
@@ -1239,7 +1219,10 @@ mod tests {
         // not, so the absence below is down to the limit and not the
         // snapshot.
         let kept = Decoder::new_buf(&bytes).unwrap().decode().unwrap();
-        let graphics = kept.kitty_graphics().unwrap();
+        let graphics = kept
+            .kitty_graphics()
+            .unwrap()
+            .expect("kitty graphics enabled");
         assert!(graphics.image(7).is_some());
         assert!(graphics.image(8).is_some());
 
@@ -1249,7 +1232,10 @@ mod tests {
         let mut decoder = Decoder::new_buf(&bytes).unwrap();
         decoder.set_kitty_image_storage_limit(8).unwrap();
         let restored = decoder.decode().unwrap();
-        let graphics = restored.kitty_graphics().unwrap();
+        let graphics = restored
+            .kitty_graphics()
+            .unwrap()
+            .expect("kitty graphics enabled");
         assert!(graphics.image(7).is_none());
         assert!(graphics.image(8).is_some());
     }

@@ -155,7 +155,11 @@
 //!     terminal: &Terminal<'_, '_>,
 //!     image_id: u32,
 //! ) -> Result<(), Box<dyn std::error::Error>> {
-//!     let graphics = terminal.kitty_graphics()?;
+//!     // Upstream can be built without Kitty graphics (it always is for
+//!     // wasm). Then there is no image storage, and so nothing to print.
+//!     let Some(graphics) = terminal.kitty_graphics()? else {
+//!         return Ok(());
+//!     };
 //!     let image = graphics.image(image_id).ok_or("no such image")?;
 //!     let pixels = image.data()?.ok_or("pixels still loading")?;
 //!     let generation = image.generation()?;
@@ -168,7 +172,7 @@
 //!
 //! # /// The first pixel and the generation of image 2, for the asserts.
 //! # fn image(terminal: &Terminal<'_, '_>) -> ([u8; 3], u64) {
-//! #     let graphics = terminal.kitty_graphics().unwrap();
+//! #     let graphics = terminal.kitty_graphics().unwrap().unwrap();
 //! #     let image = graphics.image(2).unwrap();
 //! #     let pixels = image.data().unwrap().unwrap();
 //! #     ([pixels[0], pixels[1], pixels[2]], image.generation().unwrap())
@@ -404,7 +408,14 @@
 //!     // sends, places or deletes an image, but not when images only move on
 //!     // screen. That is why the frames below use the render state's
 //!     // placements generation to know when to read the list again.
-//!     let storage_generation = terminal.kitty_graphics()?.generation()?;
+//!     //
+//!     // Upstream can be built without Kitty graphics (it always is for
+//!     // wasm), and then there is no storage at all, so stop here.
+//!     let Some(storage) = terminal.kitty_graphics()? else {
+//!         println!("Kitty graphics are disabled at build time");
+//!         return Ok(());
+//!     };
+//!     let storage_generation = storage.generation()?;
 //!     println!("Storage generation: {storage_generation}");
 //! #   assert_ne!(storage_generation, 0);
 //!
@@ -453,8 +464,9 @@
 //!         println!("Frame {frame}: images changed, reading the list:");
 //!         let mut placements = images.update(&snapshot)?;
 //!
-//!         // The storage is only needed to read pixels.
-//!         let graphics = terminal.kitty_graphics()?;
+//!         // The storage is only needed to read pixels. It existed before the
+//!         // loop, and whether it does is fixed at build time.
+//!         let graphics = terminal.kitty_graphics()?.ok_or("no Kitty graphics")?;
 //!
 //!         let mut count = 0;
 //!         while let Some(placement) = placements.next() {
@@ -642,7 +654,11 @@ pub struct Image<'t> {
 /// // though it has no position of its own.
 /// terminal.vt_write(b"\x1b_Ga=T,U=1,f=32,i=3,s=1,v=1,c=2,r=1,q=2;AP8A/w==\x1b\\");
 ///
-/// let graphics = terminal.kitty_graphics()?;
+/// // Upstream can be built without Kitty graphics (it always is for wasm).
+/// // Then there is no image storage, and so nothing to iterate.
+/// let Some(graphics) = terminal.kitty_graphics()? else {
+///     return Ok(());
+/// };
 /// let mut iterator = PlacementIterator::new()?;
 /// let mut placements = iterator.update(&graphics)?;
 ///
@@ -702,12 +718,18 @@ impl Terminal<'_, '_> {
     /// Returns a borrowed reference to the image storage.
     /// The pointer is valid until the next mutating terminal call (e.g.
     /// [`Terminal::vt_write`] or [`Terminal::reset`]).
-    pub fn kitty_graphics(&self) -> Result<Graphics<'_>> {
-        let inner = self.get::<ffi::KittyGraphics>(ffi::TerminalData::KITTY_GRAPHICS)?;
-        Ok(Graphics {
+    ///
+    /// Returns `Ok(None)` when Kitty graphics are disabled at build time.
+    pub fn kitty_graphics(&self) -> Result<Option<Graphics<'_>>> {
+        let Some(inner) =
+            self.get_optional::<ffi::KittyGraphics>(ffi::TerminalData::KITTY_GRAPHICS)?
+        else {
+            return Ok(None);
+        };
+        Ok(Some(Graphics {
             inner: Ref::new(inner)?,
             terminal: self.id,
-        })
+        }))
     }
 
     /// Advance playing animations and get the time of the next frame.
@@ -736,7 +758,7 @@ impl Terminal<'_, '_> {
     /// ```compile_fail,E0502
     /// # use libghostty_vt::Terminal;
     /// let mut terminal = Terminal::new(80, 24).unwrap();
-    /// let graphics = terminal.kitty_graphics().unwrap();
+    /// let graphics = terminal.kitty_graphics().unwrap().unwrap();
     /// let image = graphics.image(1).unwrap();
     /// let pixels = image.data().unwrap().unwrap();
     /// // The tick invalidates `pixels`, so it can't run while they're held.
@@ -758,10 +780,10 @@ impl Terminal<'_, '_> {
     // them can exist at once. Taking `&mut self` here is what lets the borrow
     // checker guarantee none of them survive the tick that invalidates them.
     pub fn kitty_graphics_animation_tick(&mut self, now_ms: u64) -> Result<Option<u64>> {
-        // Not `Terminal::kitty_graphics`: when Kitty graphics are disabled in
-        // the Zig build (which our Cargo features don't control), upstream
-        // reports the handle as `NO_VALUE`, and that getter would turn it into
-        // `Err(Error::InvalidValue)`. Here it just means nothing is playing.
+        // Not `Terminal::kitty_graphics`: we only need the raw handle, not a
+        // `Graphics` wrapper. When Kitty graphics are disabled in the Zig
+        // build (which our Cargo features don't control), upstream reports
+        // the handle as `NO_VALUE`. Here that just means nothing is playing.
         let Some(graphics) =
             self.get_optional::<ffi::KittyGraphics>(ffi::TerminalData::KITTY_GRAPHICS)?
         else {
@@ -780,21 +802,33 @@ impl Terminal<'_, '_> {
     /// The Kitty image storage limit in bytes for the active screen.
     ///
     /// A value of zero means the Kitty graphics protocol is disabled.
-    pub fn kitty_image_storage_limit(&self) -> Result<u64> {
-        self.get(ffi::TerminalData::KITTY_IMAGE_STORAGE_LIMIT)
+    /// Returns `Ok(None)` when Kitty graphics are disabled at build time.
+    pub fn kitty_image_storage_limit(&self) -> Result<Option<u64>> {
+        self.get_optional(ffi::TerminalData::KITTY_IMAGE_STORAGE_LIMIT)
     }
     /// Whether the file medium is enabled for Kitty image loading on the
     /// active screen.
-    pub fn is_kitty_image_from_file_allowed(&self) -> Result<bool> {
-        self.get(ffi::TerminalData::KITTY_IMAGE_MEDIUM_FILE)
+    ///
+    /// Returns `Ok(None)` when Kitty graphics are disabled at build time.
+    pub fn is_kitty_image_from_file_allowed(&self) -> Result<Option<bool>> {
+        self.get_optional(ffi::TerminalData::KITTY_IMAGE_MEDIUM_FILE)
     }
     /// The directory allowed for Kitty image loading via the temporary file
     /// medium on the active screen, or `None` when the medium is disabled.
     ///
+    /// Returns `Ok(None)` when Kitty graphics are disabled at build time.
+    ///
     /// Returns a borrowed path, valid until the next mutating terminal call
     /// (e.g. [`Terminal::vt_write`] or [`Terminal::reset`]).
     pub fn kitty_image_temp_file_dir(&self) -> Result<Option<&Path>> {
-        let str = self.get::<ffi::String>(ffi::TerminalData::KITTY_IMAGE_MEDIUM_TEMP_FILE)?;
+        // Upstream reports a disabled medium as an empty string, and a build
+        // without Kitty graphics as `NO_VALUE`. Neither has a directory, so
+        // both are `None`.
+        let Some(str) =
+            self.get_optional::<ffi::String>(ffi::TerminalData::KITTY_IMAGE_MEDIUM_TEMP_FILE)?
+        else {
+            return Ok(None);
+        };
         if str.len == 0 {
             return Ok(None);
         }
@@ -820,8 +854,10 @@ impl Terminal<'_, '_> {
     }
     /// Whether the shared memory medium is enabled for Kitty image loading
     /// on the active screen.
-    pub fn is_kitty_image_from_shared_mem_allowed(&self) -> Result<bool> {
-        self.get(ffi::TerminalData::KITTY_IMAGE_MEDIUM_SHARED_MEM)
+    ///
+    /// Returns `Ok(None)` when Kitty graphics are disabled at build time.
+    pub fn is_kitty_image_from_shared_mem_allowed(&self) -> Result<Option<bool>> {
+        self.get_optional(ffi::TerminalData::KITTY_IMAGE_MEDIUM_SHARED_MEM)
     }
     /// Set the Kitty image storage limit in bytes.
     ///
@@ -1098,7 +1134,7 @@ impl<'alloc> PlacementIterator<'alloc> {
     /// # use libghostty_vt::{Terminal, kitty::graphics::PlacementIterator};
     /// let terminal = Terminal::new(80, 24).unwrap();
     /// let mut iterator = PlacementIterator::new().unwrap();
-    /// let graphics = terminal.kitty_graphics().unwrap();
+    /// let graphics = terminal.kitty_graphics().unwrap().unwrap();
     /// let mut placements = iterator.update(&graphics).unwrap();
     /// drop(terminal);
     /// placements.next();
@@ -1802,7 +1838,10 @@ mod placement_tests {
         // returns NO_VALUE for its rect.
         terminal.vt_write(b"\x1b_Ga=T,t=d,f=24,i=2,p=1,s=1,v=2,U=1,c=2,r=1,q=2;////////\x1b\\");
 
-        let graphics = terminal.kitty_graphics().unwrap();
+        let graphics = terminal
+            .kitty_graphics()
+            .unwrap()
+            .expect("kitty graphics enabled");
         let mut iterator = PlacementIterator::new().unwrap();
         let mut placements = iterator.update(&graphics).unwrap();
 
@@ -1841,7 +1880,10 @@ mod placement_tests {
         let mut wide = Terminal::new(80, 24).unwrap();
         wide.resize(80, 24, 10, 20).unwrap();
 
-        let graphics = narrow.kitty_graphics().unwrap();
+        let graphics = narrow
+            .kitty_graphics()
+            .unwrap()
+            .expect("kitty graphics enabled");
         let mut iterator = PlacementIterator::new().unwrap();
         let mut placements = iterator.update(&graphics).unwrap();
         let placement = placements.next().unwrap();
@@ -1870,7 +1912,7 @@ mod placement_tests {
         let mut narrow = narrow();
         narrow
             .on_bell(|a| {
-                let graphics = a.kitty_graphics().unwrap();
+                let graphics = a.kitty_graphics().unwrap().expect("kitty graphics enabled");
                 let mut iterator = PlacementIterator::new().unwrap();
                 let mut placements = iterator.update(&graphics).unwrap();
                 let placement = placements.next().unwrap();
@@ -1930,7 +1972,10 @@ mod animation_tests {
 
     /// The first pixel and the generation of image 1.
     fn image(terminal: &Terminal<'_, '_>) -> ([u8; 4], u64) {
-        let graphics = terminal.kitty_graphics().unwrap();
+        let graphics = terminal
+            .kitty_graphics()
+            .unwrap()
+            .expect("kitty graphics enabled");
         let image = graphics.image(1).unwrap();
         let pixels = image.data().unwrap().unwrap();
         (pixels[..4].try_into().unwrap(), image.generation().unwrap())
