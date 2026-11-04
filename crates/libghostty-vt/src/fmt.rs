@@ -7,7 +7,7 @@ use std::marker::PhantomData;
 
 use crate::{
     alloc::{Allocator, Bytes, Object},
-    error::{Error, Result, from_result},
+    error::{Error, Result, from_result, from_result_with_len},
     ffi,
     selection::Selection,
     terminal::Terminal,
@@ -287,8 +287,9 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
                 std::ptr::from_mut(&mut len),
             )
         };
-        from_result(result)?;
-        Ok(len)
+        // On OUT_OF_SPACE upstream stores the required size in `len`, which
+        // the docs above promise callers; plain `from_result` would drop it.
+        from_result_with_len(result, len)
     }
 
     /// Query the required buffer size for the formatted output.
@@ -394,6 +395,25 @@ mod tests {
             format_write(&mut formatter, &mut actual).unwrap();
             assert_eq!(actual, expected, "{format:?}");
         }
+    }
+
+    /// A too-small buffer reports the size the output needs, so the caller
+    /// can retry with exactly that much, as the docs promise.
+    #[test]
+    fn format_buf_reports_the_required_size() {
+        let mut terminal = Terminal::new(10, 3).unwrap();
+        terminal.vt_write(b"one\r\ntwo");
+        let options = FormatterOptions::new().with_format(Format::Plain);
+        let mut formatter = Formatter::new(&terminal, options).unwrap();
+
+        // "one\ntwo" is 7 bytes.
+        let mut buf = [0; 3];
+        let err = formatter.format_buf(&mut buf).unwrap_err();
+        assert!(matches!(err, Error::OutOfSpace { required: 7 }), "{err:?}");
+
+        let mut buf = [0; 7];
+        let len = formatter.format_buf(&mut buf).unwrap();
+        assert_eq!(&buf[..len], b"one\ntwo");
     }
 
     /// Mirrors upstream's `PageList VT without trim keeps trailing blank
