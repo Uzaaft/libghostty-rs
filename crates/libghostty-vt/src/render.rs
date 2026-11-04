@@ -2440,7 +2440,14 @@ mod tests {
         // Only the check needs the `kitty` wrappers; libghostty stores the
         // image either way.
         #[cfg(feature = "kitty-graphics")]
-        assert!(terminal.kitty_graphics().unwrap().image(1).is_some());
+        assert!(
+            terminal
+                .kitty_graphics()
+                .unwrap()
+                .expect("kitty graphics enabled")
+                .image(1)
+                .is_some()
+        );
         let snapshot = state.update(&terminal).unwrap();
         let generation = snapshot.image_placements_generation().unwrap();
         {
@@ -2519,7 +2526,12 @@ mod tests {
         // only the `kitty` wrappers can read.
         #[cfg(feature = "kitty-graphics")]
         {
-            let image = terminal.kitty_graphics().unwrap().image(7).unwrap();
+            let image = terminal
+                .kitty_graphics()
+                .unwrap()
+                .expect("kitty graphics enabled")
+                .image(7)
+                .unwrap();
             assert_eq!(found[0].1, image.generation().unwrap());
         }
 
