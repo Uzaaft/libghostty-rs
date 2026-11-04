@@ -66,13 +66,14 @@ impl<'alloc> Encoder<'alloc> {
     /// keys typically don't generate escape sequences. Check the returned
     /// `Vec` to determine if any data was written.
     pub fn encode_to_vec(&mut self, event: &Event, vec: &mut Vec<u8>) -> Result<()> {
-        let remaining = vec.capacity() - vec.len();
-
         let written = match self.encode_to_uninit_buf(event, vec.spare_capacity_mut()) {
             Ok(v) => Ok(v),
             Err(Error::OutOfSpace { required }) => {
-                // Retry with more capacity
-                vec.reserve(required - remaining);
+                // `required` is the whole encoding, and `reserve` counts from
+                // `len`, not from the end of the current capacity, so ask for
+                // all of it. Subtracting the spare capacity undershoots
+                // whenever the vector isn't full, and the retry fails again.
+                vec.reserve(required);
                 self.encode_to_uninit_buf(event, vec.spare_capacity_mut())
             }
             Err(e) => Err(e),
@@ -655,5 +656,32 @@ bitflags::bitflags! {
         const REPORT_ASSOCIATED = ffi::KITTY_KEY_REPORT_ASSOCIATED;
         /// All Kitty keyboard protocol flags enabled
         const ALL = ffi::KITTY_KEY_ALL;
+    }
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::*;
+
+    /// `encode_to_vec` appends to a vector that already holds bytes and has
+    /// some spare capacity, just not enough for the encoding. The retry must
+    /// grow it by the whole encoding, not by what the spare capacity lacks.
+    #[test]
+    fn encode_to_vec_grows_a_partly_filled_vec() {
+        let mut encoder = Encoder::new().unwrap();
+        let mut event = Event::new().unwrap();
+        // Ctrl+Up in the legacy encoding is CSI 1;5A: 6 bytes.
+        event
+            .set_action(Action::Press)
+            .set_key(Key::ArrowUp)
+            .set_mods(Mods::CTRL);
+
+        let mut vec = Vec::with_capacity(8);
+        vec.extend_from_slice(b"abcd");
+        // The premise: not full, but too little room for the 6 bytes.
+        assert!((1..6).contains(&(vec.capacity() - vec.len())));
+
+        encoder.encode_to_vec(&event, &mut vec).unwrap();
+        assert_eq!(vec, b"abcd\x1b[1;5A");
     }
 }

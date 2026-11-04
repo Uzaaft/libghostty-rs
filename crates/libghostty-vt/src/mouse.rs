@@ -72,13 +72,14 @@ impl<'alloc> Encoder<'alloc> {
     /// keys typically don't generate escape sequences. Check the returned
     /// `usize` to determine if any data was written.
     pub fn encode_to_vec(&mut self, event: &Event, vec: &mut Vec<u8>) -> Result<()> {
-        let remaining = vec.capacity() - vec.len();
-
         let written = match self.encode_to_uninit_buf(event, vec.spare_capacity_mut()) {
             Ok(v) => Ok(v),
             Err(Error::OutOfSpace { required }) => {
-                // Retry with more capacity
-                vec.reserve(required - remaining);
+                // `required` is the whole encoding, and `reserve` counts from
+                // `len`, not from the end of the current capacity, so ask for
+                // all of it. Subtracting the spare capacity undershoots
+                // whenever the vector isn't full, and the retry fails again.
+                vec.reserve(required);
                 self.encode_to_uninit_buf(event, vec.spare_capacity_mut())
             }
             Err(e) => Err(e),
@@ -434,4 +435,44 @@ pub enum Shape {
     NwseResize = ffi::MouseShape::NWSE_RESIZE,
     ZoomIn = ffi::MouseShape::ZOOM_IN,
     ZoomOut = ffi::MouseShape::ZOOM_OUT,
+}
+
+#[cfg(all(test, not(miri)))]
+mod tests {
+    use super::*;
+
+    /// `encode_to_vec` appends to a vector that already holds bytes and has
+    /// some spare capacity, just not enough for the encoding. The retry must
+    /// grow it by the whole encoding, not by what the spare capacity lacks.
+    #[test]
+    fn encode_to_vec_grows_a_partly_filled_vec() {
+        let mut encoder = Encoder::new().unwrap();
+        encoder
+            .set_tracking_mode(TrackingMode::Normal)
+            .set_format(Format::Sgr)
+            .set_size(EncoderSize {
+                screen_width: 800,
+                screen_height: 600,
+                cell_width: 10,
+                cell_height: 20,
+                padding_top: 0,
+                padding_bottom: 0,
+                padding_left: 0,
+                padding_right: 0,
+            });
+        let mut event = Event::new().unwrap();
+        // A left press in the top-left cell is CSI < 0;1;1M in SGR: 9 bytes.
+        event
+            .set_action(Action::Press)
+            .set_button(Some(Button::Left))
+            .set_position(Position { x: 5.0, y: 5.0 });
+
+        let mut vec = Vec::with_capacity(12);
+        vec.extend_from_slice(b"abcd");
+        // The premise: not full, but too little room for the 9 bytes.
+        assert!((1..9).contains(&(vec.capacity() - vec.len())));
+
+        encoder.encode_to_vec(&event, &mut vec).unwrap();
+        assert_eq!(vec, b"abcd\x1b[<0;1;1M");
+    }
 }
