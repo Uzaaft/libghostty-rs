@@ -114,7 +114,13 @@ impl<'alloc> Parser<'alloc> {
         if has_next {
             // This shouldn't really *ever* fail, so the fact it failed
             // suggests we should stop anyways.
-            Ok(Some(Attribute::from_raw(raw_attr)?))
+            //
+            // SAFETY: `raw_attr` was just filled in by libghostty. Any
+            // slices in it point into the parser's parameter list, which
+            // stays put until the next mutating call. The returned attribute
+            // borrows `self` mutably, so no such call can happen while it
+            // lives.
+            Ok(Some(unsafe { Attribute::from_raw(raw_attr) }?))
         } else {
             Ok(None)
         }
@@ -176,10 +182,17 @@ pub enum Attribute<'p> {
 
 impl Attribute<'_> {
     /// This should never return None, but just to be safe.
-    fn from_raw(value: ffi::SgrAttribute) -> Result<Self> {
+    ///
+    /// # Safety
+    ///
+    /// `value` must come from libghostty, and the chosen lifetime must not
+    /// outlive the parser state it borrows from (see [`Unknown::from_raw`]).
+    unsafe fn from_raw(value: ffi::SgrAttribute) -> Result<Self> {
         Ok(match value.tag {
             0 => Self::Unset,
-            1 => Self::Unknown(unsafe { value.value.unknown }.into()),
+            // SAFETY: Tag 1 means `unknown` is the active union member, and
+            // its slices are valid for as long as our caller says.
+            1 => Self::Unknown(unsafe { Unknown::from_raw(value.value.unknown) }),
             2 => Self::Bold,
             3 => Self::ResetBold,
             4 => Self::Italic,
@@ -226,14 +239,23 @@ pub struct Unknown<'p> {
     pub partial: &'p [u16],
 }
 
-impl From<ffi::SgrUnknown> for Unknown<'_> {
-    fn from(value: ffi::SgrUnknown) -> Self {
-        // SAFETY: We trust libghostty to give us two valid slices
-        // of u16s that last at least as long as the current iteration,
-        // which is guaranteed by Rust's mutation XOR sharability property
-        // (e.g. one cannot reset the parser when this object still
-        // borrows the parser mutably).
+impl Unknown<'_> {
+    /// Borrow the parameter lists of an unknown attribute.
+    ///
+    /// Not a `From` impl on purpose: `ffi::SgrUnknown` is a plain public
+    /// struct (its `Default` even has NULL pointers), and the output lifetime
+    /// is picked by the caller, so a safe conversion would let safe code
+    /// conjure slices out of arbitrary pointers. Only libghostty's own output
+    /// is valid input.
+    ///
+    /// # Safety
+    ///
+    /// Both pointer/length pairs must describe valid, aligned `u16` slices
+    /// that stay alive and unmodified for the chosen lifetime.
+    unsafe fn from_raw(value: ffi::SgrUnknown) -> Self {
+        // SAFETY: Upheld by caller.
         let full = unsafe { std::slice::from_raw_parts(value.full_ptr, value.full_len) };
+        // SAFETY: Ditto.
         let partial = unsafe { std::slice::from_raw_parts(value.partial_ptr, value.partial_len) };
         Self { full, partial }
     }
