@@ -6,6 +6,7 @@
 use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
+    alloc::Object,
     error::{Error, Result, from_optional_result_uninit, from_result, from_result_with_len},
     ffi,
     style::{self, PaletteIndex, RgbColor, Style},
@@ -173,14 +174,14 @@ impl GridRef<'_> {
 /// sparingly for long-lived anchors such as selections, search state, marks,
 /// or application-side bookmarks.
 #[derive(Debug)]
-pub struct TrackedGridRef {
-    inner: NonNull<ffi::TrackedGridRefImpl>,
+pub struct TrackedGridRef<'alloc> {
+    inner: Object<'alloc, ffi::TrackedGridRefImpl>,
     terminal: NonNull<ffi::TerminalImpl>,
 }
 
-impl TrackedGridRef {
+impl<'alloc> TrackedGridRef<'alloc> {
     pub(crate) fn new(
-        inner: NonNull<ffi::TrackedGridRefImpl>,
+        inner: Object<'alloc, ffi::TrackedGridRefImpl>,
         terminal: NonNull<ffi::TerminalImpl>,
     ) -> Self {
         Self { inner, terminal }
@@ -192,7 +193,7 @@ impl TrackedGridRef {
     /// this returns false.
     #[must_use]
     pub fn has_value(&self) -> bool {
-        unsafe { ffi::ghostty_tracked_grid_ref_has_value(self.inner.as_ptr()) }
+        unsafe { ffi::ghostty_tracked_grid_ref_has_value(self.inner.as_raw()) }
     }
 
     /// Snapshot a tracked grid reference into a regular [`GridRef`].
@@ -213,7 +214,7 @@ impl TrackedGridRef {
         }
         let mut grid_ref = MaybeUninit::new(ffi::sized!(ffi::GridRef));
         let result = unsafe {
-            ffi::ghostty_tracked_grid_ref_snapshot(self.inner.as_ptr(), grid_ref.as_mut_ptr())
+            ffi::ghostty_tracked_grid_ref_snapshot(self.inner.as_raw(), grid_ref.as_mut_ptr())
         };
 
         from_optional_result_uninit(result, grid_ref).map(|value| {
@@ -246,7 +247,7 @@ impl TrackedGridRef {
         let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
         let result = unsafe {
             ffi::ghostty_tracked_grid_ref_point(
-                self.inner.as_ptr(),
+                self.inner.as_raw(),
                 space.into_raw(),
                 point.as_mut_ptr(),
             )
@@ -272,7 +273,7 @@ impl TrackedGridRef {
         // on the Rust side.
         let result = unsafe {
             ffi::ghostty_tracked_grid_ref_set(
-                self.inner.as_ptr(),
+                self.inner.as_raw(),
                 terminal.inner.as_raw(),
                 point.into(),
             )
@@ -282,9 +283,9 @@ impl TrackedGridRef {
     }
 }
 
-impl Drop for TrackedGridRef {
+impl Drop for TrackedGridRef<'_> {
     fn drop(&mut self) {
-        unsafe { ffi::ghostty_tracked_grid_ref_free(self.inner.as_ptr()) }
+        unsafe { ffi::ghostty_tracked_grid_ref_free(self.inner.as_raw()) }
     }
 }
 
