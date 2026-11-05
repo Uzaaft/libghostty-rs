@@ -17,7 +17,7 @@ use crate::{
     ffi,
     screen::GridRef,
     selection::Selection,
-    terminal::{PointCoordinate, Terminal},
+    terminal::{Point, PointCoordinate, Terminal},
 };
 
 #[doc(inline)]
@@ -29,6 +29,12 @@ pub use ffi::SelectionGestureGeometry as Geometry;
 /// Calls that use a gesture are not concurrency-safe and must be serialized
 /// with terminal mutations.
 ///
+/// A gesture is bound to the terminal passed to its constructor. Every
+/// terminal-dependent operation returns [`Error::InvalidValue`] for another
+/// terminal, including one created after the original terminal was dropped.
+/// Moving the original terminal is allowed, and it can be mutated between
+/// gesture operations. To use another terminal, create another gesture.
+///
 /// # Memory management
 ///
 /// When dropped, this type will temporarily **leak** a small amount of memory
@@ -39,30 +45,44 @@ pub use ffi::SelectionGestureGeometry as Geometry;
 #[derive(Debug)]
 pub struct Gesture<'alloc> {
     inner: Object<'alloc, ffi::SelectionGestureImpl>,
+    // Screen generations are only unique within one terminal. Upstream's
+    // generation checks cannot distinguish two terminals with matching screens.
+    terminal_id: u64,
 }
 impl<'alloc> Gesture<'alloc> {
-    /// Create a new selection gesture instance.
-    pub fn new() -> Result<Self> {
+    /// Create a new selection gesture instance bound to a terminal.
+    pub fn new(terminal: &Terminal<'_, '_>) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null()) }
+        unsafe { Self::new_inner(std::ptr::null(), terminal) }
     }
 
     /// Create a new selection gesture instance with a custom allocator.
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_with_alloc<'ctx: 'alloc>(
+        alloc: &'alloc Allocator<'ctx>,
+        terminal: &Terminal<'_, '_>,
+    ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
-        unsafe { Self::new_inner(alloc.to_raw()) }
+        unsafe { Self::new_inner(alloc.to_raw(), terminal) }
     }
 
-    unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+    unsafe fn new_inner(alloc: *const ffi::Allocator, terminal: &Terminal<'_, '_>) -> Result<Self> {
         let mut raw: ffi::SelectionGesture = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_selection_gesture_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self {
             inner: Object::new(raw)?,
+            terminal_id: terminal.id,
         })
+    }
+
+    fn check_terminal(&self, terminal: &Terminal<'_, '_>) -> Result<()> {
+        if self.terminal_id != terminal.id {
+            return Err(Error::InvalidValue);
+        }
+        Ok(())
     }
 
     fn get<T>(
@@ -70,6 +90,7 @@ impl<'alloc> Gesture<'alloc> {
         terminal: &Terminal<'_, '_>,
         tag: ffi::SelectionGestureData::Type,
     ) -> Result<T> {
+        self.check_terminal(terminal)?;
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_selection_gesture_get(
@@ -87,10 +108,13 @@ impl<'alloc> Gesture<'alloc> {
     ///
     /// This cancels the active click sequence and releases any tracked terminal
     /// references owned by the gesture without dropping the gesture object.
-    pub fn reset(&mut self, terminal: &Terminal<'_, '_>) {
+    /// The gesture remains bound to the same terminal after resetting.
+    pub fn reset(&mut self, terminal: &Terminal<'_, '_>) -> Result<&mut Self> {
+        self.check_terminal(terminal)?;
         unsafe {
             ffi::ghostty_selection_gesture_reset(self.inner.as_raw(), terminal.inner.as_raw());
         }
+        Ok(self)
     }
 
     /// Get the current click count. 0 means inactive.
@@ -121,6 +145,7 @@ impl<'alloc> Gesture<'alloc> {
     ///
     /// Returns `None` if there is no valid active anchor.
     pub fn anchor<'t>(&self, terminal: &'t Terminal<'_, '_>) -> Result<Option<GridRef<'t>>> {
+        self.check_terminal(terminal)?;
         let mut grid_ref = ffi::sized!(ffi::GridRef);
         let result = unsafe {
             ffi::ghostty_selection_gesture_get(
@@ -131,8 +156,8 @@ impl<'alloc> Gesture<'alloc> {
             )
         };
         let grid_ref = from_optional_result(result, grid_ref)?;
-        // SAFETY: We trust libghostty to return a GridRef
-        // with the correct lifetime requirements.
+        // SAFETY: The identity check binds the snapshot to the terminal that
+        // owns the tracked anchor, and upstream validates the screen generation.
         Ok(grid_ref.map(|v| unsafe { GridRef::from_raw(v) }))
     }
 }
@@ -196,6 +221,7 @@ impl Event<'_> {
         gesture: &mut Gesture<'_>,
         terminal: &'t Terminal<'_, '_>,
     ) -> Result<Option<Selection<'t>>> {
+        gesture.check_terminal(terminal)?;
         let mut selection = ffi::sized!(ffi::Selection);
 
         let result = unsafe {
@@ -208,8 +234,8 @@ impl Event<'_> {
         };
         let selection = from_optional_result(result, selection)?;
 
-        // SAFETY: We trust that libghostty will give us a
-        // selection object with correct lifetimes.
+        // SAFETY: The gesture belongs to this terminal, and event grid refs
+        // are resolved from this terminal immediately before the call.
         Ok(selection.map(|v| unsafe { Selection::from_raw(v) }))
     }
 }
@@ -322,13 +348,17 @@ impl<'alloc> PressEvent<'alloc> {
     }
 
     /// Apply a selection gesture press event and return the resulting selection snapshot.
+    ///
+    /// Resolves `point` in this terminal's active screen rather than accepting
+    /// a grid reference that could belong to another terminal or screen.
     #[inline]
     pub fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
         terminal: &'t Terminal<'_, '_>,
-        grid_ref: GridRef<'t>,
+        point: Point,
     ) -> Result<Option<Selection<'t>>> {
+        let grid_ref = terminal.grid_ref(point)?;
         self.base
             .set(ffi::SelectionGestureEventOption::REF, &grid_ref.inner)?;
         self.base.apply(gesture, terminal)
@@ -363,14 +393,17 @@ impl<'alloc> ReleaseEvent<'alloc> {
     }
 
     /// Apply a selection gesture release event and return the resulting selection snapshot.
+    ///
+    /// Pass `None` if the pointer does not map to a cell. A point outside the
+    /// requested coordinate space returns [`Error::InvalidValue`].
     #[inline]
-    pub fn apply<'t>(
+    pub fn apply(
         &mut self,
         gesture: &mut Gesture<'_>,
-        terminal: &'t Terminal<'_, '_>,
-        grid_ref: Option<GridRef<'t>>,
+        terminal: &Terminal<'_, '_>,
+        point: Option<Point>,
     ) -> Result<()> {
-        match grid_ref {
+        match point.map(|point| terminal.grid_ref(point)).transpose()? {
             Some(g) => self
                 .base
                 .set(ffi::SelectionGestureEventOption::REF, &g.inner)?,
@@ -447,14 +480,17 @@ impl<'alloc> DragEvent<'alloc> {
     }
 
     /// Apply a selection gesture drag event and return the resulting selection snapshot.
+    ///
+    /// Resolves `point` in this terminal's active screen.
     #[inline]
     pub fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
         terminal: &'t Terminal<'_, '_>,
-        grid_ref: GridRef<'t>,
+        point: Point,
         geometry: Geometry,
     ) -> Result<Option<Selection<'t>>> {
+        let grid_ref = terminal.grid_ref(point)?;
         self.base
             .set(ffi::SelectionGestureEventOption::REF, &grid_ref.inner)?;
         self.base
@@ -529,11 +565,27 @@ impl<'alloc> AutoscrollTickEvent<'alloc> {
     }
 
     /// Apply a selection gesture autoscroll tick event and return the resulting selection snapshot.
+    ///
+    /// This scrolls the viewport, so it requires exclusive terminal access.
+    /// A shared terminal reference is insufficient:
+    ///
+    /// ```compile_fail,E0308
+    /// use libghostty_vt::{Terminal, terminal::PointCoordinate,
+    ///     selection::gesture::{AutoscrollTickEvent, Geometry, Gesture}};
+    /// let terminal = Terminal::new(8, 2).unwrap();
+    /// let mut gesture = Gesture::new(&terminal).unwrap();
+    /// let cell = PointCoordinate { x: 0, y: 0 };
+    /// let geometry = Geometry {
+    ///     columns: 8, cell_width: 10, padding_left: 0, screen_height: 100,
+    /// };
+    /// AutoscrollTickEvent::new().unwrap()
+    ///     .apply(&mut gesture, &terminal, cell, geometry).unwrap();
+    /// ```
     #[inline]
     pub fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t mut Terminal<'_, '_>,
         viewport: PointCoordinate,
         geometry: Geometry,
     ) -> Result<Option<Selection<'t>>> {

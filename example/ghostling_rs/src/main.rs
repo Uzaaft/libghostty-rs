@@ -207,7 +207,7 @@ async fn main() -> Result<()> {
     // sequences, respecting terminal modes like application cursor keys,
     // the Kitty keyboard protocol, SGR mouse reporting and tracking modes,
     // etc.
-    let mut input = Input::new()?;
+    let mut input = Input::new(&terminal)?;
 
     tracing::info!(
         "ghostling-rs | simd: {}, optimize: {:?}",
@@ -822,14 +822,14 @@ struct Input<'alloc> {
     selection: SelectionState<'alloc>,
 }
 impl<'alloc> Input<'alloc> {
-    fn new() -> Result<Self> {
+    fn new(terminal: &Terminal<'_, '_>) -> Result<Self> {
         Ok(Self {
             key_encoder: key::Encoder::new()?,
             key_event: key::Event::new()?,
             mouse_encoder: mouse::Encoder::new()?,
             mouse_event: mouse::Event::new()?,
             response: Vec::with_capacity(64),
-            selection: SelectionState::new()?,
+            selection: SelectionState::new(terminal)?,
         })
     }
 
@@ -1235,12 +1235,12 @@ struct SelectionState<'alloc> {
 }
 
 impl SelectionState<'_> {
-    fn new() -> Result<Self> {
+    fn new(terminal: &Terminal<'_, '_>) -> Result<Self> {
         let mut press_event = PressEvent::new()?;
         press_event.set_repeat_interval(Duration::from_millis(500))?;
 
         Ok(Self {
-            gesture: Gesture::new()?,
+            gesture: Gesture::new(terminal)?,
             press_event,
             release_event: ReleaseEvent::new()?,
             drag_event: DragEvent::new()?,
@@ -1262,14 +1262,13 @@ impl SelectionState<'_> {
         dims: Dimensions,
     ) -> Result<()> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
-        let grid_ref = terminal.grid_ref(point)?;
 
         let selection = self
             .press_event
             .set_repeat_distance(dims.cell_width.into())?
             .set_time(self.start_time.elapsed())?
             .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref)?;
+            .apply(&mut self.gesture, terminal, point)?;
 
         terminal.set_selection(selection.as_ref())?;
         Ok(())
@@ -1279,10 +1278,10 @@ impl SelectionState<'_> {
     fn on_release(&mut self, terminal: &Terminal<'_, '_>, dims: Dimensions) -> Result<()> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         // The point might fall outside the grid, which is completely okay in this case.
-        let grid_ref = terminal.grid_ref(point).ok();
+        let point = terminal.grid_ref(point).ok().map(|_| point);
 
         self.release_event
-            .apply(&mut self.gesture, terminal, grid_ref)?;
+            .apply(&mut self.gesture, terminal, point)?;
         Ok(())
     }
 
@@ -1296,7 +1295,6 @@ impl SelectionState<'_> {
         mods: key::Mods,
     ) -> Result<()> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
-        let grid_ref = terminal.grid_ref(point)?;
         let geometry = Geometry {
                 columns: terminal.cols()?.into(),
                 cell_width: dims.cell_width as u32,
@@ -1308,7 +1306,7 @@ impl SelectionState<'_> {
             .drag_event
             .set_rectangle(Input::selection_rectangle_mods(mods))?
             .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref, geometry)?;
+            .apply(&mut self.gesture, terminal, point, geometry)?;
 
         terminal.set_selection(selection.as_ref())?;
         Ok(())
