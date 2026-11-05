@@ -1709,7 +1709,6 @@ impl From<ScrollViewport> for ffi::TerminalScrollViewport {
 pub struct Mode(pub ffi::Mode);
 
 impl Mode {
-    #![expect(missing_docs, reason = "no upstream documentation provided")]
     const ANSI_BIT: u16 = 1 << 15;
 
     /// Create a new mode from its numeric value and its kind.
@@ -1780,49 +1779,92 @@ impl Mode {
         from_result_with_len(result, written)
     }
 
+    /// Keyboard action (disable keyboard)
     pub const KAM: Self = Self::new(2, ModeKind::Ansi);
+    /// Insert mode
     pub const INSERT: Self = Self::new(4, ModeKind::Ansi);
+    /// Send/receive mode
     pub const SRM: Self = Self::new(12, ModeKind::Ansi);
+    /// Linefeed/new line mode
     pub const LINEFEED: Self = Self::new(20, ModeKind::Ansi);
 
+    /// Cursor keys
     pub const DECCKM: Self = Self::new(1, ModeKind::Dec);
+    /// 132/80 column mode
     pub const _132_COLUMN: Self = Self::new(3, ModeKind::Dec);
+    /// Slow scroll
     pub const SLOW_SCROLL: Self = Self::new(4, ModeKind::Dec);
+    /// Reverse video
     pub const REVERSE_COLORS: Self = Self::new(5, ModeKind::Dec);
+    /// Origin mode
     pub const ORIGIN: Self = Self::new(6, ModeKind::Dec);
+    /// Auto-wrap mode
     pub const WRAPAROUND: Self = Self::new(7, ModeKind::Dec);
+    /// Auto-repeat keys
     pub const AUTOREPEAT: Self = Self::new(8, ModeKind::Dec);
+    /// X10 mouse reporting
     pub const X10_MOUSE: Self = Self::new(9, ModeKind::Dec);
+    /// Cursor blink
     pub const CURSOR_BLINKING: Self = Self::new(12, ModeKind::Dec);
+    /// Cursor visible (DECTCEM)
     pub const CURSOR_VISIBLE: Self = Self::new(25, ModeKind::Dec);
+    /// Allow 132 column mode
     pub const ENABLE_MODE3: Self = Self::new(40, ModeKind::Dec);
+    /// Reverse wrap
     pub const REVERSE_WRAP: Self = Self::new(45, ModeKind::Dec);
+    /// Alternate screen (legacy)
     pub const ALT_SCREEN_LEGACY: Self = Self::new(47, ModeKind::Dec);
+    /// Application keypad
     pub const KEYPAD_KEYS: Self = Self::new(66, ModeKind::Dec);
+    /// Backarrow key mode (DECBKM)
     pub const BACKARROW_KEY_MODE: Self = Self::new(67, ModeKind::Dec);
+    /// Left/right margin mode
     pub const LEFT_RIGHT_MARGIN: Self = Self::new(69, ModeKind::Dec);
+    /// Normal mouse tracking
     pub const NORMAL_MOUSE: Self = Self::new(1000, ModeKind::Dec);
+    /// Button-event mouse tracking
     pub const BUTTON_MOUSE: Self = Self::new(1002, ModeKind::Dec);
+    /// Any-event mouse tracking
     pub const ANY_MOUSE: Self = Self::new(1003, ModeKind::Dec);
+    /// Focus in/out events
     pub const FOCUS_EVENT: Self = Self::new(1004, ModeKind::Dec);
+    /// UTF-8 mouse format
     pub const UTF8_MOUSE: Self = Self::new(1005, ModeKind::Dec);
+    /// SGR mouse format
     pub const SGR_MOUSE: Self = Self::new(1006, ModeKind::Dec);
+    /// Alternate scroll mode
     pub const ALT_SCROLL: Self = Self::new(1007, ModeKind::Dec);
+    /// `URxvt` mouse format
     pub const URXVT_MOUSE: Self = Self::new(1015, ModeKind::Dec);
+    /// SGR-Pixels mouse format
     pub const SGR_PIXELS_MOUSE: Self = Self::new(1016, ModeKind::Dec);
+    /// Ignore keypad with `NumLock`
     pub const NUMLOCK_KEYPAD: Self = Self::new(1035, ModeKind::Dec);
+    /// Alt key sends ESC prefix
     pub const ALT_ESC_PREFIX: Self = Self::new(1036, ModeKind::Dec);
+    /// Alt sends escape
     pub const ALT_SENDS_ESC: Self = Self::new(1039, ModeKind::Dec);
+    /// Extended reverse wrap
     pub const REVERSE_WRAP_EXT: Self = Self::new(1045, ModeKind::Dec);
+    /// Alternate screen
     pub const ALT_SCREEN: Self = Self::new(1047, ModeKind::Dec);
+    /// Save cursor (DECSC)
     pub const SAVE_CURSOR: Self = Self::new(1048, ModeKind::Dec);
+    /// Alt screen + save cursor + clear
     pub const ALT_SCREEN_SAVE: Self = Self::new(1049, ModeKind::Dec);
+    /// Bracketed paste mode
     pub const BRACKETED_PASTE: Self = Self::new(2004, ModeKind::Dec);
+    /// Synchronized output
     pub const SYNC_OUTPUT: Self = Self::new(2026, ModeKind::Dec);
+    /// Grapheme cluster mode
     pub const GRAPHEME_CLUSTER: Self = Self::new(2027, ModeKind::Dec);
+    /// Report color scheme
     pub const COLOR_SCHEME_REPORT: Self = Self::new(2031, ModeKind::Dec);
+    /// Report terminal visibility
     pub const VISIBILITY_REPORT: Self = Self::new(2033, ModeKind::Dec);
+    /// In-band size reports
     pub const IN_BAND_RESIZE: Self = Self::new(2048, ModeKind::Dec);
+    /// Kitty clipboard protocol paste events
     pub const PASTE_EVENTS: Self = Self::new(5522, ModeKind::Dec);
 }
 
