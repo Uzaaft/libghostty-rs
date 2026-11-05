@@ -155,6 +155,19 @@ impl GridRef<'_> {
 ///
 /// If the tracked grid reference outlives the terminal it is created from,
 /// it remains valid, but all APIs return either `false` or `Ok(None)`.
+/// It must still be dropped before the terminal's allocator, which frees
+/// the handle even after the terminal is gone.
+///
+/// ```compile_fail,E0597
+/// use libghostty_vt::{alloc::Allocator, terminal::{Point, PointCoordinate}, Terminal};
+///
+/// let tracked = {
+///     let allocator = Allocator::GLOBAL;
+///     let terminal = Terminal::new_with_alloc(&allocator, 80, 24).unwrap();
+///     terminal.track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 })).unwrap()
+/// }; // The allocator cannot be dropped while `tracked` still needs it.
+/// drop(tracked);
+/// ```
 ///
 /// Each tracked reference adds bookkeeping to terminal mutations. Use them
 /// sparingly for long-lived anchors such as selections, search state, marks,
