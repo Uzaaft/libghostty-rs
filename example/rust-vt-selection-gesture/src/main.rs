@@ -2,7 +2,6 @@ use libghostty_vt::{
     Terminal,
     error::Error,
     fmt::{Format, Formatter},
-    grid_ref::GridRef,
     point::{Coordinate, Point},
     selection::{
         Selection,
@@ -12,12 +11,6 @@ use libghostty_vt::{
 use std::io::Write;
 
 // ANCHOR: selection-gesture-main
-fn ref_at<'t>(terminal: &'t Terminal<'_, '_>, x: u16, y: u32) -> GridRef<'t> {
-    terminal
-        .grid_ref(Point::Active(Coordinate { x, y }))
-        .expect("ref should exist")
-}
-
 fn print_selection<'t>(
     terminal: &'t Terminal<'_, '_>,
     label: &str,
@@ -43,7 +36,7 @@ fn main() -> Result<(), Error> {
 
     terminal.vt_write(b"hello world\r\nsecond line");
 
-    let mut gesture = Gesture::new()?;
+    let mut gesture = Gesture::new(&terminal)?;
     let mut press = gesture::PressEvent::new()?;
     let mut drag = gesture::DragEvent::new()?;
     let mut release = gesture::ReleaseEvent::new()?;
@@ -58,18 +51,23 @@ fn main() -> Result<(), Error> {
 
     // Press in the first cell. A normal single press records the click anchor but
     // doesn't produce a selection yet, so we discard the optional output.
-    let press_ref = ref_at(&terminal, 0, 0);
-    let selection = press
-        .set_position(2.0, 8.0)?
-        .apply(&mut gesture, &terminal, press_ref)?;
+    let selection = press.set_position(2.0, 8.0)?.apply(
+        &mut gesture,
+        &terminal,
+        Point::Active(Coordinate { x: 0, y: 0 }),
+    )?;
     assert!(selection.is_none());
 
     // Drag across "hello". The drag event returns a selection snapshot that the
     // embedder can apply to its UI, copy, or format immediately.
-    let drag_ref = ref_at(&terminal, 4, 0);
     let selection = drag
         .set_position(46.0, 8.0)?
-        .apply(&mut gesture, &terminal, drag_ref, geometry)?
+        .apply(
+            &mut gesture,
+            &terminal,
+            Point::Active(Coordinate { x: 4, y: 0 }),
+            geometry,
+        )?
         .expect("'hello' should be selected");
     print_selection(&terminal, "drag", selection)?;
 
@@ -79,10 +77,13 @@ fn main() -> Result<(), Error> {
     println!("dragged: {}", gesture.dragged(&terminal)?);
 
     // Deep press uses the active click anchor to select the surrounding word.
-    gesture.reset(&terminal);
+    gesture.reset(&terminal)?;
 
-    let world_ref = ref_at(&terminal, 6, 0);
-    let selection = press.apply(&mut gesture, &terminal, world_ref)?;
+    let selection = press.apply(
+        &mut gesture,
+        &terminal,
+        Point::Active(Coordinate { x: 6, y: 0 }),
+    )?;
     assert!(selection.is_none());
 
     let selection = deep_press
