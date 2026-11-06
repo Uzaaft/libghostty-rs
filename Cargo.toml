@@ -6,7 +6,7 @@ resolver = "2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/uzaaft/libghostty-rs"
-rust-version = "1.90"
+rust-version = "1.96"
 version = "0.2.1"
 
 [workspace.dependencies]

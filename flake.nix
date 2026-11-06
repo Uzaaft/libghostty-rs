@@ -39,7 +39,7 @@
           overlays = [(import rust-overlay)];
         };
 
-        rustVersion = "1.90.0";
+        rustVersion = "1.96.0";
         # crane's devShell puts this toolchain's cargo/rustc ahead of the
         # devToolchain in packages, so it must carry the cross targets too or
         # its sysroot (without their std) shadows the devToolchain's.
