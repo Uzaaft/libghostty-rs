@@ -1,0 +1,8 @@
+[book]
+title = "Guide to libghostty-vt, Rust Edition"
+authors = ["Leah Amelia Chen"]
+language = "en"
+
+[preprocessor.rustdoc-links]
+after = ["links"]
+build.preludes = ["libghostty_vt::{*,terminal::Mode,render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration},style::*,fmt::Formatter}"]

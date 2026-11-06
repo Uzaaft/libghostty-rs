@@ -7,3 +7,4 @@
 **/.zig-cache
 **/zig-out
 rustc-ice-*.txt
+/book/book/
