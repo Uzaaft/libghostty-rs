@@ -61,6 +61,9 @@ fn main() {
     let builder = bindgen::Builder::default()
         .header(header.to_string_lossy())
         .clang_arg(format!("-I{}", include_dir.to_string_lossy()))
+        // C23 gives Ghostty's enums an explicit int underlying type. Older
+        // C modes leave signedness target-dependent, unlike the Zig ABI.
+        .clang_arg("-std=c23")
         // These headers only need freestanding C headers. Use Clang's builtins
         // instead of the host libc headers when parsing a different ABI.
         .clang_arg("-ffreestanding")
@@ -69,6 +72,9 @@ fn main() {
         .allowlist_function("[Gg]hostty.*")
         .allowlist_type("[Gg]hostty.*")
         .allowlist_var("GHOSTTY_.*")
+        // Style and image-layer masks contain typedef casts that CExpr
+        // cannot evaluate; let Clang resolve their types and values.
+        .clang_macro_fallback()
         // Only used to force enums to `int` size. It is defined as `INT_MAX`,
         // and whether bindgen can evaluate that depends on which `limits.h`
         // clang resolves, which differs between environments. Exclude it so
@@ -235,7 +241,7 @@ const PREFIXES: &[(&str, &str)] = &[
     ("GhosttyTerminalOption", "GHOSTTY_TERMINAL_OPT"),
     (
         "GhosttyTerminalScrollViewportTag",
-        "GHOSTTY_SCROLL_VIEWPORT",
+        "GHOSTTY_TERMINAL_SCROLL_VIEWPORT",
     ),
     ("GhosttyStyleColorTag", "GHOSTTY_STYLE_COLOR"),
     ("GhosttyRowSemanticPrompt", "GHOSTTY_ROW_SEMANTIC"),
@@ -245,7 +251,20 @@ const PREFIXES: &[(&str, &str)] = &[
     ("GhosttyModeReportState", "GHOSTTY_MODE_REPORT"),
     ("GhosttyFocusEvent", "GHOSTTY_FOCUS"),
     ("GhosttyResult", "GHOSTTY_"),
-    ("GhosttyKittyGraphicsImageData", "GHOSTTY_KITTY_IMAGE_DATA"),
+    (
+        "GhosttyKittyGraphicsImageData",
+        "GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA",
+    ),
+    (
+        "GhosttyKittyGraphicsPlacementIteratorOption",
+        "GHOSTTY_KITTY_GRAPHICS_PLACEMENT_ITERATOR_OPT",
+    ),
+    ("GhosttyFormatterOption", "GHOSTTY_FORMATTER_OPT"),
+    ("GhosttyRenderStateOption", "GHOSTTY_RENDER_STATE_OPT"),
+    (
+        "GhosttyRenderStateRowOption",
+        "GHOSTTY_RENDER_STATE_ROW_OPT",
+    ),
     (
         "GhosttySelectionGestureEventOption",
         "GHOSTTY_SELECTION_GESTURE_EVENT_OPT",
@@ -316,7 +335,11 @@ impl ParseCallbacks for Callbacks {
 
     fn int_macro(&self, name: &str, _value: i64) -> Option<IntKind> {
         // Fixup some int macro types to reduce manual casting
-        if name.starts_with("GHOSTTY_DA_") || name.starts_with("GHOSTTY_MODS_") {
+        if name.starts_with("GHOSTTY_DA_")
+            || name.starts_with("GHOSTTY_MODS_")
+            || name.starts_with("GHOSTTY_STYLE_FLAG_")
+            || name == "GHOSTTY_STYLE_UNDERLINE_MASK"
+        {
             Some(IntKind::U16)
         } else if name.starts_with("GHOSTTY_KITTY_KEY_") || name.starts_with("GHOSTTY_COLOR_NAMED_")
         {
