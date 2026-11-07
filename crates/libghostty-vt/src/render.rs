@@ -959,10 +959,8 @@ impl Snapshot<'_, '_> {
 
     /// Get the visual style of the cursor.
     pub fn cursor_visual_style(&self) -> Result<CursorVisualStyle> {
-        self.get::<ffi::RenderStateCursorVisualStyle::Type>(
-            ffi::RenderStateData::CURSOR_VISUAL_STYLE,
-        )
-        .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+        self.get::<ffi::CursorStyle::Type>(ffi::RenderStateData::CURSOR_VISUAL_STYLE)
+            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
 
     /// Get the relative position of the cursor and other information
@@ -1479,28 +1477,25 @@ impl CellIteration<'_, '_> {
     ///
     /// If the buffer is too small, the function returns
     /// `Err(Error::OutOfSpace { required })` where `required` is the
-    /// required number of codepoints, and `buf` is left unchanged. The
+    /// required number of codepoints, and `buf` contains the first codepoints. The
     /// caller can then retry with a sufficiently sized buffer.
     pub fn graphemes_buf(&self, buf: &mut [char]) -> Result<()> {
-        // Upstream takes no buffer length and writes unchecked, so the size
-        // check has to happen here: without it a short buffer from safe code
-        // would be an out-of-bounds write.
-        let required = self.graphemes_len()? as usize;
-        if buf.len() < required {
-            return Err(Error::OutOfSpace { required });
-        }
-        // SAFETY: GRAPHEMES_BUF writes exactly `graphemes_len` elements for
-        // the current cell, and we just checked `buf` holds at least that
-        // many, so every write stays in bounds. Nothing between the length
-        // query and this call can move the iterator, since we hold `&self`.
+        let mut buffer = ffi::CodepointBuffer {
+            ptr: buf.as_mut_ptr().cast(),
+            cap: buf.len(),
+            len: 0,
+        };
+        // SAFETY: The buffer describes writable chars. The terminal's
+        // grapheme codepoints are Unicode scalar values, and upstream
+        // writes at most `cap` elements, including on OUT_OF_SPACE.
         let result = unsafe {
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowCellsData::GRAPHEMES_BUF,
-                buf.as_mut_ptr().cast(),
+                (&raw mut buffer).cast(),
             )
         };
-        from_result(result)
+        crate::error::from_result_with_len(result, buffer.len).map(|_| ())
     }
 
     /// Replace the contents of `buf` with the current cell's full grapheme
@@ -1769,7 +1764,7 @@ impl ImageIteration<'_, '_> {
 
     /// The layer to draw the image in.
     pub fn layer(&self) -> Result<ImageLayer> {
-        self.get::<ffi::RenderStateImageLayer::Type>(ffi::RenderStateImageData::LAYER)
+        self.get::<ffi::ImageLayer::Type>(ffi::RenderStateImageData::LAYER)
             .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
     }
 
@@ -1969,13 +1964,13 @@ pub enum Dirty {
 #[non_exhaustive]
 pub enum CursorVisualStyle {
     /// Bar cursor (DECSCUSR 5, 6).
-    Bar = ffi::RenderStateCursorVisualStyle::BAR,
+    Bar = ffi::CursorStyle::BAR,
     /// Block cursor (DECSCUSR 1, 2).
-    Block = ffi::RenderStateCursorVisualStyle::BLOCK,
+    Block = ffi::CursorStyle::BLOCK,
     /// Underline cursor (DECSCUSR 3, 4).
-    Underline = ffi::RenderStateCursorVisualStyle::UNDERLINE,
+    Underline = ffi::CursorStyle::UNDERLINE,
     /// Hollow block cursor.
-    BlockHollow = ffi::RenderStateCursorVisualStyle::BLOCK_HOLLOW,
+    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 /// The image protocols that a terminal supports.
@@ -2012,11 +2007,11 @@ pub enum ImageProtocol {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, int_enum::IntEnum)]
 pub enum ImageLayer {
     /// Below the cell background colors.
-    BelowBackground = ffi::RenderStateImageLayer::BELOW_BACKGROUND,
+    BelowBackground = ffi::ImageLayer::BELOW_BACKGROUND,
     /// Above the cell background colors and below the text.
-    BelowText = ffi::RenderStateImageLayer::BELOW_TEXT,
+    BelowText = ffi::ImageLayer::BELOW_TEXT,
     /// Above the text.
-    AboveText = ffi::RenderStateImageLayer::ABOVE_TEXT,
+    AboveText = ffi::ImageLayer::ABOVE_TEXT,
 }
 
 /// The kinds of Kitty graphics placements in a render state's image list.
@@ -2349,8 +2344,7 @@ mod tests {
         assert_eq!(text, "");
     }
 
-    /// Upstream's `GRAPHEMES_BUF` takes no length and writes unchecked, so a
-    /// short buffer must be rejected on the Rust side before calling C.
+    /// Short buffers receive a prefix and the required capacity.
     #[test]
     fn graphemes_buf_rejects_short_buffer() {
         let mut terminal = Terminal::new(4, 1).unwrap();
@@ -2364,13 +2358,13 @@ mod tests {
         let mut cell_iteration = cells.update(iteration.next().unwrap()).unwrap();
         cell_iteration.next().unwrap();
 
-        // One slot short: rejected with the needed size, buffer untouched.
+        // One slot short: the prefix is written and the needed size reported.
         let mut short = ['x'];
         assert!(matches!(
             cell_iteration.graphemes_buf(&mut short),
             Err(Error::OutOfSpace { required: 2 })
         ));
-        assert_eq!(short, ['x']);
+        assert_eq!(short, ['e']);
 
         // Exactly the needed size: filled with base then combining mark.
         let mut exact = ['x'; 2];

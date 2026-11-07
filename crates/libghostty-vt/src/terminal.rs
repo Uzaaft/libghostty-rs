@@ -246,13 +246,13 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
 #[non_exhaustive]
 pub enum CursorStyle {
     /// Bar cursor (DECSCUSR 5, 6).
-    Bar = ffi::TerminalCursorStyle::BAR,
+    Bar = ffi::CursorStyle::BAR,
     /// Block cursor (DECSCUSR 1, 2).
-    Block = ffi::TerminalCursorStyle::BLOCK,
+    Block = ffi::CursorStyle::BLOCK,
     /// Underline cursor (DECSCUSR 3, 4).
-    Underline = ffi::TerminalCursorStyle::UNDERLINE,
+    Underline = ffi::CursorStyle::UNDERLINE,
     /// Hollow block cursor.
-    BlockHollow = ffi::TerminalCursorStyle::BLOCK_HOLLOW,
+    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
