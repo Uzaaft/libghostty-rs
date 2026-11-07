@@ -242,6 +242,7 @@ impl Allocator<'static> {
                 free: Some(_global_free),
                 resize: Some(_global_resize),
                 remap: Some(_global_remap),
+                reserved: [std::ptr::null_mut(); 4],
             },
         },
         _phan: PhantomData,
@@ -318,6 +319,7 @@ impl<'ctx, A: alloc::Allocator> From<&'ctx A> for Allocator<'ctx> {
                     free: Some(_free::<A>),
                     resize: Some(_resize),
                     remap: Some(_remap::<A>),
+                    reserved: [std::ptr::null_mut(); 4],
                 },
             },
             _phan: PhantomData,
@@ -486,11 +488,12 @@ pub(crate) mod testing {
         }
 
         pub(crate) fn allocator(&self) -> Allocator<'_> {
-            static VTABLE: ffi::AllocatorVtable = ffi::AllocatorVtable {
+            const VTABLE: ffi::AllocatorVtable = ffi::AllocatorVtable {
                 alloc: Some(capped_alloc),
                 resize: Some(no_resize),
                 remap: Some(no_remap),
                 free: Some(heap_free),
+                reserved: [std::ptr::null_mut(); 4],
             };
             allocator(self, &VTABLE)
         }
@@ -545,11 +548,12 @@ pub(crate) mod testing {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     impl Guard {
         pub(crate) fn allocator() -> Allocator<'static> {
-            static VTABLE: ffi::AllocatorVtable = ffi::AllocatorVtable {
+            const VTABLE: ffi::AllocatorVtable = ffi::AllocatorVtable {
                 alloc: Some(guard_pages::alloc),
                 resize: Some(no_resize),
                 remap: Some(no_remap),
                 free: Some(guard_pages::free),
+                reserved: [std::ptr::null_mut(); 4],
             };
             allocator(&(), &VTABLE)
         }
