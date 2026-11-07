@@ -3,12 +3,12 @@
 //! A formatter captures a reference to a terminal and formatting options.
 //! It can be used repeatedly to produce output that reflects the current
 //! terminal state at the time of each format call.
-use std::marker::PhantomData;
+use std::{marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Bytes, Object},
-    error::{Error, Result, from_result, from_result_with_len},
-    ffi,
+    error::{Error, Result, from_optional_result_uninit, from_result, from_result_with_len},
+    ffi::{self, FormatterOption as Opt},
     selection::Selection,
     terminal::Terminal,
 };
@@ -20,156 +20,57 @@ pub struct Formatter<'t, 'alloc: 'cb, 'cb: 't> {
     _terminal: PhantomData<&'t Terminal<'alloc, 'cb>>,
 }
 
-/// Options for [creating a terminal formatter](Formatter::new).
-#[derive(Debug)]
-pub struct FormatterOptions<'t, 's> {
-    inner: ffi::FormatterTerminalOptions,
-    _phan: PhantomData<&'s Selection<'t>>,
+bitflags::bitflags! {
+    /// Terminal state to add to VT output. Plain text and HTML ignore these bits.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Extras: ffi::FormatterExtras {
+        /// Restore the color palette with OSC 4.
+        const PALETTE = ffi::FORMATTER_EXTRA_PALETTE;
+        /// Restore terminal modes that differ from their defaults.
+        const MODES = ffi::FORMATTER_EXTRA_MODES;
+        /// Restore the scrolling region with DECSTBM and DECSLRM.
+        const SCROLLING_REGION = ffi::FORMATTER_EXTRA_SCROLLING_REGION;
+        /// Restore tab stops by clearing them all and setting each one again.
+        const TABSTOPS = ffi::FORMATTER_EXTRA_TABSTOPS;
+        /// Restore the working directory with OSC 7.
+        const PWD = ffi::FORMATTER_EXTRA_PWD;
+        /// Restore keyboard modes such as modifyOtherKeys.
+        const KEYBOARD = ffi::FORMATTER_EXTRA_KEYBOARD;
+        /// Restore the cursor position with CUP.
+        const CURSOR = ffi::FORMATTER_EXTRA_CURSOR;
+        /// Restore the style the cursor writes new text with, using SGR.
+        const STYLE = ffi::FORMATTER_EXTRA_STYLE;
+        /// Restore the hyperlink the cursor writes new text with, using OSC 8.
+        const HYPERLINK = ffi::FORMATTER_EXTRA_HYPERLINK;
+        /// Restore character protection with DECSCA.
+        const PROTECTION = ffi::FORMATTER_EXTRA_PROTECTION;
+        /// Restore the Kitty keyboard protocol flags.
+        const KITTY_KEYBOARD = ffi::FORMATTER_EXTRA_KITTY_KEYBOARD;
+        /// Restore the character sets, such as the line drawing set.
+        const CHARSETS = ffi::FORMATTER_EXTRA_CHARSETS;
+        /// No extras. VT output has only the text and its styles.
+        const NONE = ffi::FORMATTER_EXTRAS_NONE;
+        /// Every extra.
+        const ALL = ffi::FORMATTER_EXTRAS_ALL;
+        /// The palette, cursor style and cursor hyperlink.
+        const DEFAULT = ffi::FORMATTER_EXTRAS_DEFAULT;
+    }
 }
-impl Default for FormatterOptions<'_, '_> {
+
+impl Default for Extras {
     fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<'t, 's> FormatterOptions<'t, 's> {
-    /// Create a new set of options for [creating a terminal formatter](Formatter::new).
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            inner: ffi::FormatterTerminalOptions {
-                extra: ffi::FormatterTerminalExtra {
-                    screen: ffi::FormatterScreenExtra {
-                        ..ffi::sized!(ffi::FormatterScreenExtra)
-                    },
-                    ..ffi::sized!(ffi::FormatterTerminalExtra)
-                },
-                ..ffi::sized!(ffi::FormatterTerminalOptions)
-            },
-            _phan: PhantomData,
-        }
-    }
-    /// Specify the output format to emit.
-    #[must_use]
-    pub fn with_format(mut self, value: Format) -> Self {
-        self.inner.emit = value.into();
-        self
-    }
-    /// Specify whether to unwrap soft-wrapped lines.
-    #[must_use]
-    pub fn with_unwrap(mut self, value: bool) -> Self {
-        self.inner.unwrap = value;
-        self
-    }
-    /// Specify whether to trim trailing whitespace on non-blank lines.
-    ///
-    /// Trailing blank lines are always trimmed, except in [`Format::Vt`]
-    /// output without trimming, where they are kept as part of the layout.
-    ///
-    /// Defaults to `false`, so [`Format::Vt`] output keeps trailing blank
-    /// rows unless this is set.
-    #[must_use]
-    pub fn with_trim(mut self, value: bool) -> Self {
-        self.inner.trim = value;
-        self
-    }
-    /// Specify the selection to restrict output to a range.
-    ///
-    /// If a selection is not given, the formatter defaults to formatting
-    /// the entire screen.
-    #[must_use]
-    pub fn with_selection(mut self, value: &'s Selection<'t>) -> Self {
-        self.inner.selection = &raw const value.inner;
-        self
-    }
-
-    // --- Extra settings --- //
-
-    /// Specify whether to emit the palette using OSC 4 sequences.
-    #[must_use]
-    pub fn with_palette(mut self, value: bool) -> Self {
-        self.inner.extra.palette = value;
-        self
-    }
-    /// Specify terminal modes that differ from their defaults using CSI h/l.
-    #[must_use]
-    pub fn with_modes(mut self, value: bool) -> Self {
-        self.inner.extra.modes = value;
-        self
-    }
-    /// Specify whether to emit scrolling region state using DECSTBM and DECSLRM sequences.
-    #[must_use]
-    pub fn with_scrolling_region(mut self, value: bool) -> Self {
-        self.inner.extra.scrolling_region = value;
-        self
-    }
-    /// Specify tabstop positions by clearing all tabs and setting each one.
-    #[must_use]
-    pub fn with_tabstops(mut self, value: bool) -> Self {
-        self.inner.extra.tabstops = value;
-        self
-    }
-    /// Specify the present working directory using OSC 7.
-    #[must_use]
-    pub fn with_pwd(mut self, value: bool) -> Self {
-        self.inner.extra.pwd = value;
-        self
-    }
-    /// Specify keyboard modes such as `ModifyOtherKeys`.
-    #[must_use]
-    pub fn with_keyboard(mut self, value: bool) -> Self {
-        self.inner.extra.keyboard = value;
-        self
-    }
-
-    // --- Screen settings --- //
-
-    /// Specify whether to emit cursor position using CUP (CSI H).
-    #[must_use]
-    pub fn with_cursor(mut self, value: bool) -> Self {
-        self.inner.extra.screen.cursor = value;
-        self
-    }
-    /// Emit current SGR style state based on the cursor's active `style_id`.
-    #[must_use]
-    pub fn with_style(mut self, value: bool) -> Self {
-        self.inner.extra.screen.style = value;
-        self
-    }
-    /// Emit current hyperlink state using OSC 8 sequences.
-    #[must_use]
-    pub fn with_hyperlink(mut self, value: bool) -> Self {
-        self.inner.extra.screen.hyperlink = value;
-        self
-    }
-    /// Emit character protection mode using DECSCA.
-    #[must_use]
-    pub fn with_protection(mut self, value: bool) -> Self {
-        self.inner.extra.screen.protection = value;
-        self
-    }
-    /// Emit Kitty keyboard protocol state using CSI > u and CSI = sequences.
-    #[must_use]
-    pub fn with_kitty_keyboard(mut self, value: bool) -> Self {
-        self.inner.extra.screen.kitty_keyboard = value;
-        self
-    }
-    /// Emit character set designations and invocations.
-    #[must_use]
-    pub fn with_charsets(mut self, value: bool) -> Self {
-        self.inner.extra.screen.charsets = value;
-        self
+        Self::DEFAULT
     }
 }
 
 impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// Create a formatter for a terminal's active screen.
-    pub fn new(
-        terminal: &'t Terminal<'alloc, 'cb>,
-        opts: FormatterOptions<'t, '_>,
-    ) -> Result<Self> {
+    ///
+    /// A new formatter emits plain text with trailing whitespace trimmed,
+    /// without unwrapping, and with [`Extras::DEFAULT`].
+    pub fn new(terminal: &'t Terminal<'alloc, 'cb>) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null(), terminal, opts) }
+        unsafe { Self::new_inner(std::ptr::null(), terminal) }
     }
 
     /// Create a formatter for a terminal's active screen.
@@ -179,26 +80,22 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     pub fn new_with_alloc<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         terminal: &'t Terminal<'alloc, 'cb>,
-        opts: FormatterOptions,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
-        unsafe { Self::new_inner(alloc.to_raw(), terminal, opts) }
+        unsafe { Self::new_inner(alloc.to_raw(), terminal) }
     }
 
+    /// # Safety
+    ///
+    /// `alloc` must be NULL or point to an allocator valid for `'alloc`.
     unsafe fn new_inner(
         alloc: *const ffi::Allocator,
         terminal: &'t Terminal<'alloc, 'cb>,
-        opts: FormatterOptions,
     ) -> Result<Self> {
         let mut raw: ffi::Formatter = std::ptr::null_mut();
 
         let result = unsafe {
-            ffi::ghostty_formatter_terminal_new(
-                alloc,
-                &raw mut raw,
-                terminal.inner.as_raw(),
-                opts.inner,
-            )
+            ffi::ghostty_formatter_terminal_new(alloc, &raw mut raw, terminal.inner.as_raw())
         };
         from_result(result)?;
 
@@ -206,6 +103,113 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
             inner: Object::new(raw)?,
             _terminal: PhantomData,
         })
+    }
+
+    fn get_optional<T>(&self, tag: Opt::Type) -> Result<Option<T>> {
+        let mut value = MaybeUninit::<T>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_formatter_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
+        };
+        from_optional_result_uninit(result, value)
+    }
+
+    fn get<T>(&self, tag: Opt::Type) -> Result<T> {
+        self.get_optional(tag)?.ok_or(Error::InvalidValue)
+    }
+
+    fn set_optional<T>(&mut self, tag: Opt::Type, value: Option<&T>) -> Result<&mut Self> {
+        let value = value.map_or(std::ptr::null(), |v| std::ptr::from_ref(v).cast());
+        from_result(unsafe { ffi::ghostty_formatter_set(self.inner.as_raw(), tag, value) })?;
+        Ok(self)
+    }
+
+    /// The output format: plain text, VT sequences, or HTML.
+    pub fn format(&self) -> Result<Format> {
+        self.get::<ffi::FormatterFormat::Type>(Opt::EMIT)?
+            .try_into()
+            .map_err(|_| Error::InvalidValue)
+    }
+
+    /// Set the output format. Defaults to plain text.
+    pub fn set_format(&mut self, value: Format) -> Result<&mut Self> {
+        self.set_optional(Opt::EMIT, Some(&ffi::FormatterFormat::Type::from(value)))
+    }
+
+    /// Whether to join lines that wrapped because they were too long for the screen.
+    pub fn unwrap(&self) -> Result<bool> {
+        self.get(Opt::UNWRAP)
+    }
+
+    /// Join lines that wrapped because they were too long for the screen.
+    /// Defaults to false.
+    pub fn set_unwrap(&mut self, value: bool) -> Result<&mut Self> {
+        self.set_optional(Opt::UNWRAP, Some(&value))
+    }
+
+    /// Whether to remove spaces from the end of each line that has other text.
+    pub fn trim(&self) -> Result<bool> {
+        self.get(Opt::TRIM)
+    }
+
+    /// Remove spaces from the end of each line that has other text.
+    ///
+    /// Blank lines at the end of the output are always removed. The one
+    /// exception is VT output with trimming turned off, which keeps them so
+    /// the output fills the same rows as the screen. Defaults to true.
+    pub fn set_trim(&mut self, value: bool) -> Result<&mut Self> {
+        self.set_optional(Opt::TRIM, Some(&value))
+    }
+
+    /// The selection restricting output, or `None` for the whole screen.
+    /// The returned snapshot is valid until the next mutating terminal call.
+    pub fn selection(&self) -> Result<Option<Selection<'t>>> {
+        self.get_optional::<ffi::Selection>(Opt::SELECTION)
+            // SAFETY: set_selection requires snapshots from the borrowed terminal.
+            .map(|v| v.map(|raw| unsafe { Selection::from_raw(raw) }))
+    }
+
+    /// Format only the content inside a selection.
+    ///
+    /// The formatter keeps its own copy of the selection. The selection must
+    /// be a valid snapshot for this formatter's terminal. Pass `None` to clear
+    /// it and format the whole screen again.
+    ///
+    /// To format the terminal's active selection, read it with
+    /// [`Terminal::selection`] and set it here. For clipboard text, use plain
+    /// output with unwrap and trim both true.
+    ///
+    /// # Safety
+    ///
+    /// Both endpoints must be valid snapshots from this formatter's terminal
+    /// and its currently active screen. The lifetime prevents stale snapshots,
+    /// but does not prove they came from the same terminal or screen. Upstream
+    /// does not check this. Passing `None` is always safe.
+    ///
+    /// A selection from another terminal cannot be installed by safe code:
+    ///
+    /// ```compile_fail,E0133
+    /// use libghostty_vt::{Terminal, fmt::Formatter};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let terminal = Terminal::new(10, 3)?;
+    /// let other = Terminal::new(10, 3)?;
+    /// let selection = other.select_all()?;
+    /// let mut formatter = Formatter::new(&terminal)?;
+    /// formatter.set_selection(selection.as_ref())?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub unsafe fn set_selection(&mut self, value: Option<&Selection<'t>>) -> Result<&mut Self> {
+        self.set_optional(Opt::SELECTION, value.map(|v| &v.inner))
+    }
+
+    /// Terminal state to add to VT output.
+    pub fn extras(&self) -> Result<Extras> {
+        self.get(Opt::EXTRAS).map(Extras::from_bits_retain)
+    }
+
+    /// Set terminal state to add to VT output. Plain text and HTML ignore it.
+    pub fn set_extras(&mut self, value: Extras) -> Result<&mut Self> {
+        self.set_optional(Opt::EXTRAS, Some(&value.bits()))
     }
 
     /// Run the formatter and stream output to a writer.
@@ -306,11 +310,10 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
                 std::ptr::from_mut(&mut len),
             )
         };
-        // This should always fail with OutOfSpace.
+        // Empty output succeeds with zero bytes; nonempty output needs space.
         match from_result(result) {
-            Err(Error::OutOfSpace { .. }) => Ok(len),
+            Ok(()) | Err(Error::OutOfSpace { .. }) => Ok(len),
             Err(e) => Err(e),
-            Ok(()) => Err(Error::InvalidValue),
         }
     }
 }
@@ -382,12 +385,87 @@ mod tests {
     }
 
     #[test]
+    fn options_round_trip_and_invalid_extras_leave_state_unchanged() {
+        let terminal = Terminal::new(10, 3).unwrap();
+        let mut formatter = Formatter::new(&terminal).unwrap();
+        assert_eq!(formatter.format().unwrap(), Format::Plain);
+        assert!(formatter.trim().unwrap());
+        assert!(!formatter.unwrap().unwrap());
+        assert_eq!(formatter.extras().unwrap(), Extras::DEFAULT);
+        assert!(formatter.selection().unwrap().is_none());
+
+        formatter
+            .set_format(Format::Html)
+            .unwrap()
+            .set_trim(false)
+            .unwrap()
+            .set_unwrap(true)
+            .unwrap()
+            .set_extras(Extras::ALL)
+            .unwrap();
+        assert_eq!(formatter.format().unwrap(), Format::Html);
+        assert!(!formatter.trim().unwrap());
+        assert!(formatter.unwrap().unwrap());
+        assert_eq!(formatter.extras().unwrap(), Extras::ALL);
+        assert!(matches!(
+            formatter.set_extras(Extras::from_bits_retain(1 << 31)),
+            Err(Error::InvalidValue)
+        ));
+        assert_eq!(formatter.extras().unwrap(), Extras::ALL);
+    }
+
+    #[test]
+    fn selection_is_copied_and_can_be_cleared() {
+        use crate::terminal::{Point, PointCoordinate};
+
+        let mut terminal = Terminal::new(10, 3).unwrap();
+        terminal.vt_write(b"hello world");
+        let mut formatter = Formatter::new(&terminal).unwrap();
+        {
+            let start = terminal
+                .grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+                .unwrap();
+            let end = terminal
+                .grid_ref(Point::Active(PointCoordinate { x: 4, y: 0 }))
+                .unwrap();
+            let selection = Selection::new(start, end, false);
+            // SAFETY: Both endpoints come from the formatter's active screen.
+            unsafe { formatter.set_selection(Some(&selection)) }.unwrap();
+            assert!(
+                formatter
+                    .selection()
+                    .unwrap()
+                    .unwrap()
+                    .equals(&terminal, &selection)
+                    .unwrap()
+            );
+        }
+        assert_eq!(format_buf(&mut formatter), b"hello");
+        // SAFETY: Clearing a selection has no preconditions.
+        unsafe { formatter.set_selection(None) }
+            .unwrap()
+            .set_unwrap(true)
+            .unwrap();
+        assert!(formatter.selection().unwrap().is_none());
+        assert_eq!(format_buf(&mut formatter), b"hello world");
+    }
+
+    #[test]
+    fn empty_output_needs_no_buffer() {
+        let terminal = Terminal::new(10, 3).unwrap();
+        let mut formatter = Formatter::new(&terminal).unwrap();
+        assert_eq!(formatter.format_len().unwrap(), 0);
+        assert_eq!(formatter.format_buf(&mut []).unwrap(), 0);
+        assert!(formatter.format_alloc(None).unwrap().is_empty());
+    }
+
+    #[test]
     fn writer_output_matches_buffer_output_in_every_format() {
         let mut terminal = Terminal::new(20, 3).unwrap();
         terminal.vt_write(b"plain \x1b[1;31mbold red\x1b[0m\r\nsecond line");
         for format in [Format::Plain, Format::Vt, Format::Html] {
-            let options = FormatterOptions::new().with_format(format);
-            let mut formatter = Formatter::new(&terminal, options).unwrap();
+            let mut formatter = Formatter::new(&terminal).unwrap();
+            formatter.set_format(format).unwrap();
             let expected = format_buf(&mut formatter);
             assert!(!expected.is_empty(), "{format:?}");
 
@@ -403,8 +481,7 @@ mod tests {
     fn format_buf_reports_the_required_size() {
         let mut terminal = Terminal::new(10, 3).unwrap();
         terminal.vt_write(b"one\r\ntwo");
-        let options = FormatterOptions::new().with_format(Format::Plain);
-        let mut formatter = Formatter::new(&terminal, options).unwrap();
+        let mut formatter = Formatter::new(&terminal).unwrap();
 
         // "one\ntwo" is 7 bytes.
         let mut buf = [0; 3];
@@ -423,8 +500,15 @@ mod tests {
         let mut terminal = Terminal::new(10, 6).unwrap();
         terminal.vt_write(b"one\r\ntwo");
         let format = |format, trim| {
-            let options = FormatterOptions::new().with_format(format).with_trim(trim);
-            format_buf(&mut Formatter::new(&terminal, options).unwrap())
+            let mut formatter = Formatter::new(&terminal).unwrap();
+            formatter
+                .set_format(format)
+                .unwrap()
+                .set_trim(trim)
+                .unwrap()
+                .set_extras(Extras::NONE)
+                .unwrap();
+            format_buf(&mut formatter)
         };
 
         // Six rows, two with text, so five newlines.
@@ -434,15 +518,11 @@ mod tests {
         assert_eq!(format(Format::Plain, false), b"one\ntwo");
     }
 
-    /// The one-shot selection API goes through the same upstream
-    /// `PageListFormatter`, so the selection's trailing blank rows are kept
-    /// too, and only up to the selection's last row.
+    /// Selection formatting keeps trailing blank rows only up to the last
+    /// selected row, and only for untrimmed VT output.
     #[test]
     fn only_untrimmed_vt_keeps_trailing_blank_rows_in_selection() {
-        use crate::{
-            selection::FormatOptions,
-            terminal::{Point, PointCoordinate},
-        };
+        use crate::terminal::{Point, PointCoordinate};
 
         let mut terminal = Terminal::new(10, 6).unwrap();
         terminal.vt_write(b"one\r\ntwo");
@@ -454,15 +534,17 @@ mod tests {
         // Rows 0 to 3: two with text, then two blank ones.
         let selection = Selection::new(at(0, 0), at(9, 3), false);
         let format = |format, trim| {
-            let options = FormatOptions::new()
-                .with_emit_format(format)
-                .with_trim(trim)
-                .with_selection(&selection);
-            let bytes = terminal.format_selection_alloc(None, options).unwrap();
-            bytes.unwrap().to_vec()
+            let mut formatter = Formatter::new(&terminal).unwrap();
+            formatter
+                .set_format(format)
+                .unwrap()
+                .set_trim(trim)
+                .unwrap();
+            // SAFETY: Both endpoints come from the formatter's active screen.
+            unsafe { formatter.set_selection(Some(&selection)) }.unwrap();
+            formatter.format_alloc(None).unwrap().to_vec()
         };
-        // Unlike `Formatter`, the selection API always emits upstream's
-        // `.styles` extras around VT content: the whole 256-color palette as
+        // The default extras emit the whole 256-color palette as
         // OSC 4 sequences (each ending in ST) before it, and the SGR reset
         // after it. Strip them one by one, unwrapping at each step, so that
         // anything else (stray output, a missing entry) fails the test
@@ -489,7 +571,7 @@ mod tests {
     fn partial_writes_are_retried_until_complete() {
         let mut terminal = Terminal::new(20, 3).unwrap();
         terminal.vt_write(b"hello\r\nworld");
-        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        let mut formatter = Formatter::new(&terminal).unwrap();
         let expected = format_buf(&mut formatter);
 
         let mut writer = ByteAtATime {
@@ -505,7 +587,7 @@ mod tests {
     fn writer_failure_is_an_io_error() {
         let mut terminal = Terminal::new(8, 2).unwrap();
         terminal.vt_write(b"hello");
-        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        let mut formatter = Formatter::new(&terminal).unwrap();
         assert!(matches!(
             format_write(&mut formatter, &mut Reject),
             Err(Error::IoError)
@@ -543,7 +625,7 @@ mod tests {
         for i in 0..100 {
             terminal.vt_write(format!("{i:0>199}\r\n").as_bytes());
         }
-        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        let mut formatter = Formatter::new(&terminal).unwrap();
         let expected = format_buf(&mut formatter);
         assert!(expected.len() > 16 * 1024);
 

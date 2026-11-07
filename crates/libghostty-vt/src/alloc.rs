@@ -762,9 +762,7 @@ mod tests {
     #[cfg_attr(miri, ignore = "calls into libghostty")]
     fn empty_output_is_an_empty_buffer() {
         let terminal = crate::Terminal::new(10, 5).expect("terminal");
-        let mut formatter =
-            crate::fmt::Formatter::new(&terminal, crate::fmt::FormatterOptions::new())
-                .expect("formatter");
+        let mut formatter = crate::fmt::Formatter::new(&terminal).expect("formatter");
         let bytes = formatter
             .format_alloc(None)
             .expect("empty output is not an error");
