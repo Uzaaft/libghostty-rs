@@ -1022,7 +1022,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// Lowering the limit immediately removes eligible complete historical
     /// pages. A value of zero disables scrollback and erases retained history.
-    /// A `None` value removes the byte limit.
+    /// `None` restores the default of 10,000 bytes, rounded up to a page.
+    /// Pass `Some(usize::MAX)` for no byte limit.
     pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<&mut Self> {
         self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())?;
         Ok(self)

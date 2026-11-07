@@ -1135,7 +1135,7 @@ mod tests {
         let mut terminal = Terminal::new(215, 2).unwrap();
         // Lift the default byte limit, which would otherwise prune all but
         // one of those history pages.
-        terminal.set_scrollback_max_bytes(None).unwrap();
+        terminal.set_scrollback_max_bytes(Some(usize::MAX)).unwrap();
         terminal.vt_write(&b"x\r\n".repeat(215 * 3));
         let mut bytes = Vec::new();
         terminal.encode_snapshot(&mut bytes).unwrap();
@@ -1249,7 +1249,7 @@ mod tests {
         // `decode_compresses_history_when_enabled`: several history pages
         // remain to be decoded after READY.
         let mut terminal = Terminal::new(215, 2).unwrap();
-        terminal.set_scrollback_max_bytes(None).unwrap();
+        terminal.set_scrollback_max_bytes(Some(usize::MAX)).unwrap();
         terminal.vt_write(&b"x\r\n".repeat(215 * 3));
         let history = terminal.scrollback_rows().unwrap();
         let mut buf = Vec::new();
