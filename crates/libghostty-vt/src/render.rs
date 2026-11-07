@@ -1408,7 +1408,7 @@ impl CellIteration<'_, '_> {
 
     /// The style for the current cell.
     pub fn style(&self) -> Result<Style> {
-        let mut value = ffi::sized!(ffi::Style);
+        let mut value = ffi::Style::default();
         let result = unsafe {
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),

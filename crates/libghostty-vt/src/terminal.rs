@@ -1090,7 +1090,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// This is the style that will be applied to newly printed characters.
     pub fn cursor_style(&self) -> Result<style::Style> {
-        self.get::<ffi::Style>(Data::CURSOR_STYLE)
+        self.get::<ffi::Style>(Data::CURSOR_SGR_STYLE)
             .and_then(std::convert::TryInto::try_into)
     }
     /// The mouse pointer shape requested by the application through OSC 22.
@@ -5592,6 +5592,50 @@ mod tests {
         // and only the stream handling `ESC c` calls the callback.
         terminal.reset();
         assert_eq!(callback_count.get(), 2);
+    }
+
+    #[test]
+    fn cursor_style_preserves_independent_attributes() {
+        use crate::style::{PaletteIndex, RgbColor, Style, StyleColor, Underline};
+
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        let default = Style::default();
+        assert!(default.is_default());
+
+        // Complementary flag sets catch swapped bits; a curly underline
+        // exercises more than one bit of the packed underline field.
+        terminal.vt_write(b"\x1b[1;3;7;9;4:3;38;2;17;83;201;48;5;42m");
+        let expected = Style {
+            bold: true,
+            italic: true,
+            inverse: true,
+            strikethrough: true,
+            underline: Underline::Curly,
+            fg_color: StyleColor::Rgb(RgbColor {
+                r: 17,
+                g: 83,
+                b: 201,
+            }),
+            bg_color: StyleColor::Palette(PaletteIndex(42)),
+            ..default
+        };
+        assert_eq!(terminal.cursor_style().unwrap(), expected);
+        assert!(!expected.is_default());
+
+        terminal.vt_write(b"\x1b[0;2;5;8;53;4:5m");
+        assert_eq!(
+            terminal.cursor_style().unwrap(),
+            Style {
+                faint: true,
+                blink: true,
+                invisible: true,
+                overline: true,
+                underline: Underline::Dashed,
+                ..default
+            }
+        );
+        terminal.vt_write(b"\x1b[0m");
+        assert_eq!(terminal.cursor_style().unwrap(), default);
     }
 
     #[test]
