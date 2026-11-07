@@ -1063,40 +1063,21 @@ impl<'t> Image<'t> {
     /// image was still pending, the image can stay pending and this keeps
     /// returning `None`.
     pub fn data(&self) -> Result<Option<&'t [u8]>> {
-        // A pending payload is reported as `NO_VALUE`, which `get` would
-        // turn into `Err(Error::InvalidValue)`. Pending is a normal state
-        // for a stored image, so read the pointer with `get_optional`.
-        let Some(ptr) = self.get_optional::<*const u8>(ffi::KittyGraphicsImageData::DATA_PTR)?
-        else {
-            return Ok(None);
-        };
-        // Upstream never reports success with a NULL pointer: the pointer
-        // comes from a Zig slice, whose pointer can't be NULL. But
-        // `slice::from_raw_parts` needs a non-NULL pointer even for an empty
-        // slice, and a NULL slipping through would be UB rather than an
-        // error, so keep this cheap check rather than rely on a property
-        // the header doesn't spell out. A NULL pointer has no pixels to
-        // borrow, so report it the same way as a pending payload.
-        if ptr.is_null() {
-            return Ok(None);
-        }
-
-        let len = self.get::<usize>(ffi::KittyGraphicsImageData::DATA_LEN)?;
-
-        // SAFETY: `ptr` is non-NULL (checked above) and, per the header,
-        // points to the `DATA_LEN` bytes of the image's pixel data. `u8`
-        // has an alignment of 1, so any non-NULL pointer is aligned. The
-        // header says the data stays valid as long as the terminal is not
-        // mutated, and `'t` borrows the terminal immutably, so the bytes
-        // outlive the returned slice.
-        Ok(Some(unsafe { std::slice::from_raw_parts(ptr, len) }))
+        self.get_optional::<ffi::String>(ffi::KittyGraphicsImageData::PIXELS)
+            .map(|pixels| {
+                pixels.map(|pixels| {
+                    // SAFETY: The pixels remain valid until the terminal is
+                    // mutated, and `'t` borrows the terminal immutably.
+                    unsafe { pixels.to_bytes() }
+                })
+            })
     }
     /// Length of the raw pixel data in bytes. Always equal to
     /// width * height * bytes-per-pixel for the reported format. For a
     /// pending image, this is the expected length reserved against the
     /// storage limit even though [`Image::data`] is not available yet.
     pub fn data_len(&self) -> Result<usize> {
-        self.get(ffi::KittyGraphicsImageData::DATA_LEN)
+        self.get(ffi::KittyGraphicsImageData::EXPECTED_LEN)
     }
 }
 
@@ -1212,12 +1193,16 @@ impl<'t> PlacementIteration<'t, '_> {
         Ok(unsafe { value.assume_init() })
     }
 
-    /// Only return placements in one layer. See [`Layer`].
-    pub fn set_layer(&self, layer: Layer) -> Result<()> {
-        self.set::<ffi::KittyPlacementLayer::Type>(
+    /// Only return placements in the selected layers. See [`Layer`].
+    ///
+    /// An empty mask disables the filter and visits every placement.
+    /// Unknown bits return [`Error::InvalidValue`] and keep the current filter.
+    pub fn set_layer(&mut self, layer: Layer) -> Result<&mut Self> {
+        self.set::<u32>(
             ffi::KittyGraphicsPlacementIteratorOption::LAYER,
-            &layer.into(),
-        )
+            &layer.bits(),
+        )?;
+        Ok(self)
     }
 
     /// Compute the rendered pixel size of the current placement.
@@ -1357,7 +1342,7 @@ impl<'t> PlacementIteration<'t, '_> {
         if self.terminal != terminal.id {
             return Err(Error::InvalidValue);
         }
-        let mut sel = ffi::sized!(ffi::Selection);
+        let mut sel = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_rect(
                 self.iterator.inner.as_raw(),
@@ -1521,7 +1506,8 @@ pub struct SourceRect {
     pub height: u32,
 }
 
-/// A layer to limit the storage placement iterator to, set with
+bitflags::bitflags! {
+/// Layers to limit the storage placement iterator to, set with
 /// [`PlacementIteration::set_layer`].
 ///
 /// The Kitty graphics protocol picks a placement's layer from its z-index, as
@@ -1530,19 +1516,22 @@ pub struct SourceRect {
 /// ([`ImageIteration::layer`](crate::render::ImageIteration::layer)). It
 /// follows the same rules, and it also covers virtual placements, which are
 /// always drawn below the text.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(i32)]
-pub enum Layer {
-    /// Every placement. This is the default.
-    #[default]
-    All = ffi::KittyPlacementLayer::ALL,
-    /// Placements drawn below the cell backgrounds: z < [`i32::MIN`] / 2.
-    BelowBg = ffi::KittyPlacementLayer::BELOW_BG,
-    /// Placements drawn above the cell backgrounds and below the text:
-    /// [`i32::MIN`] / 2 ≤ z < 0.
-    BelowText = ffi::KittyPlacementLayer::BELOW_TEXT,
-    /// Placements drawn above the text: z ≥ 0.
-    AboveText = ffi::KittyPlacementLayer::ABOVE_TEXT,
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Layer: u32 {
+        /// Placements drawn below the cell backgrounds: z < [`i32::MIN`] / 2.
+        const BELOW_BACKGROUND = ffi::IMAGE_LAYER_MASK_BELOW_BACKGROUND;
+        /// Placements drawn above the cell backgrounds and below the text:
+        /// [`i32::MIN`] / 2 ≤ z < 0.
+        const BELOW_TEXT = ffi::IMAGE_LAYER_MASK_BELOW_TEXT;
+        /// Placements drawn above the text: z ≥ 0.
+        const ABOVE_TEXT = ffi::IMAGE_LAYER_MASK_ABOVE_TEXT;
+    }
+}
+
+impl Default for Layer {
+    fn default() -> Self {
+        Self::all()
+    }
 }
 
 /// Pixel format of a Kitty graphics image.
@@ -1811,12 +1800,42 @@ pub struct DecodedImage<'alloc> {
 mod placement_tests {
     use std::cell::Cell;
 
-    use super::PlacementIterator;
+    use super::{Layer, PlacementIterator};
     use crate::{
         Terminal,
         error::Error,
         terminal::{PointCoordinate, PointSpace},
     };
+
+    #[test]
+    fn layer_masks_combine_clear_and_reject_unknown_bits() {
+        let mut terminal = Terminal::new(10, 5).unwrap();
+        terminal.resize(10, 5, 10, 20).unwrap();
+        for (id, z) in [(1, -1_073_741_825), (2, -1), (3, 0)] {
+            terminal
+                .vt_write(format!("\x1b_Ga=T,f=24,s=1,v=1,i={id},z={z},q=2;////\x1b\\").as_bytes());
+        }
+        let graphics = terminal.kitty_graphics().unwrap().unwrap();
+        let mut iterator = PlacementIterator::new().unwrap();
+        for (mask, expected) in [
+            (Layer::BELOW_BACKGROUND | Layer::ABOVE_TEXT, vec![1, 3]),
+            (Layer::BELOW_TEXT, vec![2]),
+            (Layer::empty(), vec![1, 2, 3]),
+        ] {
+            let mut placements = iterator.update(&graphics).unwrap();
+            placements.set_layer(mask).unwrap();
+            assert!(matches!(
+                placements.set_layer(Layer::from_bits_retain(1 << 31)),
+                Err(Error::InvalidValue)
+            ));
+            let mut found = Vec::new();
+            while let Some(placement) = placements.next() {
+                found.push(placement.image_id().unwrap());
+            }
+            found.sort_unstable();
+            assert_eq!(found, expected);
+        }
+    }
 
     #[test]
     fn rect_is_none_for_virtual_placements() {
