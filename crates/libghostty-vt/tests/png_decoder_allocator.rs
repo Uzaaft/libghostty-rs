@@ -27,9 +27,9 @@ impl DecodePng for OnePixel {
         _data: &[u8],
     ) -> Option<DecodedImage<'alloc>> {
         let mut data = if self.use_given_allocator {
-            Bytes::new_with_alloc(alloc, 4).ok()?
+            Bytes::new_zeroed_with_alloc(alloc, 4).ok()?
         } else {
-            Bytes::new(4).ok()?
+            Bytes::new_zeroed(4).ok()?
         };
         data.copy_from_slice(&[255, 0, 0, 255]);
         Some(DecodedImage {

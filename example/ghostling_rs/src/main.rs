@@ -1405,7 +1405,7 @@ impl DecodePng for PngDecoder {
         // `macroquad` decodes the PNG image for us and converts it
         // to the correct RGBA8 pixel format automatically.
         let img = Image::from_file_with_format(data, Some(ImageFormat::Png)).ok()?;
-        let mut data = Bytes::new_with_alloc(alloc, img.bytes.len()).ok()?;
+        let mut data = Bytes::new_zeroed_with_alloc(alloc, img.bytes.len()).ok()?;
         data.copy_from_slice(&img.bytes);
 
         Some(DecodedImage {

@@ -101,24 +101,24 @@ impl<'alloc> Bytes<'alloc> {
     /// Allocate `len` zeroed bytes with libghostty's default allocator.
     ///
     /// Not really useful except in very niche cases.
-    pub fn new(len: usize) -> Result<Self> {
+    pub fn new_zeroed(len: usize) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
-        unsafe { Self::new_inner(std::ptr::null(), len) }
+        unsafe { Self::new_zeroed_inner(std::ptr::null(), len) }
     }
 
     /// Allocate `len` zeroed bytes with a custom allocator.
     ///
     /// Rarely needed, except by a PNG decoder, which must allocate its output
     /// with this.
-    pub fn new_with_alloc<'ctx: 'alloc>(
+    pub fn new_zeroed_with_alloc<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         len: usize,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
-        unsafe { Self::new_inner(alloc.to_raw(), len) }
+        unsafe { Self::new_zeroed_inner(alloc.to_raw(), len) }
     }
 
-    unsafe fn new_inner(alloc: *const ffi::Allocator, len: usize) -> Result<Self> {
+    unsafe fn new_zeroed_inner(alloc: *const ffi::Allocator, len: usize) -> Result<Self> {
         // `ghostty_alloc` returns NULL for a zero-length request, which
         // must not be mistaken for an allocation failure.
         if len == 0 {
@@ -749,10 +749,14 @@ mod tests {
     #[cfg_attr(miri, ignore = "calls into libghostty")]
     fn bytes_are_zero_initialized() {
         for len in [0, 1, 4096] {
-            let bytes = super::Bytes::new_with_alloc(&super::Allocator::GLOBAL, len)
-                .expect("allocation failed");
-            assert_eq!(bytes.len(), len);
-            assert!(bytes.iter().all(|&b| b == 0));
+            for bytes in [
+                super::Bytes::new_zeroed(len).expect("allocation failed"),
+                super::Bytes::new_zeroed_with_alloc(&super::Allocator::GLOBAL, len)
+                    .expect("allocation failed"),
+            ] {
+                assert_eq!(bytes.len(), len);
+                assert!(bytes.iter().all(|&b| b == 0));
+            }
         }
     }
 

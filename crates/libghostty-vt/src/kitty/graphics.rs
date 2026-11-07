@@ -335,7 +335,7 @@
 //!         _data: &[u8],
 //!     ) -> Option<graphics::DecodedImage<'alloc>> {
 //!         // Allocate RGBA pixel data through the provided allocator.
-//!         let mut data = Bytes::new_with_alloc(alloc, 4).ok()?;
+//!         let mut data = Bytes::new_zeroed_with_alloc(alloc, 4).ok()?;
 //!
 //!         // Fill with red (R=255, G=0, B=0, A=255).
 //!         data.copy_from_slice(&[255, 0, 0, 255]);
@@ -1599,7 +1599,7 @@ pub unsafe fn set_png_decoder(f: Option<Box<dyn DecodePng>>) -> Result<()> {
             // libghostty frees the buffer with the allocator it passed
             // in, so a buffer from any other allocator would be freed
             // with the wrong one. `DecodePng` is a safe trait and
-            // `Bytes::new` type-checks here, so reject such an image
+            // `Bytes::new_zeroed` type-checks here, so reject such an image
             // instead of trusting the decoder; dropping it frees the
             // buffer with its own allocator.
             Some(result) if result.data.allocator() != alloc.to_raw() => false,
@@ -1659,13 +1659,13 @@ pub trait DecodePng: Send + 'static {
     ///
     /// # On success
     ///
-    /// Allocate the pixel buffer with [`Bytes::new_with_alloc`] and `alloc`,
+    /// Allocate the pixel buffer with [`Bytes::new_zeroed_with_alloc`] and `alloc`,
     /// write the decoded pixels into it, and return it in a [`DecodedImage`].
     /// The library then owns the buffer and frees it with the same allocator.
     /// See [`DecodedImage`] for the expected pixel layout.
     ///
     /// The allocator limits how much memory a single image may use, so
-    /// [`Bytes::new_with_alloc`] can fail for very large images. Treat that as
+    /// [`Bytes::new_zeroed_with_alloc`] can fail for very large images. Treat that as
     /// a failure.
     ///
     /// # On failure
@@ -1735,7 +1735,7 @@ impl DecodePng for RustPngDecoder {
         // and let a tiny PNG claim gigabytes. (The png crate's own row and
         // zlib buffers stay on the global heap, but they are bounded by the
         // row length and the compressed size, not the image size.)
-        let mut bytes = Bytes::new_with_alloc(alloc, rgba_len).ok()?;
+        let mut bytes = Bytes::new_zeroed_with_alloc(alloc, rgba_len).ok()?;
 
         // `ALPHA` expands palettes and adds alpha, but keeps grayscale as two
         // channels, so the decoded output is either RGBA8 or GA8. Both fit in
