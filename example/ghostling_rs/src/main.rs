@@ -956,7 +956,7 @@ impl<'alloc> Input<'alloc> {
                 padding_bottom: PADDING as u32,
                 padding_left: PADDING as u32,
                 padding_right: PADDING as u32,
-            })
+            })?
             .set_any_button_pressed(any_pressed)
             // Enable motion deduplication so the encoder suppresses redundant
             // motion events within the same cell.
