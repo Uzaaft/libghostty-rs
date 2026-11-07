@@ -198,7 +198,7 @@ impl TrackedGridRef {
         if self.terminal != terminal.inner.ptr {
             return Err(Error::InvalidValue);
         }
-        let mut grid_ref = MaybeUninit::new(ffi::sized!(ffi::GridRef));
+        let mut grid_ref = MaybeUninit::zeroed();
         let result = unsafe {
             ffi::ghostty_tracked_grid_ref_snapshot(self.inner.as_ptr(), grid_ref.as_mut_ptr())
         };

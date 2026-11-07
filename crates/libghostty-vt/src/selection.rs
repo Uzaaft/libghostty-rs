@@ -59,7 +59,6 @@ impl<'t> Selection<'t> {
                 start: start.inner,
                 end: end.inner,
                 rectangle,
-                ..ffi::sized!(ffi::Selection)
             })
         }
     }
@@ -184,7 +183,7 @@ impl<'t> Selection<'t> {
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
     pub fn to_ordered(&self, terminal: &'t Terminal<'_, '_>, desired: Order) -> Result<Self> {
-        let mut selection = ffi::sized!(ffi::Selection);
+        let mut selection = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_terminal_selection_ordered(
                 terminal.inner.as_raw(),
@@ -233,7 +232,7 @@ impl Terminal<'_, '_> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn select_all(&self) -> Result<Option<Selection<'_>>> {
-        let mut value = ffi::sized!(ffi::Selection);
+        let mut value = ffi::Selection::default();
         let result =
             unsafe { ffi::ghostty_terminal_select_all(self.inner.as_raw(), &raw mut value) };
 
@@ -247,7 +246,7 @@ impl Terminal<'_, '_> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn select_line(&self, options: SelectLineOptions) -> Result<Option<Selection<'_>>> {
-        let mut value = ffi::sized!(ffi::Selection);
+        let mut value = ffi::Selection::default();
 
         let result = unsafe {
             ffi::ghostty_terminal_select_line(
@@ -267,10 +266,14 @@ impl Terminal<'_, '_> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn select_output(&self, grid_ref: GridRef<'_>) -> Result<Option<Selection<'_>>> {
-        let mut value = ffi::sized!(ffi::Selection);
+        let mut value = ffi::Selection::default();
 
         let result = unsafe {
-            ffi::ghostty_terminal_select_output(self.inner.as_raw(), grid_ref.inner, &raw mut value)
+            ffi::ghostty_terminal_select_output(
+                self.inner.as_raw(),
+                &raw const grid_ref.inner,
+                &raw mut value,
+            )
         };
 
         let sel = from_optional_result(result, value)?;
@@ -283,7 +286,7 @@ impl Terminal<'_, '_> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn select_word(&self, options: SelectWordOptions) -> Result<Option<Selection<'_>>> {
-        let mut value = ffi::sized!(ffi::Selection);
+        let mut value = ffi::Selection::default();
 
         let result = unsafe {
             ffi::ghostty_terminal_select_word(
@@ -359,7 +362,7 @@ impl Terminal<'_, '_> {
         &self,
         options: SelectWordBetweenOptions,
     ) -> Result<Option<Selection<'_>>> {
-        let mut value = ffi::sized!(ffi::Selection);
+        let mut value = ffi::Selection::default();
 
         let result = unsafe {
             ffi::ghostty_terminal_select_word_between(

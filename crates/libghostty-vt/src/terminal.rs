@@ -595,7 +595,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// that. This API is instead meant for less strictly performance-sensitive
     /// use cases.
     pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
-        let mut grid_ref = ffi::sized!(ffi::GridRef);
+        let mut grid_ref = ffi::GridRef::default();
         let result = unsafe {
             ffi::ghostty_terminal_grid_ref(self.inner.as_raw(), point.into(), &raw mut grid_ref)
         };
