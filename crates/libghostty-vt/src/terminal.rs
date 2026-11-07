@@ -575,7 +575,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Scrolls the terminal's viewport according to the given behavior.
     /// See [`ScrollViewport::DeltaPrompt`] for the navigation behavior.
     pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
-        unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) }
+        unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) };
     }
 
     /// Resolve a point in the terminal grid to a grid reference.
@@ -2401,12 +2401,11 @@ impl SizeReportStyle {
         // region, and upstream only writes within `buf_len`, even when it
         // runs out of space partway through (an empty `buf` is fine too:
         // upstream accepts a zero-length or NULL buffer as a size query).
-        // `size` is a plain-old-data struct passed by value, so copying it
-        // out of the borrow is all the C side needs.
+        // `size` remains borrowed for the duration of the call.
         let result = unsafe {
             ffi::ghostty_size_report_encode(
                 self.into(),
-                *size,
+                size,
                 buf.as_mut_ptr().cast(),
                 buf.len(),
                 &raw mut written,
