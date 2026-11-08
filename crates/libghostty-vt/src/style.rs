@@ -139,15 +139,18 @@ impl TryFrom<ffi::Style> for Style {
             fg_color: StyleColor::try_from(value.fg_color)?,
             bg_color: StyleColor::try_from(value.bg_color)?,
             underline_color: StyleColor::try_from(value.underline_color)?,
-            bold: value.bold,
-            italic: value.italic,
-            faint: value.faint,
-            blink: value.blink,
-            inverse: value.inverse,
-            invisible: value.invisible,
-            strikethrough: value.strikethrough,
-            overline: value.overline,
-            underline: Underline::try_from(value.underline).map_err(|_| Error::InvalidValue)?,
+            bold: value.flags & ffi::STYLE_FLAG_BOLD != 0,
+            italic: value.flags & ffi::STYLE_FLAG_ITALIC != 0,
+            faint: value.flags & ffi::STYLE_FLAG_FAINT != 0,
+            blink: value.flags & ffi::STYLE_FLAG_BLINK != 0,
+            inverse: value.flags & ffi::STYLE_FLAG_INVERSE != 0,
+            invisible: value.flags & ffi::STYLE_FLAG_INVISIBLE != 0,
+            strikethrough: value.flags & ffi::STYLE_FLAG_STRIKETHROUGH != 0,
+            overline: value.flags & ffi::STYLE_FLAG_OVERLINE != 0,
+            underline: Underline::try_from(i32::from(
+                (value.flags & ffi::STYLE_UNDERLINE_MASK) >> ffi::STYLE_UNDERLINE_SHIFT,
+            ))
+            .map_err(|_| Error::InvalidValue)?,
         })
     }
 }
@@ -155,19 +158,19 @@ impl TryFrom<ffi::Style> for Style {
 impl From<Style> for ffi::Style {
     fn from(value: Style) -> Self {
         Self {
-            size: std::mem::size_of::<Self>(),
             fg_color: value.fg_color.into(),
             bg_color: value.bg_color.into(),
             underline_color: value.underline_color.into(),
-            bold: value.bold,
-            italic: value.italic,
-            faint: value.faint,
-            blink: value.blink,
-            inverse: value.inverse,
-            invisible: value.invisible,
-            strikethrough: value.strikethrough,
-            overline: value.overline,
-            underline: i32::from(value.underline),
+            flags: (u16::from(value.bold) * ffi::STYLE_FLAG_BOLD)
+                | (u16::from(value.italic) * ffi::STYLE_FLAG_ITALIC)
+                | (u16::from(value.faint) * ffi::STYLE_FLAG_FAINT)
+                | (u16::from(value.blink) * ffi::STYLE_FLAG_BLINK)
+                | (u16::from(value.inverse) * ffi::STYLE_FLAG_INVERSE)
+                | (u16::from(value.invisible) * ffi::STYLE_FLAG_INVISIBLE)
+                | (u16::from(value.strikethrough) * ffi::STYLE_FLAG_STRIKETHROUGH)
+                | (u16::from(value.overline) * ffi::STYLE_FLAG_OVERLINE)
+                | ((value.underline as u16) << ffi::STYLE_UNDERLINE_SHIFT),
+            reserved: 0,
         }
     }
 }
@@ -175,7 +178,7 @@ impl From<Style> for ffi::Style {
 impl TryFrom<ffi::StyleColor> for StyleColor {
     type Error = Error;
     fn try_from(value: ffi::StyleColor) -> Result<Self> {
-        Ok(match value.tag {
+        Ok(match i32::from(value.tag) {
             ffi::StyleColorTag::NONE => Self::None,
             ffi::StyleColorTag::PALETTE => {
                 Self::Palette(PaletteIndex(unsafe { value.value.palette }))
@@ -187,18 +190,29 @@ impl TryFrom<ffi::StyleColor> for StyleColor {
 }
 
 impl From<StyleColor> for ffi::StyleColor {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the C color tags fit in their documented one-byte field"
+    )]
     fn from(value: StyleColor) -> Self {
         match value {
             StyleColor::None => Self {
-                tag: ffi::StyleColorTag::NONE,
+                tag: ffi::StyleColorTag::NONE as u8,
                 value: ffi::StyleColorValue::default(),
             },
             StyleColor::Palette(PaletteIndex(palette)) => Self {
-                tag: ffi::StyleColorTag::PALETTE,
-                value: ffi::StyleColorValue { palette },
+                tag: ffi::StyleColorTag::PALETTE as u8,
+                // The frozen color layout requires unused bytes to be zero.
+                value: ffi::StyleColorValue {
+                    rgb: ffi::ColorRgb {
+                        r: palette,
+                        g: 0,
+                        b: 0,
+                    },
+                },
             },
             StyleColor::Rgb(rgb) => Self {
-                tag: ffi::StyleColorTag::RGB,
+                tag: ffi::StyleColorTag::RGB as u8,
                 value: ffi::StyleColorValue { rgb: rgb.into() },
             },
         }

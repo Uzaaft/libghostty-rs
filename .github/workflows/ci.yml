@@ -76,10 +76,12 @@ jobs:
 
       # The examples are their own workspace, so the flake checks above never
       # build them. `--locked` also fails if example/Cargo.lock is stale.
+      # Use the shell's native Ghostty library instead of compiling it again.
+      # Wasm and iOS below deliberately keep exercising source builds.
       - name: Build examples
         run: |
-          nix develop -c cargo build --locked --manifest-path example/Cargo.toml --workspace
-          nix develop -c cargo test --locked --manifest-path example/Cargo.toml -p wasm_rs
+          nix develop -c cargo build --locked --manifest-path example/Cargo.toml --workspace --features libghostty-vt/pkg-config
+          nix develop -c cargo test --locked --manifest-path example/Cargo.toml -p wasm_rs --features libghostty-vt/pkg-config
 
       # Link and execute Rust + Zig together. cargo check cannot catch ABI,
       # callback table, allocator, or unexpected host-import failures.

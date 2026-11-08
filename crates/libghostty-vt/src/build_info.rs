@@ -45,6 +45,51 @@ pub fn supports_tmux_control_mode() -> Result<bool> {
     build_info(Info::TMUX_CONTROL_MODE)
 }
 
+/// Whether snapshot encoding and decoding are available.
+pub fn supports_snapshot() -> Result<bool> {
+    build_info(Info::FEATURE_SNAPSHOT)
+}
+
+/// Whether terminal content formatting is available.
+pub fn supports_formatter() -> Result<bool> {
+    build_info(Info::FEATURE_FORMATTER)
+}
+
+/// Whether selections and selection gestures are available.
+pub fn supports_selection() -> Result<bool> {
+    build_info(Info::FEATURE_SELECTION)
+}
+
+/// Whether terminal content search is available.
+pub fn supports_search() -> Result<bool> {
+    build_info(Info::FEATURE_SEARCH)
+}
+
+/// Whether render state snapshots are available.
+pub fn supports_render_state() -> Result<bool> {
+    build_info(Info::FEATURE_RENDER_STATE)
+}
+
+/// Whether key, mouse, focus and paste encoding are available.
+pub fn supports_input_encode() -> Result<bool> {
+    build_info(Info::FEATURE_INPUT_ENCODE)
+}
+
+/// Whether color parsing and palette functions are available.
+pub fn supports_color() -> Result<bool> {
+    build_info(Info::FEATURE_COLOR)
+}
+
+/// Whether grid references, cells and rows can be inspected.
+pub fn supports_grid_introspection() -> Result<bool> {
+    build_info(Info::FEATURE_GRID_INTROSPECTION)
+}
+
+/// Whether applications can register custom glyphs with the glyph protocol.
+pub fn supports_glyph_protocol() -> Result<bool> {
+    build_info(Info::FEATURE_GLYPH_PROTOCOL)
+}
+
 /// The optimization mode the library was built with.
 pub fn optimize_mode() -> Result<OptimizeMode> {
     build_info::<ffi::OptimizeMode::Type>(Info::OPTIMIZE)

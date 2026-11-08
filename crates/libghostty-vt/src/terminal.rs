@@ -246,13 +246,13 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
 #[non_exhaustive]
 pub enum CursorStyle {
     /// Bar cursor (DECSCUSR 5, 6).
-    Bar = ffi::TerminalCursorStyle::BAR,
+    Bar = ffi::CursorStyle::BAR,
     /// Block cursor (DECSCUSR 1, 2).
-    Block = ffi::TerminalCursorStyle::BLOCK,
+    Block = ffi::CursorStyle::BLOCK,
     /// Underline cursor (DECSCUSR 3, 4).
-    Underline = ffi::TerminalCursorStyle::UNDERLINE,
+    Underline = ffi::CursorStyle::UNDERLINE,
     /// Hollow block cursor.
-    BlockHollow = ffi::TerminalCursorStyle::BLOCK_HOLLOW,
+    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
@@ -575,7 +575,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Scrolls the terminal's viewport according to the given behavior.
     /// See [`ScrollViewport::DeltaPrompt`] for the navigation behavior.
     pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
-        unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) }
+        unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) };
     }
 
     /// Resolve a point in the terminal grid to a grid reference.
@@ -595,7 +595,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// that. This API is instead meant for less strictly performance-sensitive
     /// use cases.
     pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
-        let mut grid_ref = ffi::sized!(ffi::GridRef);
+        let mut grid_ref = ffi::GridRef::default();
         let result = unsafe {
             ffi::ghostty_terminal_grid_ref(self.inner.as_raw(), point.into(), &raw mut grid_ref)
         };
@@ -1022,7 +1022,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// Lowering the limit immediately removes eligible complete historical
     /// pages. A value of zero disables scrollback and erases retained history.
-    /// A `None` value removes the byte limit.
+    /// `None` restores the default of 10,000 bytes, rounded up to a page.
+    /// Pass `Some(usize::MAX)` for no byte limit.
     pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<&mut Self> {
         self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())?;
         Ok(self)
@@ -1090,7 +1091,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// This is the style that will be applied to newly printed characters.
     pub fn cursor_style(&self) -> Result<style::Style> {
-        self.get::<ffi::Style>(Data::CURSOR_STYLE)
+        self.get::<ffi::Style>(Data::CURSOR_SGR_STYLE)
             .and_then(std::convert::TryInto::try_into)
     }
     /// The mouse pointer shape requested by the application through OSC 22.
@@ -2400,12 +2401,11 @@ impl SizeReportStyle {
         // region, and upstream only writes within `buf_len`, even when it
         // runs out of space partway through (an empty `buf` is fine too:
         // upstream accepts a zero-length or NULL buffer as a size query).
-        // `size` is a plain-old-data struct passed by value, so copying it
-        // out of the borrow is all the C side needs.
+        // `size` remains borrowed for the duration of the call.
         let result = unsafe {
             ffi::ghostty_size_report_encode(
                 self.into(),
-                *size,
+                size,
                 buf.as_mut_ptr().cast(),
                 buf.len(),
                 &raw mut written,
@@ -2462,9 +2462,6 @@ pub struct CompressionActivity(u64);
 /// within the clipboard write request callback. Returning without replying
 /// denies the write.
 ///
-/// As the C API requires, only the fields within the size libghostty reports
-/// for the request are read. Any that don't fit read as empty or false, and
-/// [`reply`](Self::reply) then does nothing, which denies the write.
 #[derive(Debug)]
 pub struct ClipboardWrite<'t> {
     ptr: *const ffi::ClipboardWrite,
@@ -2477,9 +2474,7 @@ impl<'t> ClipboardWrite<'t> {
     #[must_use]
     pub fn name(&self) -> &'t [u8] {
         // SAFETY: The request and its strings live for the callback duration.
-        unsafe {
-            crate::sized_field!(self.ptr, ffi::ClipboardWrite, name).map_or(&[], |n| n.to_bytes())
-        }
+        unsafe { (*self.ptr).name.to_bytes() }
     }
 
     /// True if the terminal already holds a session grant for this request.
@@ -2487,7 +2482,7 @@ impl<'t> ClipboardWrite<'t> {
     #[must_use]
     pub fn granted(&self) -> bool {
         // SAFETY: The request lives for the callback duration.
-        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardWrite, granted) }.unwrap_or(false)
+        unsafe { (*self.ptr).granted }
     }
 
     /// True if the program supplied a session password, so the embedder may
@@ -2496,7 +2491,7 @@ impl<'t> ClipboardWrite<'t> {
     #[must_use]
     pub fn can_remember(&self) -> bool {
         // SAFETY: The request lives for the callback duration.
-        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardWrite, can_remember) }.unwrap_or(false)
+        unsafe { (*self.ptr).can_remember }
     }
 
     /// Answer the write.
@@ -2516,9 +2511,7 @@ impl<'t> ClipboardWrite<'t> {
             ..ffi::sized!(ffi::ClipboardWriteReply)
         };
         // SAFETY: The request lives for the callback duration.
-        if let Some(callback) =
-            unsafe { crate::sized_field!(self.ptr, ffi::ClipboardWrite, reply) }.flatten()
-        {
+        if let Some(callback) = unsafe { (*self.ptr).reply } {
             // SAFETY: The reply only needs to outlive this synchronous call.
             unsafe { callback(self.ptr, &raw const reply) };
         }
@@ -2539,8 +2532,8 @@ impl<'t> ClipboardWrite<'t> {
     pub fn location(&self) -> ClipboardLocation {
         // SAFETY: We trust libghostty to give us a valid pointer
         // within the lifetime of the callback.
-        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardWrite, location) }
-            .and_then(|location| location.try_into().ok())
+        unsafe { (*self.ptr).location }
+            .try_into()
             .unwrap_or(ClipboardLocation::Standard)
     }
     /// Get an iterator into a borrowed array of MIME representations.
@@ -2552,17 +2545,12 @@ impl<'t> ClipboardWrite<'t> {
     pub fn contents(&self) -> ClipboardContents<'t> {
         // SAFETY: We trust libghostty to give us a valid pointer
         // within the lifetime of the callback.
-        let (ptr, len) = unsafe {
-            (
-                crate::sized_field!(self.ptr, ffi::ClipboardWrite, contents),
-                crate::sized_field!(self.ptr, ffi::ClipboardWrite, contents_len),
-            )
-        };
+        let (ptr, len) = unsafe { ((*self.ptr).contents, (*self.ptr).contents_len) };
         // The C API declares `contents` optional and sends null for a write
         // carrying no representations (the "clear the clipboard" shape);
         // `from_raw_parts` requires a non-null pointer even at length zero.
         let contents: &'t [ffi::ClipboardContent] = match (ptr, len) {
-            (Some(ptr), Some(len)) if !ptr.is_null() => {
+            (ptr, len) if !ptr.is_null() => {
                 // SAFETY: We trust libghostty to give us a valid pointer and
                 // length within the lifetime of the callback.
                 unsafe { std::slice::from_raw_parts(ptr, len) }
@@ -2706,8 +2694,8 @@ impl<'t> ClipboardRead<'t> {
     #[must_use]
     pub fn location(&self) -> ClipboardLocation {
         // SAFETY: The request lives for the callback duration.
-        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardRead, location) }
-            .and_then(|location| location.try_into().ok())
+        unsafe { (*self.ptr).location }
+            .try_into()
             .unwrap_or(ClipboardLocation::Standard)
     }
 
@@ -2719,18 +2707,13 @@ impl<'t> ClipboardRead<'t> {
     #[must_use]
     pub fn mimes(&self) -> impl ExactSizeIterator<Item = &'t [u8]> + use<'t> {
         // SAFETY: The request lives for the callback duration.
-        let (ptr, len) = unsafe {
-            (
-                crate::sized_field!(self.ptr, ffi::ClipboardRead, mimes),
-                crate::sized_field!(self.ptr, ffi::ClipboardRead, mimes_len),
-            )
-        };
+        let (ptr, len) = unsafe { ((*self.ptr).mimes, (*self.ptr).mimes_len) };
         // `mimes` is NULL when `mimes_len` is zero (a targets-only OSC 5522
         // read), and `from_raw_parts` requires a non-null pointer even at
         // length zero. Check both, as `ClipboardWrite::contents` does, so
         // a NULL pointer can never reach it.
         let mimes: &'t [ffi::String] = match (ptr, len) {
-            (Some(ptr), Some(len)) if !ptr.is_null() && len > 0 => {
+            (ptr, len) if !ptr.is_null() && len > 0 => {
                 // SAFETY: libghostty provides `mimes_len` strings that live
                 // for the callback duration.
                 unsafe { std::slice::from_raw_parts(ptr, len) }
@@ -2747,7 +2730,7 @@ impl<'t> ClipboardRead<'t> {
     #[must_use]
     pub fn list(&self) -> bool {
         // SAFETY: The request lives for the callback duration.
-        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardRead, list) }.unwrap_or(false)
+        unsafe { (*self.ptr).list }
     }
 
     /// Name of the requesting program for permission prompts, if the protocol
@@ -2755,9 +2738,7 @@ impl<'t> ClipboardRead<'t> {
     #[must_use]
     pub fn name(&self) -> &'t [u8] {
         // SAFETY: The request and its strings live for the callback duration.
-        unsafe {
-            crate::sized_field!(self.ptr, ffi::ClipboardRead, name).map_or(&[], |n| n.to_bytes())
-        }
+        unsafe { (*self.ptr).name.to_bytes() }
     }
 
     /// True if the terminal already holds a session grant for this request
@@ -2771,7 +2752,7 @@ impl<'t> ClipboardRead<'t> {
     #[must_use]
     pub fn granted(&self) -> bool {
         // SAFETY: The request lives for the callback duration.
-        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardRead, granted) }.unwrap_or(false)
+        unsafe { (*self.ptr).granted }
     }
 
     /// True if the program supplied a session password, so the embedder may
@@ -2780,7 +2761,7 @@ impl<'t> ClipboardRead<'t> {
     #[must_use]
     pub fn can_remember(&self) -> bool {
         // SAFETY: The request lives for the callback duration.
-        unsafe { crate::sized_field!(self.ptr, ffi::ClipboardRead, can_remember) }.unwrap_or(false)
+        unsafe { (*self.ptr).can_remember }
     }
 
     /// Answer the read.
@@ -2830,9 +2811,7 @@ impl<'t> ClipboardRead<'t> {
             ..ffi::sized!(ffi::ClipboardReadReply)
         };
         // SAFETY: The request lives for the callback duration.
-        if let Some(callback) =
-            unsafe { crate::sized_field!(self.ptr, ffi::ClipboardRead, reply) }.flatten()
-        {
+        if let Some(callback) = unsafe { (*self.ptr).reply } {
             // SAFETY: The reply and the buffers it points to only need to
             // outlive this synchronous call.
             unsafe { callback(self.ptr, &raw const reply) };
@@ -3048,10 +3027,7 @@ impl<'t> DesktopNotification<'t> {
     pub fn title(self) -> &'t [u8] {
         // SAFETY: The notification and its strings live for the callback
         // duration.
-        unsafe {
-            crate::sized_field!(self.ptr, ffi::TerminalDesktopNotification, title)
-                .map_or(&[], |title| title.to_bytes())
-        }
+        unsafe { (*self.ptr).title.to_bytes() }
     }
 
     /// Notification body.
@@ -3061,10 +3037,7 @@ impl<'t> DesktopNotification<'t> {
     pub fn body(self) -> &'t [u8] {
         // SAFETY: The notification and its strings live for the callback
         // duration.
-        unsafe {
-            crate::sized_field!(self.ptr, ffi::TerminalDesktopNotification, body)
-                .map_or(&[], |body| body.to_bytes())
-        }
+        unsafe { (*self.ptr).body.to_bytes() }
     }
 }
 
@@ -3173,9 +3146,7 @@ impl<'t> ProgramStatus<'t> {
 
     /// The raw report.
     ///
-    /// Every field has been present since the struct was introduced, so
-    /// reading them doesn't need to consult `size` (unlike fields added
-    /// later, which go through `sized_field!`).
+    /// The report has a frozen layout, so every field is readable.
     fn raw(self) -> &'t ffi::TerminalProgramStatus {
         // SAFETY: We trust libghostty to give us a valid underlying ptr,
         // which lives for the callback duration, i.e. `'t`.
@@ -3332,10 +3303,7 @@ impl<'t> SemanticPrompt<'t> {
 
     /// The raw event.
     ///
-    /// Upstream promises every field we read has been present since the
-    /// struct was introduced, so reading them doesn't need to consult
-    /// `size`. Fields added later (upstream names a command identifier and
-    /// a "redrawn prompt" flag as likely) must go through `sized_field!`.
+    /// The event has a frozen layout, so every field is readable.
     fn raw(self) -> &'t ffi::TerminalSemanticPrompt {
         // SAFETY: We trust libghostty to give us a valid underlying ptr,
         // which lives for the callback duration, i.e. `'t`.
@@ -5595,6 +5563,50 @@ mod tests {
     }
 
     #[test]
+    fn cursor_style_preserves_independent_attributes() {
+        use crate::style::{PaletteIndex, RgbColor, Style, StyleColor, Underline};
+
+        let mut terminal = Terminal::new(80, 24).unwrap();
+        let default = Style::default();
+        assert!(default.is_default());
+
+        // Complementary flag sets catch swapped bits; a curly underline
+        // exercises more than one bit of the packed underline field.
+        terminal.vt_write(b"\x1b[1;3;7;9;4:3;38;2;17;83;201;48;5;42m");
+        let expected = Style {
+            bold: true,
+            italic: true,
+            inverse: true,
+            strikethrough: true,
+            underline: Underline::Curly,
+            fg_color: StyleColor::Rgb(RgbColor {
+                r: 17,
+                g: 83,
+                b: 201,
+            }),
+            bg_color: StyleColor::Palette(PaletteIndex(42)),
+            ..default
+        };
+        assert_eq!(terminal.cursor_style().unwrap(), expected);
+        assert!(!expected.is_default());
+
+        terminal.vt_write(b"\x1b[0;2;5;8;53;4:5m");
+        assert_eq!(
+            terminal.cursor_style().unwrap(),
+            Style {
+                faint: true,
+                blink: true,
+                invisible: true,
+                overline: true,
+                underline: Underline::Dashed,
+                ..default
+            }
+        );
+        terminal.vt_write(b"\x1b[0m");
+        assert_eq!(terminal.cursor_style().unwrap(), default);
+    }
+
+    #[test]
     fn default_cursor_reset_uses_configured_style_and_blink() {
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         let mut render_state = RenderState::new().expect("render state should initialize");
@@ -6368,79 +6380,6 @@ mod tests {
         );
     }
 
-    /// The C API only allows reading the fields within a request's `size`.
-    /// For a request that ends before `name`, the fields past it must not be
-    /// read, and `reply` must not call whatever lies where the reply function
-    /// would be.
-    #[test]
-    fn clipboard_write_reads_only_fields_within_its_size() {
-        unsafe extern "C" fn reply(
-            _: *const ffi::ClipboardWrite,
-            _: *const ffi::ClipboardWriteReply,
-        ) {
-            panic!("a reply function past the request's size was called");
-        }
-        let data = b"hi";
-        let content = ffi::ClipboardContent {
-            mime: ffi::String::from("text/plain"),
-            data: ffi::String {
-                ptr: data.as_ptr(),
-                len: data.len(),
-            },
-        };
-        let raw = ffi::ClipboardWrite {
-            size: std::mem::offset_of!(ffi::ClipboardWrite, name),
-            location: ffi::ClipboardLocation::PRIMARY,
-            contents: &raw const content,
-            contents_len: 1,
-            name: ffi::String::from("program"),
-            granted: true,
-            can_remember: true,
-            reply: Some(reply),
-            ..ffi::sized!(ffi::ClipboardWrite)
-        };
-        // SAFETY: `raw` outlives the borrow, matching the callback contract.
-        let write = unsafe { ClipboardWrite::from_raw(&raw const raw) };
-        assert_eq!(write.location(), ClipboardLocation::Primary);
-        assert_eq!(write.contents().next().unwrap().data, b"hi");
-        assert!(write.name().is_empty());
-        assert!(!write.granted());
-        assert!(!write.can_remember());
-        write.reply(Ok(()), false);
-    }
-
-    /// Same as above for a read request that ends before `name`.
-    #[test]
-    fn clipboard_read_reads_only_fields_within_its_size() {
-        unsafe extern "C" fn reply(
-            _: *const ffi::ClipboardRead,
-            _: *const ffi::ClipboardReadReply,
-        ) {
-            panic!("a reply function past the request's size was called");
-        }
-        let mime = ffi::String::from("text/plain");
-        let raw = ffi::ClipboardRead {
-            size: std::mem::offset_of!(ffi::ClipboardRead, name),
-            location: ffi::ClipboardLocation::SELECTION,
-            mimes: &raw const mime,
-            mimes_len: 1,
-            list: true,
-            name: ffi::String::from("program"),
-            granted: true,
-            can_remember: true,
-            reply: Some(reply),
-            ..ffi::sized!(ffi::ClipboardRead)
-        };
-        // SAFETY: `raw` outlives the borrow, matching the callback contract.
-        let read = unsafe { ClipboardRead::from_raw(&raw const raw) };
-        assert_eq!(read.location(), ClipboardLocation::Selection);
-        assert_eq!(read.mimes().collect::<Vec<_>>(), [b"text/plain"]);
-        assert!(read.name().is_empty());
-        assert!(!read.granted());
-        assert!(!read.can_remember());
-        read.reply(Ok(&[]), &[], false);
-    }
-
     /// Bold `A`, then `B`, a space and `C` on the first row.
     ///
     /// Expected checksums, worked out from upstream's `xt_checksum.compute`:
@@ -6895,10 +6834,10 @@ mod miri_soundness {
             let request = ffi::ClipboardRead {
                 ctx: terminal.cast(),
                 reply: Some(reply_to_read),
-                ..ffi::sized!(ffi::ClipboardRead)
+                ..ffi::ClipboardRead::default()
             };
             // SAFETY: Registration provided this callback and its userdata;
-            // the sized request remains live throughout synchronous dispatch.
+            // the request remains live throughout synchronous dispatch.
             unsafe { read.unwrap()(terminal, userdata, &raw const request) };
         } else {
             // SAFETY: Registration provided this callback and its userdata.
@@ -7054,7 +6993,7 @@ mod miri_soundness {
             location: ffi::ClipboardLocation::STANDARD,
             contents: std::ptr::null(),
             contents_len: 0,
-            ..ffi::sized!(ffi::ClipboardWrite)
+            ..ffi::ClipboardWrite::default()
         };
         // SAFETY: `raw` outlives the borrow, matching the callback contract.
         let write = unsafe { ClipboardWrite::from_raw(&raw) };

@@ -1,17 +1,12 @@
 //! Rust port of upstream's `example/wasm-vt` terminal demo.
 
-use libghostty_vt::{
-    Terminal,
-    alloc::Bytes,
-    error::Result,
-    fmt::{Formatter, FormatterOptions},
-};
+use libghostty_vt::{Terminal, alloc::Bytes, error::Result, fmt::Formatter};
 
 /// Create a terminal, feed it VT data, and return its contents as plain text.
 pub fn format_terminal(cols: u16, rows: u16, input: &[u8]) -> Result<Bytes<'static>> {
     let mut terminal = Terminal::new(cols, rows)?;
     terminal.vt_write(input);
-    let mut formatter = Formatter::new(&terminal, FormatterOptions::new().with_trim(true))?;
+    let mut formatter = Formatter::new(&terminal)?;
     formatter.format_alloc(None)
 }
 

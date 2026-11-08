@@ -6,12 +6,7 @@ use std::{
     mem::{align_of, offset_of, size_of},
 };
 
-use libghostty_vt::{
-    RenderState, Terminal,
-    alloc::Allocator,
-    ffi,
-    fmt::{Formatter, FormatterOptions},
-};
+use libghostty_vt::{RenderState, Terminal, alloc::Allocator, ffi, fmt::Formatter};
 
 /// Exercise the same public Rust API used on native targets.
 /// A failed assertion traps, which makes the host runner fail as well.
@@ -34,7 +29,7 @@ pub extern "C" fn run() {
     layout!(String, ptr, len);
     layout!(Allocator, ctx, vtable);
     layout!(AllocatorVtable, alloc, resize, remap, free);
-    layout!(FormatterTerminalOptions, size, emit, unwrap, trim, extra);
+    layout!(Selection, start, end, rectangle);
 
     // Keep Rust-owned memory alive while Zig grows and uses its own heap.
     let guard = vec![0x5au8; 256 * 1024];
@@ -58,8 +53,7 @@ pub extern "C" fn run() {
         let snapshot = state.update(&terminal).unwrap();
         assert_eq!(snapshot.cols().unwrap(), 13);
         assert_eq!(snapshot.rows().unwrap(), 7);
-        let mut formatter =
-            Formatter::new(&terminal, FormatterOptions::new().with_trim(true)).unwrap();
+        let mut formatter = Formatter::new(&terminal).unwrap();
         let mut output = [0; 64];
         let len = formatter.format_buf(&mut output).unwrap();
         assert_eq!(&output[..len], b"abC\nxy");

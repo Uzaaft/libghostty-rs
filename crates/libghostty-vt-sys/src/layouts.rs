@@ -68,7 +68,7 @@
         target_abi = "sim",
         target_arch = "aarch64",
         target_endian = "little",
-        target_env = "",
+        target_env = "sim",
         target_os = "ios",
         target_pointer_width = "64",
         target_vendor = "apple"
@@ -172,7 +172,18 @@ mod layout_0 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of AllocatorVtable"][::std::mem::size_of::<AllocatorVtable>() - 32usize];
+        ["Size of CodepointBuffer"][::std::mem::size_of::<CodepointBuffer>() - 24usize];
+        ["Alignment of CodepointBuffer"][::std::mem::align_of::<CodepointBuffer>() - 8usize];
+        ["Offset of field: CodepointBuffer::ptr"]
+            [::std::mem::offset_of!(CodepointBuffer, ptr) - 0usize];
+        ["Offset of field: CodepointBuffer::cap"]
+            [::std::mem::offset_of!(CodepointBuffer, cap) - 8usize];
+        ["Offset of field: CodepointBuffer::len"]
+            [::std::mem::offset_of!(CodepointBuffer, len) - 16usize];
+    };
+    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
+    const _: () = {
+        ["Size of AllocatorVtable"][::std::mem::size_of::<AllocatorVtable>() - 64usize];
         ["Alignment of AllocatorVtable"][::std::mem::align_of::<AllocatorVtable>() - 8usize];
         ["Offset of field: AllocatorVtable::alloc"]
             [::std::mem::offset_of!(AllocatorVtable, alloc) - 0usize];
@@ -182,6 +193,8 @@ mod layout_0 {
             [::std::mem::offset_of!(AllocatorVtable, remap) - 16usize];
         ["Offset of field: AllocatorVtable::free"]
             [::std::mem::offset_of!(AllocatorVtable, free) - 24usize];
+        ["Offset of field: AllocatorVtable::reserved"]
+            [::std::mem::offset_of!(AllocatorVtable, reserved) - 32usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -291,50 +304,38 @@ mod layout_0 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of StyleColorValue"][::std::mem::size_of::<StyleColorValue>() - 8usize];
-        ["Alignment of StyleColorValue"][::std::mem::align_of::<StyleColorValue>() - 8usize];
+        ["Size of StyleColorValue"][::std::mem::size_of::<StyleColorValue>() - 3usize];
+        ["Alignment of StyleColorValue"][::std::mem::align_of::<StyleColorValue>() - 1usize];
         ["Offset of field: StyleColorValue::palette"]
             [::std::mem::offset_of!(StyleColorValue, palette) - 0usize];
         ["Offset of field: StyleColorValue::rgb"]
             [::std::mem::offset_of!(StyleColorValue, rgb) - 0usize];
-        ["Offset of field: StyleColorValue::_padding"]
-            [::std::mem::offset_of!(StyleColorValue, _padding) - 0usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of StyleColor"][::std::mem::size_of::<StyleColor>() - 16usize];
-        ["Alignment of StyleColor"][::std::mem::align_of::<StyleColor>() - 8usize];
+        ["Size of StyleColor"][::std::mem::size_of::<StyleColor>() - 4usize];
+        ["Alignment of StyleColor"][::std::mem::align_of::<StyleColor>() - 1usize];
         ["Offset of field: StyleColor::tag"][::std::mem::offset_of!(StyleColor, tag) - 0usize];
-        ["Offset of field: StyleColor::value"][::std::mem::offset_of!(StyleColor, value) - 8usize];
+        ["Offset of field: StyleColor::value"][::std::mem::offset_of!(StyleColor, value) - 1usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of Style"][::std::mem::size_of::<Style>() - 72usize];
-        ["Alignment of Style"][::std::mem::align_of::<Style>() - 8usize];
-        ["Offset of field: Style::size"][::std::mem::offset_of!(Style, size) - 0usize];
-        ["Offset of field: Style::fg_color"][::std::mem::offset_of!(Style, fg_color) - 8usize];
-        ["Offset of field: Style::bg_color"][::std::mem::offset_of!(Style, bg_color) - 24usize];
+        ["Size of Style"][::std::mem::size_of::<Style>() - 16usize];
+        ["Alignment of Style"][::std::mem::align_of::<Style>() - 2usize];
+        ["Offset of field: Style::fg_color"][::std::mem::offset_of!(Style, fg_color) - 0usize];
+        ["Offset of field: Style::bg_color"][::std::mem::offset_of!(Style, bg_color) - 4usize];
         ["Offset of field: Style::underline_color"]
-            [::std::mem::offset_of!(Style, underline_color) - 40usize];
-        ["Offset of field: Style::bold"][::std::mem::offset_of!(Style, bold) - 56usize];
-        ["Offset of field: Style::italic"][::std::mem::offset_of!(Style, italic) - 57usize];
-        ["Offset of field: Style::faint"][::std::mem::offset_of!(Style, faint) - 58usize];
-        ["Offset of field: Style::blink"][::std::mem::offset_of!(Style, blink) - 59usize];
-        ["Offset of field: Style::inverse"][::std::mem::offset_of!(Style, inverse) - 60usize];
-        ["Offset of field: Style::invisible"][::std::mem::offset_of!(Style, invisible) - 61usize];
-        ["Offset of field: Style::strikethrough"]
-            [::std::mem::offset_of!(Style, strikethrough) - 62usize];
-        ["Offset of field: Style::overline"][::std::mem::offset_of!(Style, overline) - 63usize];
-        ["Offset of field: Style::underline"][::std::mem::offset_of!(Style, underline) - 64usize];
+            [::std::mem::offset_of!(Style, underline_color) - 8usize];
+        ["Offset of field: Style::flags"][::std::mem::offset_of!(Style, flags) - 12usize];
+        ["Offset of field: Style::reserved"][::std::mem::offset_of!(Style, reserved) - 14usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of GridRef"][::std::mem::size_of::<GridRef>() - 24usize];
+        ["Size of GridRef"][::std::mem::size_of::<GridRef>() - 16usize];
         ["Alignment of GridRef"][::std::mem::align_of::<GridRef>() - 8usize];
-        ["Offset of field: GridRef::size"][::std::mem::offset_of!(GridRef, size) - 0usize];
-        ["Offset of field: GridRef::node"][::std::mem::offset_of!(GridRef, node) - 8usize];
-        ["Offset of field: GridRef::x"][::std::mem::offset_of!(GridRef, x) - 16usize];
-        ["Offset of field: GridRef::y"][::std::mem::offset_of!(GridRef, y) - 18usize];
+        ["Offset of field: GridRef::node"][::std::mem::offset_of!(GridRef, node) - 0usize];
+        ["Offset of field: GridRef::x"][::std::mem::offset_of!(GridRef, x) - 8usize];
+        ["Offset of field: GridRef::y"][::std::mem::offset_of!(GridRef, y) - 10usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -363,13 +364,12 @@ mod layout_0 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of Selection"][::std::mem::size_of::<Selection>() - 64usize];
+        ["Size of Selection"][::std::mem::size_of::<Selection>() - 40usize];
         ["Alignment of Selection"][::std::mem::align_of::<Selection>() - 8usize];
-        ["Offset of field: Selection::size"][::std::mem::offset_of!(Selection, size) - 0usize];
-        ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 8usize];
-        ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 32usize];
+        ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 0usize];
+        ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 16usize];
         ["Offset of field: Selection::rectangle"]
-            [::std::mem::offset_of!(Selection, rectangle) - 56usize];
+            [::std::mem::offset_of!(Selection, rectangle) - 32usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -385,7 +385,7 @@ mod layout_0 {
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalSelectWordOptions"]
-            [::std::mem::size_of::<TerminalSelectWordOptions>() - 48usize];
+            [::std::mem::size_of::<TerminalSelectWordOptions>() - 40usize];
         ["Alignment of TerminalSelectWordOptions"]
             [::std::mem::align_of::<TerminalSelectWordOptions>() - 8usize];
         ["Offset of field: TerminalSelectWordOptions::size"]
@@ -393,14 +393,14 @@ mod layout_0 {
         ["Offset of field: TerminalSelectWordOptions::ref_"]
             [::std::mem::offset_of!(TerminalSelectWordOptions, ref_) - 8usize];
         ["Offset of field: TerminalSelectWordOptions::boundary_codepoints"]
-            [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 32usize];
+            [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 24usize];
         ["Offset of field: TerminalSelectWordOptions::boundary_codepoints_len"]
-            [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 40usize];
+            [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 32usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalSelectWordBetweenOptions"]
-            [::std::mem::size_of::<TerminalSelectWordBetweenOptions>() - 72usize];
+            [::std::mem::size_of::<TerminalSelectWordBetweenOptions>() - 56usize];
         ["Alignment of TerminalSelectWordBetweenOptions"]
             [::std::mem::align_of::<TerminalSelectWordBetweenOptions>() - 8usize];
         ["Offset of field: TerminalSelectWordBetweenOptions::size"]
@@ -408,20 +408,20 @@ mod layout_0 {
         ["Offset of field: TerminalSelectWordBetweenOptions::start"]
             [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, start) - 8usize];
         ["Offset of field: TerminalSelectWordBetweenOptions::end"]
-            [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 32usize];
+            [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 24usize];
         ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints"][::std::mem::offset_of!(
             TerminalSelectWordBetweenOptions,
             boundary_codepoints
-        ) - 56usize];
+        ) - 40usize];
         ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints_len"][::std::mem::offset_of!(
             TerminalSelectWordBetweenOptions,
             boundary_codepoints_len
-        ) - 64usize];
+        ) - 48usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalSelectLineOptions"]
-            [::std::mem::size_of::<TerminalSelectLineOptions>() - 56usize];
+            [::std::mem::size_of::<TerminalSelectLineOptions>() - 48usize];
         ["Alignment of TerminalSelectLineOptions"]
             [::std::mem::align_of::<TerminalSelectLineOptions>() - 8usize];
         ["Offset of field: TerminalSelectLineOptions::size"]
@@ -429,28 +429,11 @@ mod layout_0 {
         ["Offset of field: TerminalSelectLineOptions::ref_"]
             [::std::mem::offset_of!(TerminalSelectLineOptions, ref_) - 8usize];
         ["Offset of field: TerminalSelectLineOptions::whitespace"]
-            [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 32usize];
+            [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 24usize];
         ["Offset of field: TerminalSelectLineOptions::whitespace_len"]
-            [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 40usize];
+            [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 32usize];
         ["Offset of field: TerminalSelectLineOptions::semantic_prompt_boundary"]
-            [::std::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 48usize];
-    };
-    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
-    const _: () = {
-        ["Size of TerminalSelectionFormatOptions"]
-            [::std::mem::size_of::<TerminalSelectionFormatOptions>() - 24usize];
-        ["Alignment of TerminalSelectionFormatOptions"]
-            [::std::mem::align_of::<TerminalSelectionFormatOptions>() - 8usize];
-        ["Offset of field: TerminalSelectionFormatOptions::size"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, size) - 0usize];
-        ["Offset of field: TerminalSelectionFormatOptions::emit"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, emit) - 8usize];
-        ["Offset of field: TerminalSelectionFormatOptions::unwrap"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, unwrap) - 12usize];
-        ["Offset of field: TerminalSelectionFormatOptions::trim"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, trim) - 13usize];
-        ["Offset of field: TerminalSelectionFormatOptions::selection"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, selection) - 16usize];
+            [::std::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 40usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -685,26 +668,24 @@ mod layout_0 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 72usize];
+        ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 64usize];
         ["Alignment of ClipboardWrite"][::std::mem::align_of::<ClipboardWrite>() - 8usize];
-        ["Offset of field: ClipboardWrite::size"]
-            [::std::mem::offset_of!(ClipboardWrite, size) - 0usize];
         ["Offset of field: ClipboardWrite::location"]
-            [::std::mem::offset_of!(ClipboardWrite, location) - 8usize];
+            [::std::mem::offset_of!(ClipboardWrite, location) - 0usize];
         ["Offset of field: ClipboardWrite::contents"]
-            [::std::mem::offset_of!(ClipboardWrite, contents) - 16usize];
+            [::std::mem::offset_of!(ClipboardWrite, contents) - 8usize];
         ["Offset of field: ClipboardWrite::contents_len"]
-            [::std::mem::offset_of!(ClipboardWrite, contents_len) - 24usize];
+            [::std::mem::offset_of!(ClipboardWrite, contents_len) - 16usize];
         ["Offset of field: ClipboardWrite::name"]
-            [::std::mem::offset_of!(ClipboardWrite, name) - 32usize];
+            [::std::mem::offset_of!(ClipboardWrite, name) - 24usize];
         ["Offset of field: ClipboardWrite::granted"]
-            [::std::mem::offset_of!(ClipboardWrite, granted) - 48usize];
+            [::std::mem::offset_of!(ClipboardWrite, granted) - 40usize];
         ["Offset of field: ClipboardWrite::can_remember"]
-            [::std::mem::offset_of!(ClipboardWrite, can_remember) - 49usize];
+            [::std::mem::offset_of!(ClipboardWrite, can_remember) - 41usize];
         ["Offset of field: ClipboardWrite::ctx"]
-            [::std::mem::offset_of!(ClipboardWrite, ctx) - 56usize];
+            [::std::mem::offset_of!(ClipboardWrite, ctx) - 48usize];
         ["Offset of field: ClipboardWrite::reply"]
-            [::std::mem::offset_of!(ClipboardWrite, reply) - 64usize];
+            [::std::mem::offset_of!(ClipboardWrite, reply) - 56usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -727,97 +708,87 @@ mod layout_0 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of ClipboardRead"][::std::mem::size_of::<ClipboardRead>() - 80usize];
+        ["Size of ClipboardRead"][::std::mem::size_of::<ClipboardRead>() - 72usize];
         ["Alignment of ClipboardRead"][::std::mem::align_of::<ClipboardRead>() - 8usize];
-        ["Offset of field: ClipboardRead::size"]
-            [::std::mem::offset_of!(ClipboardRead, size) - 0usize];
         ["Offset of field: ClipboardRead::location"]
-            [::std::mem::offset_of!(ClipboardRead, location) - 8usize];
+            [::std::mem::offset_of!(ClipboardRead, location) - 0usize];
         ["Offset of field: ClipboardRead::mimes"]
-            [::std::mem::offset_of!(ClipboardRead, mimes) - 16usize];
+            [::std::mem::offset_of!(ClipboardRead, mimes) - 8usize];
         ["Offset of field: ClipboardRead::mimes_len"]
-            [::std::mem::offset_of!(ClipboardRead, mimes_len) - 24usize];
+            [::std::mem::offset_of!(ClipboardRead, mimes_len) - 16usize];
         ["Offset of field: ClipboardRead::list"]
-            [::std::mem::offset_of!(ClipboardRead, list) - 32usize];
+            [::std::mem::offset_of!(ClipboardRead, list) - 24usize];
         ["Offset of field: ClipboardRead::name"]
-            [::std::mem::offset_of!(ClipboardRead, name) - 40usize];
+            [::std::mem::offset_of!(ClipboardRead, name) - 32usize];
         ["Offset of field: ClipboardRead::granted"]
-            [::std::mem::offset_of!(ClipboardRead, granted) - 56usize];
+            [::std::mem::offset_of!(ClipboardRead, granted) - 48usize];
         ["Offset of field: ClipboardRead::can_remember"]
-            [::std::mem::offset_of!(ClipboardRead, can_remember) - 57usize];
+            [::std::mem::offset_of!(ClipboardRead, can_remember) - 49usize];
         ["Offset of field: ClipboardRead::ctx"]
-            [::std::mem::offset_of!(ClipboardRead, ctx) - 64usize];
+            [::std::mem::offset_of!(ClipboardRead, ctx) - 56usize];
         ["Offset of field: ClipboardRead::reply"]
-            [::std::mem::offset_of!(ClipboardRead, reply) - 72usize];
+            [::std::mem::offset_of!(ClipboardRead, reply) - 64usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalDesktopNotification"]
-            [::std::mem::size_of::<TerminalDesktopNotification>() - 40usize];
+            [::std::mem::size_of::<TerminalDesktopNotification>() - 32usize];
         ["Alignment of TerminalDesktopNotification"]
             [::std::mem::align_of::<TerminalDesktopNotification>() - 8usize];
-        ["Offset of field: TerminalDesktopNotification::size"]
-            [::std::mem::offset_of!(TerminalDesktopNotification, size) - 0usize];
         ["Offset of field: TerminalDesktopNotification::title"]
-            [::std::mem::offset_of!(TerminalDesktopNotification, title) - 8usize];
+            [::std::mem::offset_of!(TerminalDesktopNotification, title) - 0usize];
         ["Offset of field: TerminalDesktopNotification::body"]
-            [::std::mem::offset_of!(TerminalDesktopNotification, body) - 24usize];
+            [::std::mem::offset_of!(TerminalDesktopNotification, body) - 16usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalProgressReport"]
-            [::std::mem::size_of::<TerminalProgressReport>() - 16usize];
+            [::std::mem::size_of::<TerminalProgressReport>() - 8usize];
         ["Alignment of TerminalProgressReport"]
-            [::std::mem::align_of::<TerminalProgressReport>() - 8usize];
-        ["Offset of field: TerminalProgressReport::size"]
-            [::std::mem::offset_of!(TerminalProgressReport, size) - 0usize];
+            [::std::mem::align_of::<TerminalProgressReport>() - 4usize];
         ["Offset of field: TerminalProgressReport::state"]
-            [::std::mem::offset_of!(TerminalProgressReport, state) - 8usize];
+            [::std::mem::offset_of!(TerminalProgressReport, state) - 0usize];
         ["Offset of field: TerminalProgressReport::progress"]
-            [::std::mem::offset_of!(TerminalProgressReport, progress) - 12usize];
+            [::std::mem::offset_of!(TerminalProgressReport, progress) - 4usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of TerminalProgramStatus"][::std::mem::size_of::<TerminalProgramStatus>() - 88usize];
+        ["Size of TerminalProgramStatus"][::std::mem::size_of::<TerminalProgramStatus>() - 80usize];
         ["Alignment of TerminalProgramStatus"]
             [::std::mem::align_of::<TerminalProgramStatus>() - 8usize];
-        ["Offset of field: TerminalProgramStatus::size"]
-            [::std::mem::offset_of!(TerminalProgramStatus, size) - 0usize];
         ["Offset of field: TerminalProgramStatus::state"]
-            [::std::mem::offset_of!(TerminalProgramStatus, state) - 8usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, state) - 0usize];
         ["Offset of field: TerminalProgramStatus::kind"]
-            [::std::mem::offset_of!(TerminalProgramStatus, kind) - 12usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, kind) - 4usize];
         ["Offset of field: TerminalProgramStatus::progress"]
-            [::std::mem::offset_of!(TerminalProgramStatus, progress) - 16usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, progress) - 8usize];
         ["Offset of field: TerminalProgramStatus::id"]
-            [::std::mem::offset_of!(TerminalProgramStatus, id) - 24usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, id) - 16usize];
         ["Offset of field: TerminalProgramStatus::app"]
-            [::std::mem::offset_of!(TerminalProgramStatus, app) - 40usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, app) - 32usize];
         ["Offset of field: TerminalProgramStatus::title"]
-            [::std::mem::offset_of!(TerminalProgramStatus, title) - 56usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, title) - 48usize];
         ["Offset of field: TerminalProgramStatus::message"]
-            [::std::mem::offset_of!(TerminalProgramStatus, message) - 72usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, message) - 64usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalSemanticPrompt"]
-            [::std::mem::size_of::<TerminalSemanticPrompt>() - 56usize];
+            [::std::mem::size_of::<TerminalSemanticPrompt>() - 48usize];
         ["Alignment of TerminalSemanticPrompt"]
             [::std::mem::align_of::<TerminalSemanticPrompt>() - 8usize];
-        ["Offset of field: TerminalSemanticPrompt::size"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, size) - 0usize];
         ["Offset of field: TerminalSemanticPrompt::kind"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, kind) - 8usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, kind) - 0usize];
         ["Offset of field: TerminalSemanticPrompt::prompt_kind"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, prompt_kind) - 12usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, prompt_kind) - 4usize];
         ["Offset of field: TerminalSemanticPrompt::has_exit_code"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, has_exit_code) - 16usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, has_exit_code) - 8usize];
         ["Offset of field: TerminalSemanticPrompt::exit_code"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, exit_code) - 20usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, exit_code) - 12usize];
         ["Offset of field: TerminalSemanticPrompt::command"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, command) - 24usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, command) - 16usize];
         ["Offset of field: TerminalSemanticPrompt::error"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, error) - 40usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, error) - 32usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -859,68 +830,6 @@ mod layout_0 {
             [::std::mem::offset_of!(TerminalModeConfig, mode) - 0usize];
         ["Offset of field: TerminalModeConfig::value"]
             [::std::mem::offset_of!(TerminalModeConfig, value) - 2usize];
-    };
-    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
-    const _: () = {
-        ["Size of FormatterScreenExtra"][::std::mem::size_of::<FormatterScreenExtra>() - 16usize];
-        ["Alignment of FormatterScreenExtra"]
-            [::std::mem::align_of::<FormatterScreenExtra>() - 8usize];
-        ["Offset of field: FormatterScreenExtra::size"]
-            [::std::mem::offset_of!(FormatterScreenExtra, size) - 0usize];
-        ["Offset of field: FormatterScreenExtra::cursor"]
-            [::std::mem::offset_of!(FormatterScreenExtra, cursor) - 8usize];
-        ["Offset of field: FormatterScreenExtra::style"]
-            [::std::mem::offset_of!(FormatterScreenExtra, style) - 9usize];
-        ["Offset of field: FormatterScreenExtra::hyperlink"]
-            [::std::mem::offset_of!(FormatterScreenExtra, hyperlink) - 10usize];
-        ["Offset of field: FormatterScreenExtra::protection"]
-            [::std::mem::offset_of!(FormatterScreenExtra, protection) - 11usize];
-        ["Offset of field: FormatterScreenExtra::kitty_keyboard"]
-            [::std::mem::offset_of!(FormatterScreenExtra, kitty_keyboard) - 12usize];
-        ["Offset of field: FormatterScreenExtra::charsets"]
-            [::std::mem::offset_of!(FormatterScreenExtra, charsets) - 13usize];
-    };
-    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
-    const _: () = {
-        ["Size of FormatterTerminalExtra"]
-            [::std::mem::size_of::<FormatterTerminalExtra>() - 32usize];
-        ["Alignment of FormatterTerminalExtra"]
-            [::std::mem::align_of::<FormatterTerminalExtra>() - 8usize];
-        ["Offset of field: FormatterTerminalExtra::size"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, size) - 0usize];
-        ["Offset of field: FormatterTerminalExtra::palette"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, palette) - 8usize];
-        ["Offset of field: FormatterTerminalExtra::modes"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, modes) - 9usize];
-        ["Offset of field: FormatterTerminalExtra::scrolling_region"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, scrolling_region) - 10usize];
-        ["Offset of field: FormatterTerminalExtra::tabstops"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, tabstops) - 11usize];
-        ["Offset of field: FormatterTerminalExtra::pwd"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, pwd) - 12usize];
-        ["Offset of field: FormatterTerminalExtra::keyboard"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, keyboard) - 13usize];
-        ["Offset of field: FormatterTerminalExtra::screen"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, screen) - 16usize];
-    };
-    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
-    const _: () = {
-        ["Size of FormatterTerminalOptions"]
-            [::std::mem::size_of::<FormatterTerminalOptions>() - 56usize];
-        ["Alignment of FormatterTerminalOptions"]
-            [::std::mem::align_of::<FormatterTerminalOptions>() - 8usize];
-        ["Offset of field: FormatterTerminalOptions::size"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, size) - 0usize];
-        ["Offset of field: FormatterTerminalOptions::emit"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, emit) - 8usize];
-        ["Offset of field: FormatterTerminalOptions::unwrap"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, unwrap) - 12usize];
-        ["Offset of field: FormatterTerminalOptions::trim"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, trim) - 13usize];
-        ["Offset of field: FormatterTerminalOptions::extra"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, extra) - 16usize];
-        ["Offset of field: FormatterTerminalOptions::selection"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, selection) - 48usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -1142,7 +1051,18 @@ mod layout_1 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of AllocatorVtable"][::std::mem::size_of::<AllocatorVtable>() - 16usize];
+        ["Size of CodepointBuffer"][::std::mem::size_of::<CodepointBuffer>() - 12usize];
+        ["Alignment of CodepointBuffer"][::std::mem::align_of::<CodepointBuffer>() - 4usize];
+        ["Offset of field: CodepointBuffer::ptr"]
+            [::std::mem::offset_of!(CodepointBuffer, ptr) - 0usize];
+        ["Offset of field: CodepointBuffer::cap"]
+            [::std::mem::offset_of!(CodepointBuffer, cap) - 4usize];
+        ["Offset of field: CodepointBuffer::len"]
+            [::std::mem::offset_of!(CodepointBuffer, len) - 8usize];
+    };
+    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
+    const _: () = {
+        ["Size of AllocatorVtable"][::std::mem::size_of::<AllocatorVtable>() - 32usize];
         ["Alignment of AllocatorVtable"][::std::mem::align_of::<AllocatorVtable>() - 4usize];
         ["Offset of field: AllocatorVtable::alloc"]
             [::std::mem::offset_of!(AllocatorVtable, alloc) - 0usize];
@@ -1152,6 +1072,8 @@ mod layout_1 {
             [::std::mem::offset_of!(AllocatorVtable, remap) - 8usize];
         ["Offset of field: AllocatorVtable::free"]
             [::std::mem::offset_of!(AllocatorVtable, free) - 12usize];
+        ["Offset of field: AllocatorVtable::reserved"]
+            [::std::mem::offset_of!(AllocatorVtable, reserved) - 16usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -1261,50 +1183,38 @@ mod layout_1 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of StyleColorValue"][::std::mem::size_of::<StyleColorValue>() - 8usize];
-        ["Alignment of StyleColorValue"][::std::mem::align_of::<StyleColorValue>() - 8usize];
+        ["Size of StyleColorValue"][::std::mem::size_of::<StyleColorValue>() - 3usize];
+        ["Alignment of StyleColorValue"][::std::mem::align_of::<StyleColorValue>() - 1usize];
         ["Offset of field: StyleColorValue::palette"]
             [::std::mem::offset_of!(StyleColorValue, palette) - 0usize];
         ["Offset of field: StyleColorValue::rgb"]
             [::std::mem::offset_of!(StyleColorValue, rgb) - 0usize];
-        ["Offset of field: StyleColorValue::_padding"]
-            [::std::mem::offset_of!(StyleColorValue, _padding) - 0usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of StyleColor"][::std::mem::size_of::<StyleColor>() - 16usize];
-        ["Alignment of StyleColor"][::std::mem::align_of::<StyleColor>() - 8usize];
+        ["Size of StyleColor"][::std::mem::size_of::<StyleColor>() - 4usize];
+        ["Alignment of StyleColor"][::std::mem::align_of::<StyleColor>() - 1usize];
         ["Offset of field: StyleColor::tag"][::std::mem::offset_of!(StyleColor, tag) - 0usize];
-        ["Offset of field: StyleColor::value"][::std::mem::offset_of!(StyleColor, value) - 8usize];
+        ["Offset of field: StyleColor::value"][::std::mem::offset_of!(StyleColor, value) - 1usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of Style"][::std::mem::size_of::<Style>() - 72usize];
-        ["Alignment of Style"][::std::mem::align_of::<Style>() - 8usize];
-        ["Offset of field: Style::size"][::std::mem::offset_of!(Style, size) - 0usize];
-        ["Offset of field: Style::fg_color"][::std::mem::offset_of!(Style, fg_color) - 8usize];
-        ["Offset of field: Style::bg_color"][::std::mem::offset_of!(Style, bg_color) - 24usize];
+        ["Size of Style"][::std::mem::size_of::<Style>() - 16usize];
+        ["Alignment of Style"][::std::mem::align_of::<Style>() - 2usize];
+        ["Offset of field: Style::fg_color"][::std::mem::offset_of!(Style, fg_color) - 0usize];
+        ["Offset of field: Style::bg_color"][::std::mem::offset_of!(Style, bg_color) - 4usize];
         ["Offset of field: Style::underline_color"]
-            [::std::mem::offset_of!(Style, underline_color) - 40usize];
-        ["Offset of field: Style::bold"][::std::mem::offset_of!(Style, bold) - 56usize];
-        ["Offset of field: Style::italic"][::std::mem::offset_of!(Style, italic) - 57usize];
-        ["Offset of field: Style::faint"][::std::mem::offset_of!(Style, faint) - 58usize];
-        ["Offset of field: Style::blink"][::std::mem::offset_of!(Style, blink) - 59usize];
-        ["Offset of field: Style::inverse"][::std::mem::offset_of!(Style, inverse) - 60usize];
-        ["Offset of field: Style::invisible"][::std::mem::offset_of!(Style, invisible) - 61usize];
-        ["Offset of field: Style::strikethrough"]
-            [::std::mem::offset_of!(Style, strikethrough) - 62usize];
-        ["Offset of field: Style::overline"][::std::mem::offset_of!(Style, overline) - 63usize];
-        ["Offset of field: Style::underline"][::std::mem::offset_of!(Style, underline) - 64usize];
+            [::std::mem::offset_of!(Style, underline_color) - 8usize];
+        ["Offset of field: Style::flags"][::std::mem::offset_of!(Style, flags) - 12usize];
+        ["Offset of field: Style::reserved"][::std::mem::offset_of!(Style, reserved) - 14usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of GridRef"][::std::mem::size_of::<GridRef>() - 12usize];
+        ["Size of GridRef"][::std::mem::size_of::<GridRef>() - 8usize];
         ["Alignment of GridRef"][::std::mem::align_of::<GridRef>() - 4usize];
-        ["Offset of field: GridRef::size"][::std::mem::offset_of!(GridRef, size) - 0usize];
-        ["Offset of field: GridRef::node"][::std::mem::offset_of!(GridRef, node) - 4usize];
-        ["Offset of field: GridRef::x"][::std::mem::offset_of!(GridRef, x) - 8usize];
-        ["Offset of field: GridRef::y"][::std::mem::offset_of!(GridRef, y) - 10usize];
+        ["Offset of field: GridRef::node"][::std::mem::offset_of!(GridRef, node) - 0usize];
+        ["Offset of field: GridRef::x"][::std::mem::offset_of!(GridRef, x) - 4usize];
+        ["Offset of field: GridRef::y"][::std::mem::offset_of!(GridRef, y) - 6usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -1333,13 +1243,12 @@ mod layout_1 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of Selection"][::std::mem::size_of::<Selection>() - 32usize];
+        ["Size of Selection"][::std::mem::size_of::<Selection>() - 20usize];
         ["Alignment of Selection"][::std::mem::align_of::<Selection>() - 4usize];
-        ["Offset of field: Selection::size"][::std::mem::offset_of!(Selection, size) - 0usize];
-        ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 4usize];
-        ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 16usize];
+        ["Offset of field: Selection::start"][::std::mem::offset_of!(Selection, start) - 0usize];
+        ["Offset of field: Selection::end"][::std::mem::offset_of!(Selection, end) - 8usize];
         ["Offset of field: Selection::rectangle"]
-            [::std::mem::offset_of!(Selection, rectangle) - 28usize];
+            [::std::mem::offset_of!(Selection, rectangle) - 16usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -1355,7 +1264,7 @@ mod layout_1 {
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalSelectWordOptions"]
-            [::std::mem::size_of::<TerminalSelectWordOptions>() - 24usize];
+            [::std::mem::size_of::<TerminalSelectWordOptions>() - 20usize];
         ["Alignment of TerminalSelectWordOptions"]
             [::std::mem::align_of::<TerminalSelectWordOptions>() - 4usize];
         ["Offset of field: TerminalSelectWordOptions::size"]
@@ -1363,14 +1272,14 @@ mod layout_1 {
         ["Offset of field: TerminalSelectWordOptions::ref_"]
             [::std::mem::offset_of!(TerminalSelectWordOptions, ref_) - 4usize];
         ["Offset of field: TerminalSelectWordOptions::boundary_codepoints"]
-            [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 16usize];
+            [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints) - 12usize];
         ["Offset of field: TerminalSelectWordOptions::boundary_codepoints_len"]
-            [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 20usize];
+            [::std::mem::offset_of!(TerminalSelectWordOptions, boundary_codepoints_len) - 16usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalSelectWordBetweenOptions"]
-            [::std::mem::size_of::<TerminalSelectWordBetweenOptions>() - 36usize];
+            [::std::mem::size_of::<TerminalSelectWordBetweenOptions>() - 28usize];
         ["Alignment of TerminalSelectWordBetweenOptions"]
             [::std::mem::align_of::<TerminalSelectWordBetweenOptions>() - 4usize];
         ["Offset of field: TerminalSelectWordBetweenOptions::size"]
@@ -1378,20 +1287,20 @@ mod layout_1 {
         ["Offset of field: TerminalSelectWordBetweenOptions::start"]
             [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, start) - 4usize];
         ["Offset of field: TerminalSelectWordBetweenOptions::end"]
-            [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 16usize];
+            [::std::mem::offset_of!(TerminalSelectWordBetweenOptions, end) - 12usize];
         ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints"][::std::mem::offset_of!(
             TerminalSelectWordBetweenOptions,
             boundary_codepoints
-        ) - 28usize];
+        ) - 20usize];
         ["Offset of field: TerminalSelectWordBetweenOptions::boundary_codepoints_len"][::std::mem::offset_of!(
             TerminalSelectWordBetweenOptions,
             boundary_codepoints_len
-        ) - 32usize];
+        ) - 24usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalSelectLineOptions"]
-            [::std::mem::size_of::<TerminalSelectLineOptions>() - 28usize];
+            [::std::mem::size_of::<TerminalSelectLineOptions>() - 24usize];
         ["Alignment of TerminalSelectLineOptions"]
             [::std::mem::align_of::<TerminalSelectLineOptions>() - 4usize];
         ["Offset of field: TerminalSelectLineOptions::size"]
@@ -1399,28 +1308,11 @@ mod layout_1 {
         ["Offset of field: TerminalSelectLineOptions::ref_"]
             [::std::mem::offset_of!(TerminalSelectLineOptions, ref_) - 4usize];
         ["Offset of field: TerminalSelectLineOptions::whitespace"]
-            [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 16usize];
+            [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace) - 12usize];
         ["Offset of field: TerminalSelectLineOptions::whitespace_len"]
-            [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 20usize];
+            [::std::mem::offset_of!(TerminalSelectLineOptions, whitespace_len) - 16usize];
         ["Offset of field: TerminalSelectLineOptions::semantic_prompt_boundary"]
-            [::std::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 24usize];
-    };
-    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
-    const _: () = {
-        ["Size of TerminalSelectionFormatOptions"]
-            [::std::mem::size_of::<TerminalSelectionFormatOptions>() - 16usize];
-        ["Alignment of TerminalSelectionFormatOptions"]
-            [::std::mem::align_of::<TerminalSelectionFormatOptions>() - 4usize];
-        ["Offset of field: TerminalSelectionFormatOptions::size"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, size) - 0usize];
-        ["Offset of field: TerminalSelectionFormatOptions::emit"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, emit) - 4usize];
-        ["Offset of field: TerminalSelectionFormatOptions::unwrap"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, unwrap) - 8usize];
-        ["Offset of field: TerminalSelectionFormatOptions::trim"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, trim) - 9usize];
-        ["Offset of field: TerminalSelectionFormatOptions::selection"]
-            [::std::mem::offset_of!(TerminalSelectionFormatOptions, selection) - 12usize];
+            [::std::mem::offset_of!(TerminalSelectLineOptions, semantic_prompt_boundary) - 20usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -1655,26 +1547,24 @@ mod layout_1 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 36usize];
+        ["Size of ClipboardWrite"][::std::mem::size_of::<ClipboardWrite>() - 32usize];
         ["Alignment of ClipboardWrite"][::std::mem::align_of::<ClipboardWrite>() - 4usize];
-        ["Offset of field: ClipboardWrite::size"]
-            [::std::mem::offset_of!(ClipboardWrite, size) - 0usize];
         ["Offset of field: ClipboardWrite::location"]
-            [::std::mem::offset_of!(ClipboardWrite, location) - 4usize];
+            [::std::mem::offset_of!(ClipboardWrite, location) - 0usize];
         ["Offset of field: ClipboardWrite::contents"]
-            [::std::mem::offset_of!(ClipboardWrite, contents) - 8usize];
+            [::std::mem::offset_of!(ClipboardWrite, contents) - 4usize];
         ["Offset of field: ClipboardWrite::contents_len"]
-            [::std::mem::offset_of!(ClipboardWrite, contents_len) - 12usize];
+            [::std::mem::offset_of!(ClipboardWrite, contents_len) - 8usize];
         ["Offset of field: ClipboardWrite::name"]
-            [::std::mem::offset_of!(ClipboardWrite, name) - 16usize];
+            [::std::mem::offset_of!(ClipboardWrite, name) - 12usize];
         ["Offset of field: ClipboardWrite::granted"]
-            [::std::mem::offset_of!(ClipboardWrite, granted) - 24usize];
+            [::std::mem::offset_of!(ClipboardWrite, granted) - 20usize];
         ["Offset of field: ClipboardWrite::can_remember"]
-            [::std::mem::offset_of!(ClipboardWrite, can_remember) - 25usize];
+            [::std::mem::offset_of!(ClipboardWrite, can_remember) - 21usize];
         ["Offset of field: ClipboardWrite::ctx"]
-            [::std::mem::offset_of!(ClipboardWrite, ctx) - 28usize];
+            [::std::mem::offset_of!(ClipboardWrite, ctx) - 24usize];
         ["Offset of field: ClipboardWrite::reply"]
-            [::std::mem::offset_of!(ClipboardWrite, reply) - 32usize];
+            [::std::mem::offset_of!(ClipboardWrite, reply) - 28usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -1697,97 +1587,87 @@ mod layout_1 {
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of ClipboardRead"][::std::mem::size_of::<ClipboardRead>() - 40usize];
+        ["Size of ClipboardRead"][::std::mem::size_of::<ClipboardRead>() - 36usize];
         ["Alignment of ClipboardRead"][::std::mem::align_of::<ClipboardRead>() - 4usize];
-        ["Offset of field: ClipboardRead::size"]
-            [::std::mem::offset_of!(ClipboardRead, size) - 0usize];
         ["Offset of field: ClipboardRead::location"]
-            [::std::mem::offset_of!(ClipboardRead, location) - 4usize];
+            [::std::mem::offset_of!(ClipboardRead, location) - 0usize];
         ["Offset of field: ClipboardRead::mimes"]
-            [::std::mem::offset_of!(ClipboardRead, mimes) - 8usize];
+            [::std::mem::offset_of!(ClipboardRead, mimes) - 4usize];
         ["Offset of field: ClipboardRead::mimes_len"]
-            [::std::mem::offset_of!(ClipboardRead, mimes_len) - 12usize];
+            [::std::mem::offset_of!(ClipboardRead, mimes_len) - 8usize];
         ["Offset of field: ClipboardRead::list"]
-            [::std::mem::offset_of!(ClipboardRead, list) - 16usize];
+            [::std::mem::offset_of!(ClipboardRead, list) - 12usize];
         ["Offset of field: ClipboardRead::name"]
-            [::std::mem::offset_of!(ClipboardRead, name) - 20usize];
+            [::std::mem::offset_of!(ClipboardRead, name) - 16usize];
         ["Offset of field: ClipboardRead::granted"]
-            [::std::mem::offset_of!(ClipboardRead, granted) - 28usize];
+            [::std::mem::offset_of!(ClipboardRead, granted) - 24usize];
         ["Offset of field: ClipboardRead::can_remember"]
-            [::std::mem::offset_of!(ClipboardRead, can_remember) - 29usize];
+            [::std::mem::offset_of!(ClipboardRead, can_remember) - 25usize];
         ["Offset of field: ClipboardRead::ctx"]
-            [::std::mem::offset_of!(ClipboardRead, ctx) - 32usize];
+            [::std::mem::offset_of!(ClipboardRead, ctx) - 28usize];
         ["Offset of field: ClipboardRead::reply"]
-            [::std::mem::offset_of!(ClipboardRead, reply) - 36usize];
+            [::std::mem::offset_of!(ClipboardRead, reply) - 32usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalDesktopNotification"]
-            [::std::mem::size_of::<TerminalDesktopNotification>() - 20usize];
+            [::std::mem::size_of::<TerminalDesktopNotification>() - 16usize];
         ["Alignment of TerminalDesktopNotification"]
             [::std::mem::align_of::<TerminalDesktopNotification>() - 4usize];
-        ["Offset of field: TerminalDesktopNotification::size"]
-            [::std::mem::offset_of!(TerminalDesktopNotification, size) - 0usize];
         ["Offset of field: TerminalDesktopNotification::title"]
-            [::std::mem::offset_of!(TerminalDesktopNotification, title) - 4usize];
+            [::std::mem::offset_of!(TerminalDesktopNotification, title) - 0usize];
         ["Offset of field: TerminalDesktopNotification::body"]
-            [::std::mem::offset_of!(TerminalDesktopNotification, body) - 12usize];
+            [::std::mem::offset_of!(TerminalDesktopNotification, body) - 8usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalProgressReport"]
-            [::std::mem::size_of::<TerminalProgressReport>() - 12usize];
+            [::std::mem::size_of::<TerminalProgressReport>() - 8usize];
         ["Alignment of TerminalProgressReport"]
             [::std::mem::align_of::<TerminalProgressReport>() - 4usize];
-        ["Offset of field: TerminalProgressReport::size"]
-            [::std::mem::offset_of!(TerminalProgressReport, size) - 0usize];
         ["Offset of field: TerminalProgressReport::state"]
-            [::std::mem::offset_of!(TerminalProgressReport, state) - 4usize];
+            [::std::mem::offset_of!(TerminalProgressReport, state) - 0usize];
         ["Offset of field: TerminalProgressReport::progress"]
-            [::std::mem::offset_of!(TerminalProgressReport, progress) - 8usize];
+            [::std::mem::offset_of!(TerminalProgressReport, progress) - 4usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
-        ["Size of TerminalProgramStatus"][::std::mem::size_of::<TerminalProgramStatus>() - 48usize];
+        ["Size of TerminalProgramStatus"][::std::mem::size_of::<TerminalProgramStatus>() - 44usize];
         ["Alignment of TerminalProgramStatus"]
             [::std::mem::align_of::<TerminalProgramStatus>() - 4usize];
-        ["Offset of field: TerminalProgramStatus::size"]
-            [::std::mem::offset_of!(TerminalProgramStatus, size) - 0usize];
         ["Offset of field: TerminalProgramStatus::state"]
-            [::std::mem::offset_of!(TerminalProgramStatus, state) - 4usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, state) - 0usize];
         ["Offset of field: TerminalProgramStatus::kind"]
-            [::std::mem::offset_of!(TerminalProgramStatus, kind) - 8usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, kind) - 4usize];
         ["Offset of field: TerminalProgramStatus::progress"]
-            [::std::mem::offset_of!(TerminalProgramStatus, progress) - 12usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, progress) - 8usize];
         ["Offset of field: TerminalProgramStatus::id"]
-            [::std::mem::offset_of!(TerminalProgramStatus, id) - 16usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, id) - 12usize];
         ["Offset of field: TerminalProgramStatus::app"]
-            [::std::mem::offset_of!(TerminalProgramStatus, app) - 24usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, app) - 20usize];
         ["Offset of field: TerminalProgramStatus::title"]
-            [::std::mem::offset_of!(TerminalProgramStatus, title) - 32usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, title) - 28usize];
         ["Offset of field: TerminalProgramStatus::message"]
-            [::std::mem::offset_of!(TerminalProgramStatus, message) - 40usize];
+            [::std::mem::offset_of!(TerminalProgramStatus, message) - 36usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
         ["Size of TerminalSemanticPrompt"]
-            [::std::mem::size_of::<TerminalSemanticPrompt>() - 36usize];
+            [::std::mem::size_of::<TerminalSemanticPrompt>() - 32usize];
         ["Alignment of TerminalSemanticPrompt"]
             [::std::mem::align_of::<TerminalSemanticPrompt>() - 4usize];
-        ["Offset of field: TerminalSemanticPrompt::size"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, size) - 0usize];
         ["Offset of field: TerminalSemanticPrompt::kind"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, kind) - 4usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, kind) - 0usize];
         ["Offset of field: TerminalSemanticPrompt::prompt_kind"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, prompt_kind) - 8usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, prompt_kind) - 4usize];
         ["Offset of field: TerminalSemanticPrompt::has_exit_code"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, has_exit_code) - 12usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, has_exit_code) - 8usize];
         ["Offset of field: TerminalSemanticPrompt::exit_code"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, exit_code) - 16usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, exit_code) - 12usize];
         ["Offset of field: TerminalSemanticPrompt::command"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, command) - 20usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, command) - 16usize];
         ["Offset of field: TerminalSemanticPrompt::error"]
-            [::std::mem::offset_of!(TerminalSemanticPrompt, error) - 28usize];
+            [::std::mem::offset_of!(TerminalSemanticPrompt, error) - 24usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
@@ -1829,68 +1709,6 @@ mod layout_1 {
             [::std::mem::offset_of!(TerminalModeConfig, mode) - 0usize];
         ["Offset of field: TerminalModeConfig::value"]
             [::std::mem::offset_of!(TerminalModeConfig, value) - 2usize];
-    };
-    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
-    const _: () = {
-        ["Size of FormatterScreenExtra"][::std::mem::size_of::<FormatterScreenExtra>() - 12usize];
-        ["Alignment of FormatterScreenExtra"]
-            [::std::mem::align_of::<FormatterScreenExtra>() - 4usize];
-        ["Offset of field: FormatterScreenExtra::size"]
-            [::std::mem::offset_of!(FormatterScreenExtra, size) - 0usize];
-        ["Offset of field: FormatterScreenExtra::cursor"]
-            [::std::mem::offset_of!(FormatterScreenExtra, cursor) - 4usize];
-        ["Offset of field: FormatterScreenExtra::style"]
-            [::std::mem::offset_of!(FormatterScreenExtra, style) - 5usize];
-        ["Offset of field: FormatterScreenExtra::hyperlink"]
-            [::std::mem::offset_of!(FormatterScreenExtra, hyperlink) - 6usize];
-        ["Offset of field: FormatterScreenExtra::protection"]
-            [::std::mem::offset_of!(FormatterScreenExtra, protection) - 7usize];
-        ["Offset of field: FormatterScreenExtra::kitty_keyboard"]
-            [::std::mem::offset_of!(FormatterScreenExtra, kitty_keyboard) - 8usize];
-        ["Offset of field: FormatterScreenExtra::charsets"]
-            [::std::mem::offset_of!(FormatterScreenExtra, charsets) - 9usize];
-    };
-    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
-    const _: () = {
-        ["Size of FormatterTerminalExtra"]
-            [::std::mem::size_of::<FormatterTerminalExtra>() - 24usize];
-        ["Alignment of FormatterTerminalExtra"]
-            [::std::mem::align_of::<FormatterTerminalExtra>() - 4usize];
-        ["Offset of field: FormatterTerminalExtra::size"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, size) - 0usize];
-        ["Offset of field: FormatterTerminalExtra::palette"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, palette) - 4usize];
-        ["Offset of field: FormatterTerminalExtra::modes"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, modes) - 5usize];
-        ["Offset of field: FormatterTerminalExtra::scrolling_region"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, scrolling_region) - 6usize];
-        ["Offset of field: FormatterTerminalExtra::tabstops"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, tabstops) - 7usize];
-        ["Offset of field: FormatterTerminalExtra::pwd"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, pwd) - 8usize];
-        ["Offset of field: FormatterTerminalExtra::keyboard"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, keyboard) - 9usize];
-        ["Offset of field: FormatterTerminalExtra::screen"]
-            [::std::mem::offset_of!(FormatterTerminalExtra, screen) - 12usize];
-    };
-    #[allow(clippy::unnecessary_operation, clippy::identity_op)]
-    const _: () = {
-        ["Size of FormatterTerminalOptions"]
-            [::std::mem::size_of::<FormatterTerminalOptions>() - 40usize];
-        ["Alignment of FormatterTerminalOptions"]
-            [::std::mem::align_of::<FormatterTerminalOptions>() - 4usize];
-        ["Offset of field: FormatterTerminalOptions::size"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, size) - 0usize];
-        ["Offset of field: FormatterTerminalOptions::emit"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, emit) - 4usize];
-        ["Offset of field: FormatterTerminalOptions::unwrap"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, unwrap) - 8usize];
-        ["Offset of field: FormatterTerminalOptions::trim"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, trim) - 9usize];
-        ["Offset of field: FormatterTerminalOptions::extra"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, extra) - 12usize];
-        ["Offset of field: FormatterTerminalOptions::selection"]
-            [::std::mem::offset_of!(FormatterTerminalOptions, selection) - 36usize];
     };
     #[allow(clippy::unnecessary_operation, clippy::identity_op)]
     const _: () = {
