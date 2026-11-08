@@ -1030,12 +1030,12 @@ impl<'t> Image<'t> {
     /// Pixel format of the image.
     pub fn format(&self) -> Result<ImageFormat> {
         self.get::<ffi::KittyImageFormat::Type>(ffi::KittyGraphicsImageData::FORMAT)
-            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+            .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
     /// Compression of the image.
     pub fn compression(&self) -> Result<Compression> {
         self.get::<ffi::KittyImageCompression::Type>(ffi::KittyGraphicsImageData::COMPRESSION)
-            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+            .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
 
     /// Borrowed pointer to the raw pixel data.

@@ -170,7 +170,7 @@ impl<'t> Selection<'t> {
             )
         };
         from_result(result)?;
-        Order::try_from(order).map_err(|_| Error::InvalidValue)
+        Order::try_from(order).map_err(|_| Error::Unsupported)
     }
 
     /// Return a selection snapshot with endpoints ordered as requested.

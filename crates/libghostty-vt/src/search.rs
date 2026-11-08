@@ -353,7 +353,7 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
         // freed, since ticking a scrollback search reads a pin the terminal
         // tracks. Otherwise, ticking only touches search-owned memory.
         from_result(unsafe { ffi::ghostty_search_tick(self.inner.as_raw(), &raw mut status) })?;
-        status.try_into().map_err(|_| Error::InvalidValue)
+        status.try_into().map_err(|_| Error::Unsupported)
     }
 
     /// Feed and tick until the search is caught up with the terminal.
@@ -385,7 +385,7 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     pub fn status(&self) -> Result<Status> {
         self.get::<ffi::SearchStatus::Type>(ffi::SearchData::STATUS)?
             .try_into()
-            .map_err(|_| Error::InvalidValue)
+            .map_err(|_| Error::Unsupported)
     }
 
     /// Total matches found so far on the active screen. Zero until the first
@@ -422,7 +422,7 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     pub fn scroll(&self) -> Result<Scroll> {
         self.get::<ffi::SearchScroll::Type>(ffi::SearchData::SELECT_SCROLL)?
             .try_into()
-            .map_err(|_| Error::InvalidValue)
+            .map_err(|_| Error::Unsupported)
     }
 
     /// Set the scroll policy applied by [`Self::select_next`] and

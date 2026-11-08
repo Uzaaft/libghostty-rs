@@ -747,7 +747,7 @@ impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
     pub fn screen(&self) -> Result<Screen> {
         self.decoder
             .get::<ffi::TerminalScreen::Type>(Data::PROGRESS_SCREEN)
-            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+            .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
 
     /// What the most recent successful [`IncrementalDecoder::next`] call
@@ -773,11 +773,7 @@ impl<'alloc, 'r, 'd> Progress<'alloc, 'r, 'd> {
                 frame: self.decoder.get(Data::PROGRESS_IMAGE_FRAME)?,
                 bytes: self.decoder.get(Data::PROGRESS_IMAGE_BYTES)?,
             }),
-            // A newer libghostty may decode records we have no variant for.
-            // Unlike `osc::CommandType`, which has an `Invalid` variant to
-            // fall back to, this already returns a `Result`, so say so
-            // there instead of guessing at a variant.
-            _ => Err(Error::InvalidValue),
+            _ => Err(Error::Unsupported),
         }
     }
 

@@ -905,7 +905,7 @@ impl Snapshot<'_, '_> {
     /// Get the current dirty state.
     pub fn dirty(&self) -> Result<Dirty> {
         self.get::<ffi::RenderStateDirty::Type>(ffi::RenderStateData::DIRTY)
-            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+            .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
 
     /// Get the viewport width.
@@ -960,7 +960,7 @@ impl Snapshot<'_, '_> {
     /// Get the visual style of the cursor.
     pub fn cursor_visual_style(&self) -> Result<CursorVisualStyle> {
         self.get::<ffi::CursorStyle::Type>(ffi::RenderStateData::CURSOR_VISUAL_STYLE)
-            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+            .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
 
     /// Get the relative position of the cursor and other information
@@ -1006,7 +1006,7 @@ impl Snapshot<'_, '_> {
             visual_style: raw
                 .visual_style
                 .try_into()
-                .map_err(|_| Error::InvalidValue)?,
+                .map_err(|_| Error::Unsupported)?,
         })
     }
 
@@ -1386,6 +1386,15 @@ impl CellIteration<'_, '_> {
     }
 
     fn get<T>(&self, tag: ffi::RenderStateRowCellsData::Type) -> Result<T> {
+        match self.get_optional(tag) {
+            Ok(Some(v)) => Ok(v),
+            // This should never happen.
+            Ok(None) => Err(Error::InvalidValue),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn get_optional<T>(&self, tag: ffi::RenderStateRowCellsData::Type) -> Result<Option<T>> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_render_state_row_cells_get(
@@ -1394,9 +1403,7 @@ impl CellIteration<'_, '_> {
                 value.as_mut_ptr().cast(),
             )
         };
-        from_result(result)?;
-        // SAFETY: Value should be initialized after successful call.
-        Ok(unsafe { value.assume_init() })
+        from_optional_result_uninit(result, value)
     }
 
     /// The raw cell value.
@@ -1427,12 +1434,8 @@ impl CellIteration<'_, '_> {
     /// case the caller should use whatever default foreground color it want
     /// (e.g. the terminal foreground).
     pub fn fg_color(&self) -> Result<Option<RgbColor>> {
-        let res = self.get::<ffi::ColorRgb>(ffi::RenderStateRowCellsData::FG_COLOR);
-        match res {
-            Ok(o) => Ok(Some(o.into())),
-            Err(Error::InvalidValue) => Ok(None),
-            Err(e) => Err(e),
-        }
+        let color = self.get_optional::<ffi::ColorRgb>(ffi::RenderStateRowCellsData::FG_COLOR)?;
+        Ok(color.map(|v| v.into()))
     }
 
     /// The resolved background color of the cell.
@@ -1445,12 +1448,8 @@ impl CellIteration<'_, '_> {
     /// caller should use whatever default background color it wants
     /// (e.g. the terminal background).
     pub fn bg_color(&self) -> Result<Option<RgbColor>> {
-        let res = self.get::<ffi::ColorRgb>(ffi::RenderStateRowCellsData::BG_COLOR);
-        match res {
-            Ok(o) => Ok(Some(o.into())),
-            Err(Error::InvalidValue) => Ok(None),
-            Err(e) => Err(e),
-        }
+        let color = self.get_optional::<ffi::ColorRgb>(ffi::RenderStateRowCellsData::BG_COLOR)?;
+        Ok(color.map(|v| v.into()))
     }
 
     /// Get the grapheme codepoints.
@@ -1712,7 +1711,7 @@ impl ImageIteration<'_, '_> {
     /// yet gives [`Error::InvalidValue`].
     pub fn protocol(&self) -> Result<ImageProtocol> {
         self.get::<ffi::ImageProtocol::Type>(ffi::RenderStateImageData::PROTOCOL)
-            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+            .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
 
     /// The ID of the image to draw.
@@ -1763,7 +1762,7 @@ impl ImageIteration<'_, '_> {
     /// The layer to draw the image in.
     pub fn layer(&self) -> Result<ImageLayer> {
         self.get::<ffi::ImageLayer::Type>(ffi::RenderStateImageData::LAYER)
-            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+            .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
 
     /// The z-index, which orders images within a [layer](Self::layer).
@@ -1887,7 +1886,7 @@ impl ImageIteration<'_, '_> {
         self.get_optional::<ffi::RenderStateKittyPlacementKind::Type>(
             ffi::RenderStateImageData::KITTY_KIND,
         )?
-        .map(|v| v.try_into().map_err(|_| Error::InvalidValue))
+        .map(|v| v.try_into().map_err(|_| Error::Unsupported))
         .transpose()
     }
 }

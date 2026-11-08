@@ -200,7 +200,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     pub fn format(&self) -> Result<Format> {
         self.get::<ffi::FormatterFormat::Type>(Opt::EMIT)?
             .try_into()
-            .map_err(|_| Error::InvalidValue)
+            .map_err(|_| Error::Unsupported)
     }
 
     /// Set the output format. Defaults to plain text.

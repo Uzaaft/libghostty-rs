@@ -150,7 +150,7 @@ impl TryFrom<ffi::Style> for Style {
             underline: Underline::try_from(i32::from(
                 (value.flags & ffi::STYLE_UNDERLINE_MASK) >> ffi::STYLE_UNDERLINE_SHIFT,
             ))
-            .map_err(|_| Error::InvalidValue)?,
+            .map_err(|_| Error::Unsupported)?,
         })
     }
 }

@@ -494,15 +494,15 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             kind: is_string
                 .then(|| stop.kind.try_into())
                 .transpose()
-                .map_err(|_| Error::InvalidValue)?,
+                .map_err(|_| Error::Unsupported)?,
             introducer: started
                 .then(|| stop.introducer.try_into())
                 .transpose()
-                .map_err(|_| Error::InvalidValue)?,
+                .map_err(|_| Error::Unsupported)?,
             end: ended
                 .then(|| stop.end.try_into())
                 .transpose()
-                .map_err(|_| Error::InvalidValue)?,
+                .map_err(|_| Error::Unsupported)?,
             byte: is_string.then_some(stop.byte),
         }))
     }
@@ -749,7 +749,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             ffi::ghostty_terminal_compress(self.inner.as_raw(), mode.into(), &raw mut value)
         };
         from_result(result)?;
-        value.try_into().map_err(|_| Error::InvalidValue)
+        value.try_into().map_err(|_| Error::Unsupported)
     }
 
     /// Return the current compression activity token.

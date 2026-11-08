@@ -315,7 +315,7 @@ impl Row {
     /// The semantic prompt state of this row.
     pub fn semantic_prompt(self) -> Result<RowSemanticPrompt> {
         self.get::<ffi::RowSemanticPrompt::Type>(ffi::RowData::SEMANTIC_PROMPT)
-            .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+            .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
     /// Whether this row contains a Kitty virtual placeholder.
     pub fn has_kitty_virtual_placeholder(self) -> Result<bool> {
@@ -405,10 +405,10 @@ pub mod cell {
         Codepoint: CODEPOINT, u32 => u32, Ok;
         /// The content tag describing what kind of content is in the cell.
         ContentTag: CONTENT_TAG, ffi::CellContentTag::Type => CellContentTag,
-            |v: ffi::CellContentTag::Type| v.try_into().map_err(|_| Error::InvalidValue);
+            |v: ffi::CellContentTag::Type| v.try_into().map_err(|_| Error::Unsupported);
         /// The wide property of the cell.
         Wide: WIDE, ffi::CellWide::Type => CellWide,
-            |v: ffi::CellWide::Type| v.try_into().map_err(|_| Error::InvalidValue);
+            |v: ffi::CellWide::Type| v.try_into().map_err(|_| Error::Unsupported);
         /// Whether the cell has text to render.
         HasText: HAS_TEXT, bool => bool, Ok;
         /// Whether the cell has non-default styling.
@@ -421,7 +421,7 @@ pub mod cell {
         Protected: PROTECTED, bool => bool, Ok;
         /// The semantic content type of the cell (from OSC 133).
         SemanticContent: SEMANTIC_CONTENT, ffi::CellSemanticContent::Type => CellSemanticContent,
-            |v: ffi::CellSemanticContent::Type| v.try_into().map_err(|_| Error::InvalidValue);
+            |v: ffi::CellSemanticContent::Type| v.try_into().map_err(|_| Error::Unsupported);
         /// The palette index for the cell's background color.
         ///
         /// Only valid when the content tag is [`CellContentTag::BgColorPalette`].

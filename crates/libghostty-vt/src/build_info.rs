@@ -93,7 +93,7 @@ pub fn supports_glyph_protocol() -> Result<bool> {
 /// The optimization mode the library was built with.
 pub fn optimize_mode() -> Result<OptimizeMode> {
     build_info::<ffi::OptimizeMode::Type>(Info::OPTIMIZE)
-        .and_then(|v| v.try_into().map_err(|_| Error::InvalidValue))
+        .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
 }
 
 /// The full version string (e.g. "1.2.3" or "1.2.3-dev+abcdef").

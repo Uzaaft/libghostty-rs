@@ -200,7 +200,7 @@ impl Attribute<'_> {
             6 => Self::Faint,
             7 => Self::Underline(
                 Underline::try_from(unsafe { value.value.underline })
-                    .map_err(|_| Error::InvalidValue)?,
+                    .map_err(|_| Error::Unsupported)?,
             ),
             8 => Self::UnderlineColor(unsafe { value.value.underline_color }.into()),
             9 => Self::UnderlineColor256(PaletteIndex(unsafe { value.value.underline_color_256 })),
@@ -225,7 +225,7 @@ impl Attribute<'_> {
             28 => Self::BrightFg8(PaletteIndex(unsafe { value.value.bright_fg_8 })),
             29 => Self::Bg256(PaletteIndex(unsafe { value.value.bg_256 })),
             30 => Self::Fg256(PaletteIndex(unsafe { value.value.fg_256 })),
-            _ => return Err(Error::InvalidValue),
+            _ => return Err(Error::Unsupported),
         })
     }
 }

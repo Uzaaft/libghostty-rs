@@ -44,7 +44,7 @@ impl std::fmt::Display for Error {
             Self::IoError => write!(f, "external IO error"),
             Self::LimitExceeded => write!(f, "encoded input exceeded configured limit"),
             Self::Rejected => write!(f, "operation rejected"),
-            Self::Unsupported => write!(f, "operation unsupported"),
+            Self::Unsupported => write!(f, "unsupported feature or option"),
         }
     }
 }
@@ -56,11 +56,13 @@ pub(crate) fn from_result(code: ffi::Result::Type) -> Result<()> {
         ffi::Result::SUCCESS => Ok(()),
         ffi::Result::OUT_OF_MEMORY => Err(Error::OutOfMemory),
         ffi::Result::OUT_OF_SPACE => Err(Error::OutOfSpace { required: 0 }),
+        // NO_VALUE should never be possible here.
+        ffi::Result::NO_VALUE | ffi::Result::INVALID_VALUE => Err(Error::InvalidValue),
         ffi::Result::IO_ERROR => Err(Error::IoError),
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
-        _ => Err(Error::InvalidValue),
+        _ => Err(Error::Unsupported),
     }
 }
 
@@ -78,7 +80,7 @@ pub(crate) fn from_optional_result_uninit<T>(
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
-        _ => Err(Error::InvalidValue),
+        _ => Err(Error::Unsupported),
     }
 }
 
@@ -93,7 +95,7 @@ pub(crate) fn from_optional_result<T>(code: ffi::Result::Type, v: T) -> Result<O
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
-        _ => Err(Error::InvalidValue),
+        _ => Err(Error::Unsupported),
     }
 }
 
@@ -106,7 +108,7 @@ pub(crate) fn from_result_with_len(code: ffi::Result::Type, len: usize) -> Resul
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
-        _ => Err(Error::InvalidValue),
+        _ => Err(Error::Unsupported),
     }
 }
 
@@ -123,6 +125,6 @@ pub(crate) fn from_optional_result_with_len(
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
         ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
-        _ => Err(Error::InvalidValue),
+        _ => Err(Error::Unsupported),
     }
 }

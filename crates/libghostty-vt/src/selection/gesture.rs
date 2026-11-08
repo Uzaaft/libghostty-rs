@@ -107,7 +107,7 @@ impl<'alloc> Gesture<'alloc> {
             terminal,
             ffi::SelectionGestureData::AUTOSCROLL,
         )?;
-        Autoscroll::try_from(v).map_err(|_| Error::InvalidValue)
+        Autoscroll::try_from(v).map_err(|_| Error::Unsupported)
     }
     /// Get the current gesture behavior.
     pub fn behavior(&self, terminal: &Terminal<'_, '_>) -> Result<Behavior> {
@@ -115,7 +115,7 @@ impl<'alloc> Gesture<'alloc> {
             terminal,
             ffi::SelectionGestureData::BEHAVIOR,
         )?;
-        Behavior::try_from(v).map_err(|_| Error::InvalidValue)
+        Behavior::try_from(v).map_err(|_| Error::Unsupported)
     }
     /// Get the current left-click anchor.
     ///
