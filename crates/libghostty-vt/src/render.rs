@@ -1435,7 +1435,7 @@ impl CellIteration<'_, '_> {
     /// (e.g. the terminal foreground).
     pub fn fg_color(&self) -> Result<Option<RgbColor>> {
         let color = self.get_optional::<ffi::ColorRgb>(ffi::RenderStateRowCellsData::FG_COLOR)?;
-        Ok(color.map(|v| v.into()))
+        Ok(color.map(std::convert::Into::into))
     }
 
     /// The resolved background color of the cell.
@@ -1449,7 +1449,7 @@ impl CellIteration<'_, '_> {
     /// (e.g. the terminal background).
     pub fn bg_color(&self) -> Result<Option<RgbColor>> {
         let color = self.get_optional::<ffi::ColorRgb>(ffi::RenderStateRowCellsData::BG_COLOR)?;
-        Ok(color.map(|v| v.into()))
+        Ok(color.map(std::convert::Into::into))
     }
 
     /// Get the grapheme codepoints.

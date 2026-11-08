@@ -61,7 +61,6 @@ pub(crate) fn from_result(code: ffi::Result::Type) -> Result<()> {
         ffi::Result::IO_ERROR => Err(Error::IoError),
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
-        ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
         _ => Err(Error::Unsupported),
     }
 }
@@ -79,7 +78,6 @@ pub(crate) fn from_optional_result_uninit<T>(
         ffi::Result::IO_ERROR => Err(Error::IoError),
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
-        ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
         _ => Err(Error::Unsupported),
     }
 }
@@ -94,7 +92,6 @@ pub(crate) fn from_optional_result<T>(code: ffi::Result::Type, v: T) -> Result<O
         ffi::Result::IO_ERROR => Err(Error::IoError),
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
-        ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
         _ => Err(Error::Unsupported),
     }
 }
@@ -107,7 +104,6 @@ pub(crate) fn from_result_with_len(code: ffi::Result::Type, len: usize) -> Resul
         ffi::Result::IO_ERROR => Err(Error::IoError),
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
-        ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
         _ => Err(Error::Unsupported),
     }
 }
@@ -124,7 +120,6 @@ pub(crate) fn from_optional_result_with_len(
         ffi::Result::IO_ERROR => Err(Error::IoError),
         ffi::Result::REJECTED => Err(Error::Rejected),
         ffi::Result::LIMIT_EXCEEDED => Err(Error::LimitExceeded),
-        ffi::Result::UNSUPPORTED => Err(Error::Unsupported),
         _ => Err(Error::Unsupported),
     }
 }
