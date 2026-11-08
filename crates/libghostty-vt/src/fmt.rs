@@ -85,6 +85,79 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         unsafe { Self::new_inner(alloc.to_raw(), terminal) }
     }
 
+    /// Create a formatter restricted to the terminal's current active selection.
+    ///
+    /// Returns `Ok(None)` when there is no active selection, rather than
+    /// creating a formatter for the whole screen. The formatter copies the
+    /// selection at creation; later selection changes do not change its range.
+    /// All other options have the same defaults as [`Self::new`]. For clipboard
+    /// text, use plain output with unwrap and trim both true.
+    ///
+    /// ```
+    /// use libghostty_vt::{Terminal, fmt::{Format, Formatter}};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let terminal = Terminal::new(80, 24)?;
+    /// if let Some(mut formatter) = Formatter::new_selection(&terminal)? {
+    ///     formatter.set_format(Format::Plain)?.set_unwrap(true)?.set_trim(true)?;
+    ///     let selected = formatter.format_alloc(None)?;
+    ///     // Copy only `selected` to the clipboard.
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// The terminal cannot change screens or invalidate the selection while
+    /// the formatter is in use:
+    ///
+    /// ```compile_fail,E0502
+    /// use libghostty_vt::{Terminal, fmt::Formatter};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut terminal = Terminal::new(10, 3)?;
+    /// let mut formatter = Formatter::new_selection(&terminal)?.unwrap();
+    /// terminal.vt_write(b"\x1b[?1049h");
+    /// formatter.format_alloc(None)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new_selection(terminal: &'t Terminal<'alloc, 'cb>) -> Result<Option<Self>> {
+        // SAFETY: A NULL allocator is always valid.
+        unsafe { Self::new_selection_inner(std::ptr::null(), terminal) }
+    }
+
+    /// Create a formatter restricted to the terminal's current active selection.
+    ///
+    /// Like [`Self::new_selection`], returns `Ok(None)` when there is no active
+    /// selection. See the [crate-level documentation](crate#memory-management-and-lifetimes)
+    /// regarding custom memory management and lifetimes.
+    pub fn new_selection_with_alloc<'ctx: 'alloc>(
+        alloc: &'alloc Allocator<'ctx>,
+        terminal: &'t Terminal<'alloc, 'cb>,
+    ) -> Result<Option<Self>> {
+        // SAFETY: Borrow checking should forbid invalid allocators.
+        unsafe { Self::new_selection_inner(alloc.to_raw(), terminal) }
+    }
+
+    /// # Safety
+    ///
+    /// `alloc` must be NULL or point to an allocator valid for `'alloc`.
+    unsafe fn new_selection_inner(
+        alloc: *const ffi::Allocator,
+        terminal: &'t Terminal<'alloc, 'cb>,
+    ) -> Result<Option<Self>> {
+        let Some(selection) = terminal.selection()? else {
+            return Ok(None);
+        };
+        // SAFETY: Upheld by caller.
+        let mut formatter = unsafe { Self::new_inner(alloc, terminal) }?;
+        // SAFETY: The snapshot comes from this very terminal's active screen.
+        // The formatter's shared terminal borrow prevents writes, resize, reset,
+        // and screen switches for its lifetime. Shared selection/gesture,
+        // tracked-ref, and render-state operations do not invalidate grid refs.
+        // Upstream copies the selection, not the pointer to this local value.
+        unsafe { formatter.set_selection(Some(&selection)) }?;
+        Ok(Some(formatter))
+    }
+
     /// # Safety
     ///
     /// `alloc` must be NULL or point to an allocator valid for `'alloc`.
@@ -174,9 +247,9 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// be a valid snapshot for this formatter's terminal. Pass `None` to clear
     /// it and format the whole screen again.
     ///
-    /// To format the terminal's active selection, read it with
-    /// [`Terminal::selection`] and set it here. For clipboard text, use plain
-    /// output with unwrap and trim both true.
+    /// To format the terminal's active selection safely, use
+    /// [`Self::new_selection`]. For clipboard text, use plain output with
+    /// unwrap and trim both true.
     ///
     /// # Safety
     ///
@@ -448,6 +521,62 @@ mod tests {
             .unwrap();
         assert!(formatter.selection().unwrap().is_none());
         assert_eq!(format_buf(&mut formatter), b"hello world");
+    }
+
+    #[test]
+    fn current_selection_formats_only_selected_text_and_keeps_its_snapshot() {
+        use crate::terminal::{Point, PointCoordinate};
+
+        let mut terminal = Terminal::new(20, 3).unwrap();
+        terminal.vt_write(b"left chosen right\r\nnot selected");
+        let at = |x| {
+            terminal
+                .grid_ref(Point::Active(PointCoordinate { x, y: 0 }))
+                .unwrap()
+        };
+        let selection = Selection::new(at(5), at(10), false);
+        terminal.set_selection(Some(&selection)).unwrap();
+
+        let mut formatter = Formatter::new_selection(&terminal).unwrap().unwrap();
+        let mut allocated = Formatter::new_selection_with_alloc(&Allocator::GLOBAL, &terminal)
+            .unwrap()
+            .unwrap();
+        formatter
+            .set_format(Format::Plain)
+            .unwrap()
+            .set_unwrap(true)
+            .unwrap()
+            .set_trim(true)
+            .unwrap();
+        // Clearing the terminal-owned selection does not invalidate the copy.
+        terminal.set_selection(None).unwrap();
+        let _tracked = terminal
+            .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .unwrap();
+        assert_eq!(&*formatter.format_alloc(None).unwrap(), b"chosen");
+        assert_eq!(
+            &*allocated.format_alloc(Some(&Allocator::GLOBAL)).unwrap(),
+            b"chosen"
+        );
+    }
+
+    #[test]
+    fn current_selection_absence_does_not_format_the_whole_screen() {
+        let mut terminal = Terminal::new(20, 3).unwrap();
+        terminal.vt_write(b"not clipboard text");
+        assert!(Formatter::new_selection(&terminal).unwrap().is_none());
+        assert!(
+            Formatter::new_selection_with_alloc(&Allocator::GLOBAL, &terminal)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            &*Formatter::new(&terminal)
+                .unwrap()
+                .format_alloc(None)
+                .unwrap(),
+            b"not clipboard text"
+        );
     }
 
     #[test]
