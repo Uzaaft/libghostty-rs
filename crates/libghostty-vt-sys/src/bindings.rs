@@ -3063,6 +3063,10 @@ unsafe extern "C" {
     pub fn ghostty_terminal_free(terminal: Terminal);
 }
 unsafe extern "C" {
+    #[doc = " Clear the primary screen and history without resetting modes or the VT parser.\n\n At a semantic prompt, clears the display and returns true so the caller can\n send form feed (0x0C) to the shell to repaint. Otherwise, removes rows above\n the cursor, preserves the cursor line and rows below it, and returns false.\n Clears the selection and all Kitty images, including offscreen and unplaced\n images. On the alternate screen or a NULL terminal, does nothing and returns\n false. Does not write to the PTY callback.\n"]
+    pub fn ghostty_terminal_clear_screen(terminal: Terminal) -> bool;
+}
+unsafe extern "C" {
     #[doc = " Perform a full reset of the terminal (RIS).\n\n Resets all terminal state back to its initial configuration, including\n modes, scrollback, scrolling region, and screen contents. The terminal\n dimensions are preserved.\n\n If synchronized output was enabled, the GHOSTTY_TERMINAL_OPT_RENDER_HOLD\n callback is invoked to report that the hold ended.\n\n"]
     pub fn ghostty_terminal_reset(terminal: Terminal);
 }

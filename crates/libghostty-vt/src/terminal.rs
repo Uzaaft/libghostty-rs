@@ -556,6 +556,33 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         from_result(result)
     }
 
+    /// Clear the primary screen and history without resetting modes or the VT parser.
+    ///
+    /// At a semantic prompt, clears the display and returns true so the caller can
+    /// send form feed (0x0C) to the shell to repaint. Otherwise, removes rows above
+    /// the cursor, preserves the cursor line and rows below it, and returns false.
+    /// Clears the selection and all Kitty images, including offscreen and unplaced
+    /// images. On the alternate screen, does nothing and returns false.
+    /// Does not write to the PTY callback.
+    ///
+    /// ```
+    /// use libghostty_vt::{Terminal, fmt::Formatter};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut terminal = Terminal::new(20, 5)?;
+    /// terminal.vt_write(b"old output\r\ncurrent line\x1b[31");
+    /// assert!(!terminal.clear_screen()); // No semantic prompt needs redrawing.
+    /// assert!(!terminal.is_vt_ground()?); // The partial CSI is still pending.
+    /// terminal.vt_write(b"m!");
+    /// assert_eq!(terminal.cursor_y()?, 0);
+    /// assert_eq!(Formatter::new(&terminal)?.format_alloc(None)?.as_ref(), b"current line!");
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn clear_screen(&mut self) -> bool {
+        unsafe { ffi::ghostty_terminal_clear_screen(self.inner.as_raw()) }
+    }
+
     /// Perform a full reset of the terminal (RIS).
     ///
     /// Resets all terminal state back to its initial configuration,
