@@ -71,18 +71,25 @@ run on older processors. For a binary that will run on the build machine, set
 `LIBGHOSTTY_VT_SYS_CPU=native`; a named Zig CPU model such as `x86_64_v3` can be
 used when all deployment machines support that target.
 
-The `pkg-config` path is opt-in. If you enable `libghostty-vt-sys/pkg-config`,
+The `pkg-config` path is opt-in. If you enable `libghostty-vt/pkg-config`
+(or `libghostty-vt-sys/pkg-config` for direct FFI use),
 the build will prefer an installed `libghostty-vt` discovered through
 `pkg-config` when `GHOSTTY_SOURCE_DIR` is unset. libghostty-vt is pre-1.0, so
 the checked-in bindings are expected to move with the pinned Ghostty source and
 do not guarantee compatibility with arbitrary installed C API revisions. An
 explicit `GHOSTTY_SOURCE_DIR` always wins.
 
-Nix builds in this repository prefetch the pinned Ghostty source and Ghostty's
-Zig package dependencies up front, then set `GHOSTTY_SOURCE_DIR` and
-`GHOSTTY_ZIG_SYSTEM_DIR` for the Cargo build. Downstream Nix packaging should
-use the same contract rather than adding `git` or allowing network access in
-the sandbox.
+Native Nix builds use `pkg-config`: Linux consumes upstream's pinned Nix
+package (substituted from Ghostty's binary cache when available), and macOS
+static builds use the matching release XCFramework with a pinned SHA-256.
+The default dev shell provides the same library for opt-in Cargo builds.
+The macOS dynamic-link check still builds upstream's Nix package because the
+XCFramework contains no shared library. Windows, Wasm, and the iOS vendored
+check continue to build from source.
+
+Downstream Nix source builds can prefetch the pinned Ghostty source and its
+Zig package dependencies, then set `GHOSTTY_SOURCE_DIR` and
+`GHOSTTY_ZIG_SYSTEM_DIR` rather than allowing network access in the sandbox.
 
 By default, `libghostty-vt` and `libghostty-vt-sys` link `libghostty-vt.a`.
 This statically links the Ghostty VT archive, but the final binary may still
@@ -93,7 +100,7 @@ enable `libghostty-vt/link-dynamic`.
 nix develop
 cargo check
 cargo test -p libghostty-vt-sys
-cargo build --manifest-path example/Cargo.toml --workspace
+cargo build --manifest-path example/Cargo.toml --workspace --features libghostty-vt/pkg-config
 ```
 
 ### Regenerating bindings

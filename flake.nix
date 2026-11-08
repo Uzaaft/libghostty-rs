@@ -89,7 +89,40 @@
             (previousAttrs.patches or [])
             ++ ["${ghostty}/nix/patches/zig-0.17-ios-process-replace.patch"];
         });
-        ghosttyLib = ghostty.packages.${system}.libghostty-vt;
+        ghosttySourceLib = ghostty.packages.${system}.libghostty-vt;
+        # The release contains a universal macOS archive, but no dylib. Keep
+        # the upstream derivation for dynamic-link coverage and use the signed
+        # release's checksum for ordinary static builds. Tie it to the source
+        # pin so a later bindings bump cannot silently use an older archive.
+        ghosttyLib =
+          if pkgs.stdenv.isDarwin
+          then
+            assert ghostty.rev == "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec";
+              pkgs.runCommand "libghostty-vt-1.0.0-macos" {
+                src = pkgs.fetchurl {
+                  url = "https://release.files.ghostty.org/libghostty-vt/1.0.0/ghostty-vt-1.0.0.xcframework.zip";
+                  sha256 = "2c32b7409b2b6c2ef6cfd606526de357762ad458bdc27134ad074e86506a8bc2";
+                };
+                nativeBuildInputs = [pkgs.unzip];
+              } ''
+                unzip -q "$src"
+                slice=ghostty-vt.xcframework/macos-arm64_x86_64
+                mkdir -p "$out/lib/pkgconfig"
+                cp "$slice/libghostty-vt.a" "$out/lib/"
+                cp -R "$slice/Headers" "$out/include"
+                cat > "$out/lib/pkgconfig/libghostty-vt-static.pc" <<EOF
+                prefix=$out
+                libdir=\''${prefix}/lib
+                includedir=\''${prefix}/include
+
+                Name: libghostty-vt-static
+                Description: Ghostty VT library (static)
+                Version: 1.0.0
+                Libs: -L\''${libdir} -lghostty-vt
+                Cflags: -I\''${includedir}
+                EOF
+              ''
+          else ghosttySourceLib;
 
         miriCommand = pkgs.writeShellApplication {
           name = "libghostty-miri";
@@ -280,6 +313,13 @@
             commonArgs
             // {
               inherit cargoArtifacts;
+              # The Apple release has no shared library. Build upstream's
+              # dylib only for this check, not for every static consumer.
+              buildInputs = map (input:
+                if input == ghosttyLib
+                then ghosttySourceLib
+                else input)
+              commonArgs.buildInputs;
               cargoExtraArgs = "${commonArgs.cargoExtraArgs} --features libghostty-vt-sys/link-dynamic";
               cargoTestExtraArgs = "--workspace --all-targets";
             }
@@ -291,6 +331,9 @@
         };
 
         devShells.default = craneLib.devShell {
+          # Native Cargo examples opt into pkg-config; cross-target and
+          # explicit source builds still use Zig from this shell.
+          buildInputs = [ghosttyLib];
           packages = [
             devToolchain
             zigPkg
