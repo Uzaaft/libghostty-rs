@@ -1,8 +1,13 @@
-//! Format terminal content as plain text, VT sequences, or HTML.
+//! Turn terminal content into plain text, VT sequences, or HTML.
 //!
-//! A formatter captures a reference to a terminal and formatting options.
-//! It can be used repeatedly to produce output that reflects the current
-//! terminal state at the time of each format call.
+//! A formatter is a view of a terminal that you can turn into plain text,
+//! VT sequences, or HTML, as many times as you like.
+//!
+//! Use one to get text out of a terminal, such as copying a selection or
+//! saving what's on the screen. You need a terminal first, and it must
+//! outlive the formatter. Each format call reflects the terminal at the
+//! time of that call.
+// FIXME: Transclude examples, link to guide
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
@@ -489,17 +494,17 @@ mod tests {
 
     #[test]
     fn selection_is_copied_and_can_be_cleared() {
-        use crate::terminal::{Point, PointCoordinate};
+        use crate::point::{Coordinate, Point};
 
         let mut terminal = Terminal::new(10, 3).unwrap();
         terminal.vt_write(b"hello world");
         let mut formatter = Formatter::new(&terminal).unwrap();
         {
             let start = terminal
-                .grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+                .grid_ref(Point::Active(Coordinate { x: 0, y: 0 }))
                 .unwrap();
             let end = terminal
-                .grid_ref(Point::Active(PointCoordinate { x: 4, y: 0 }))
+                .grid_ref(Point::Active(Coordinate { x: 4, y: 0 }))
                 .unwrap();
             let selection = Selection::new(start, end, false);
             // SAFETY: Both endpoints come from the formatter's active screen.
@@ -525,13 +530,13 @@ mod tests {
 
     #[test]
     fn current_selection_formats_only_selected_text_and_keeps_its_snapshot() {
-        use crate::terminal::{Point, PointCoordinate};
+        use crate::point::{Coordinate, Point};
 
         let mut terminal = Terminal::new(20, 3).unwrap();
         terminal.vt_write(b"left chosen right\r\nnot selected");
         let at = |x| {
             terminal
-                .grid_ref(Point::Active(PointCoordinate { x, y: 0 }))
+                .grid_ref(Point::Active(Coordinate { x, y: 0 }))
                 .unwrap()
         };
         let selection = Selection::new(at(5), at(10), false);
@@ -551,7 +556,7 @@ mod tests {
         // Clearing the terminal-owned selection does not invalidate the copy.
         terminal.set_selection(None).unwrap();
         let _tracked = terminal
-            .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .track_grid_ref(Point::Active(Coordinate { x: 0, y: 0 }))
             .unwrap();
         assert_eq!(&*formatter.format_alloc(None).unwrap(), b"chosen");
         assert_eq!(
@@ -651,13 +656,13 @@ mod tests {
     /// selected row, and only for untrimmed VT output.
     #[test]
     fn only_untrimmed_vt_keeps_trailing_blank_rows_in_selection() {
-        use crate::terminal::{Point, PointCoordinate};
+        use crate::point::{Coordinate, Point};
 
         let mut terminal = Terminal::new(10, 6).unwrap();
         terminal.vt_write(b"one\r\ntwo");
         let at = |x, y| {
             terminal
-                .grid_ref(Point::Active(PointCoordinate { x, y }))
+                .grid_ref(Point::Active(Coordinate { x, y }))
                 .unwrap()
         };
         // Rows 0 to 3: two with text, then two blank ones.

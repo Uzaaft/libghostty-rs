@@ -1,123 +1,13 @@
+//! Save a terminal's full state and restore it later.
+//!
 //! Encode and restore the complete state of a terminal via a binary format.
 //!
-//! A snapshot is an ordered, CRC-protected record stream. Its READY marker
-//! follows enough state to render and resume the terminal, including any
-//! unfinished VT parser input. Older scrollback pages follow READY and the
-//! FINISH marker terminates the complete snapshot.
+//! Use this to save a terminal and bring it back later. If the input can
+//! stop partway through a sequence, call [`Terminal::set_continuation_max_bytes`]
+//! before you write it.
 //!
-//! End-of-file before an operation's required READY or FINISH marker is
-//! malformed, truncated snapshot data and returns [`Error::InvalidValue`].
-//! [`Error::IoError`] is reserved for reader errors.
-//!
-//! Decoding is done with the dedicated [`Decoder`] struct; encoding, meanwhile,
-//! is supported by methods on [`Terminal`] like [`Terminal::encode_snapshot`].
-//!
-//! # Format
-//!
-//! Every integer is unsigned and little-endian.
-//! The stream begins with this fixed ten-byte envelope:
-//!
-//! ```text
-//! byte  0               8       10
-//!       +---------------+--------+
-//!       | "GHOSTSNP"    | version|
-//!       | 8-byte magic  | u16    |
-//!       +---------------+--------+
-//! ```
-//!
-//! The envelope is followed by independently checksummed records. A record's
-//! CRC32C covers its encoded tag and payload length followed by its payload;
-//! it does not cover the CRC field itself.
-//!
-//! ```text
-//! byte  0       2             6          10             10 + payload_len
-//!       +-------+-------------+-----------+----------------+
-//!       | tag   | payload_len | CRC32C    | payload        |
-//!       | u16   | u32         | u32       | payload_len B  |
-//!       +-------+-------------+-----------+----------------+
-//!       \____________________/             \______________/
-//!          CRC prefix                         CRC suffix
-//! ```
-//!
-//! Record groups occur in this strict order. SCREEN and HISTORY groups contain
-//! one entry for each screen declared by TERMINAL. Each manifest is followed by
-//! the number of PAGE records it declares. Active SCREEN pages make the terminal
-//! renderable; HISTORY pages are older scrollback ordered newest to oldest so
-//! an incremental decoder can prepend them as they arrive.
-//!
-//! ```text
-//!
-//! +---------------- TERMINAL ----------------+
-//! | terminal-wide state and screen count     |
-//! +----------------- SCREEN -----------------+  repeated per screen
-//! | active-screen manifest                   |
-//! +------------------ PAGE ------------------+  repeated per manifest
-//! | active screen rows                       |
-//! +---------- KITTY_IMAGE_STORAGE -----------+  optional, per screen
-//! | images, placements, in-progress load     |
-//! +------------- CONTINUATION ---------------+
-//! | unfinished VT/UTF-8 input, or ground     |
-//! +------------------ READY -----------------+
-//! | empty renderable-state marker            |  ready() returns here
-//! +---------- KITTY_IMAGE_PAYLOAD -----------+  optional, anywhere until FINISH,
-//! | one image's or frame's pixels            |  next() consumes one
-//! +----------------- HISTORY ----------------+  repeated per screen
-//! | scrollback manifest                      |
-//! +------------------ PAGE ------------------+  next() consumes one page
-//! | older screen rows                        |
-//! +------ KITTY_IMAGE_PAGE_PLACEMENTS -------+  optional, after a PAGE
-//! | placements pinned to that page           |
-//! +------------------ FINISH ----------------+
-//! | empty end-of-snapshot marker             |  next() returns NO_VALUE
-//! +------------------------------------------+
-//! | trailing transport bytes (not consumed) |
-//! +------------------------------------------+
-//! ```
-//!
-//! READY separates the renderable prefix through CONTINUATION from history.
-//! FINISH terminates the record sequence. Both are empty records protected by
-//! CRC32C, like every other record. Declared record counts, tags, and strict
-//! decoding enforce the stream's ordering and completeness.
-//!
-//! A decoder skips any record whose tag it does not know, wherever it
-//! appears. This lets a newer library add optional kinds of records that
-//! older libraries ignore, without changing the snapshot version. Skipped
-//! records are still checked, so a damaged record fails decoding even when
-//! its tag is unknown.
-//!
-//! The Kitty graphics records are optional in this way. A library built
-//! without Kitty graphics skips them and restores the same terminal without
-//! its images, and a terminal without images writes none of them.
-//!
-//! Images are restored at READY with their pixels pending, and the pixels
-//! arrive later through [`IncrementalDecoder::next`].
-// The Kitty graphics items only exist with the `kitty-graphics` feature, so
-// only link to them then; otherwise the links would be broken.
-#![cfg_attr(
-    feature = "kitty-graphics",
-    doc = "A pending image can be placed and queried, but \
-           [`Image::data`](crate::kitty::graphics::Image::data) returns \
-           `Ok(None)` for it until its pixels arrive. When they do, the image \
-           keeps its [`Image::generation`](crate::kitty::graphics::Image::generation), \
-           but [`Graphics::generation`](crate::kitty::graphics::Graphics::generation) \
-           changes, so a renderer that watches that value picks up the new \
-           pixels on its next frame."
-)]
-#![cfg_attr(
-    not(feature = "kitty-graphics"),
-    doc = "A pending image can be placed and queried, but `Image::data` \
-           returns `Ok(None)` for it until its pixels arrive. When they do, \
-           the image keeps its `Image::generation`, but `Graphics::generation` \
-           changes, so a renderer that watches that value picks up the new \
-           pixels on its next frame."
-)]
-//!
-//! Snapshot format version 1 is a work in progress and does not yet carry a
-//! binary-compatibility guarantee.
-//!
-//! ## See also
-//!
-//! [Snapshot format and Zig codec documentation](https://github.com/ghostty-org/ghostty/blob/main/src/terminal/snapshot/main.zig)
+//! The snapshot byte format is versioned separately from the library and isn't
+//! covered by the ABI promise in [Stability](https://lib.ghostty.org/vt/stability.html).
 use std::{
     io::{Read, Write},
     marker::PhantomData,

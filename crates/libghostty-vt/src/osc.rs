@@ -484,7 +484,7 @@ pub enum CommandType<'p> {
     /// ```
     ///
     /// [`Terminal::on_program_status`]: crate::Terminal::on_program_status
-    /// [`ProgramStatus`]: crate::terminal::ProgramStatus
+    /// [`ProgramStatus`]: crate::effect::ProgramStatus
     ProgramStatus,
 }
 

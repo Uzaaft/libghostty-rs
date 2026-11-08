@@ -1,26 +1,18 @@
-//! Selecting terminal content between two endpoints.
+//! Select words, lines, and ranges, and turn pointer gestures into selections.
 //!
-//! The start and end values are [`GridRef`] values. They are therefore
-//! untracked grid references and inherit the same lifetime rules: they are
-//! only safe to use until the next mutating operation on the terminal that
-//! produced them, including dropping the terminal. To keep a selection valid
-//! across terminal mutations, callers must maintain tracked grid references
-//! for the endpoints and reconstruct a [`Selection`] from fresh snapshots
-//! when needed.
+//! A selection is a range of terminal content between two cells. It is a
+//! snapshot, only valid until the next change to the terminal.
 //!
-//! Selections can be directly obtained by calling methods such as
-//! [`Terminal::select_all`], [`Terminal::select_word`], etc., but this can be
-//! quite cumbersome to use for terminal emulators designed for human users.
-//! For this use case, [selection gestures](self::gesture) serve as a convenient
-//! way of translating common UI actions (clicking, dragging, etc.) into selections,
-//! to be copied, formatted, or installed as the active selection.
+//! You need a terminal, and usually a grid reference to start from.
+// FIXME: Transclude examples, link to guide
 use std::marker::PhantomData;
 
 use crate::{
     error::{Error, Result, from_optional_result, from_result},
     ffi,
-    screen::GridRef,
-    terminal::{Point, Terminal},
+    grid_ref::GridRef,
+    point::Point,
+    terminal::Terminal,
 };
 
 pub mod gesture;

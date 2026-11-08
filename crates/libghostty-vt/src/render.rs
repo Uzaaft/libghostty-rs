@@ -4,10 +4,11 @@ use std::{convert::Into, marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
+    color::Rgb,
     error::{Error, Result, from_optional_result, from_optional_result_uninit, from_result},
     ffi,
     screen::{Cell, Row},
-    style::{RgbColor, Style},
+    style::Style,
     terminal::Terminal,
 };
 
@@ -932,7 +933,7 @@ impl Snapshot<'_, '_> {
     }
 
     /// Get the cursor color that may have been explicitly set by the terminal state.
-    pub fn cursor_color(&self) -> Result<Option<RgbColor>> {
+    pub fn cursor_color(&self) -> Result<Option<Rgb>> {
         let has_value = self.get(ffi::RenderStateData::COLOR_CURSOR_HAS_VALUE)?;
         if has_value {
             let color = self.get(ffi::RenderStateData::COLOR_CURSOR)?;
@@ -1433,7 +1434,7 @@ impl CellIteration<'_, '_> {
     /// Returns `None` if the cell has no explicit foreground color, in which
     /// case the caller should use whatever default foreground color it want
     /// (e.g. the terminal foreground).
-    pub fn fg_color(&self) -> Result<Option<RgbColor>> {
+    pub fn fg_color(&self) -> Result<Option<Rgb>> {
         let color = self.get_optional::<ffi::ColorRgb>(ffi::RenderStateRowCellsData::FG_COLOR)?;
         Ok(color.map(std::convert::Into::into))
     }
@@ -1447,7 +1448,7 @@ impl CellIteration<'_, '_> {
     /// Returns `None` if the cell has no background color, in which case the
     /// caller should use whatever default background color it wants
     /// (e.g. the terminal background).
-    pub fn bg_color(&self) -> Result<Option<RgbColor>> {
+    pub fn bg_color(&self) -> Result<Option<Rgb>> {
         let color = self.get_optional::<ffi::ColorRgb>(ffi::RenderStateRowCellsData::BG_COLOR)?;
         Ok(color.map(std::convert::Into::into))
     }
@@ -1934,13 +1935,13 @@ pub struct RowId([u64; 2]);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Colors {
     /// The default/current background color for the render state.
-    pub background: RgbColor,
+    pub background: Rgb,
     /// The default/current foreground color for the render state.
-    pub foreground: RgbColor,
+    pub foreground: Rgb,
     /// The cursor color which may be explicitly set by terminal state.
-    pub cursor: Option<RgbColor>,
+    pub cursor: Option<Rgb>,
     /// The active 256-color palette for this render state.
-    pub palette: [RgbColor; 256],
+    pub palette: [Rgb; 256],
 }
 
 /// Dirty state of a render state after update.
@@ -2422,13 +2423,13 @@ mod tests {
     #[test]
     fn cell_get_multi_reads_background_colors() {
         use crate::{
+            point::{Coordinate, Point},
             screen::{CellContentTag, cell},
-            style::{PaletteIndex, RgbColor},
-            terminal::{Point, PointCoordinate},
+            style::{PaletteIndex, Rgb},
         };
 
         let mut terminal = Terminal::new(2, 1).unwrap();
-        let point = Point::Viewport(PointCoordinate { x: 0, y: 0 });
+        let point = Point::Viewport(Coordinate { x: 0, y: 0 });
         terminal.vt_write(b"\x1b[48;5;173m\x1b[2K");
         let cell = terminal.grid_ref(point).unwrap().cell().unwrap();
         let (palette, tag) = cell
@@ -2443,7 +2444,7 @@ mod tests {
         assert_eq!(tag, CellContentTag::BgColorRgb);
         assert_eq!(
             rgb,
-            RgbColor {
+            Rgb {
                 r: 18,
                 g: 52,
                 b: 86
