@@ -26,5 +26,3 @@ Raw FFI bindings for libghostty-vt.
   `libghostty-vt` found through `pkg-config` only when `GHOSTTY_SOURCE_DIR` is
   unset. With the default static link mode, it probes Ghostty's
   `libghostty-vt-static` pkg-config module instead.
-- libghostty-vt is pre-1.0, so these bindings do not guarantee compatibility
-  with arbitrary installed C API revisions.

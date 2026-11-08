@@ -2,9 +2,10 @@
 
 use crate::{
     alloc::{Allocator, Object},
+    color::{PaletteIndex, Rgb},
     error::{Error, Result, from_result},
     ffi,
-    style::{PaletteIndex, RgbColor, Underline},
+    style::Underline,
 };
 
 /// SGR (Select Graphic Rendition) attribute parser.
@@ -155,7 +156,7 @@ pub enum Attribute<'p> {
     ResetItalic,
     Faint,
     Underline(Underline),
-    UnderlineColor(RgbColor),
+    UnderlineColor(Rgb),
     UnderlineColor256(PaletteIndex),
     ResetUnderlineColor,
     Overline,
@@ -168,8 +169,8 @@ pub enum Attribute<'p> {
     ResetInvisible,
     Strikethrough,
     ResetStrikethrough,
-    DirectColorFg(RgbColor),
-    DirectColorBg(RgbColor),
+    DirectColorFg(Rgb),
+    DirectColorBg(Rgb),
     Bg8(PaletteIndex),
     Fg8(PaletteIndex),
     ResetFg,

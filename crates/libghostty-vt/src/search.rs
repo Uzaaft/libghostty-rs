@@ -1,56 +1,13 @@
-//! Search terminal contents, including scrollback, for a string.
+//! Find a string in a terminal, including its scrollback.
 //!
-//! Search a terminal for a string, covering the active area and scrollback of
-//! both the primary and alternate screens.
+//! Search a terminal for a string, covering the active area and scrollback
+//! of both the primary and alternate screens.
 //!
-//! A [`Search`] searches the terminal it was created with for a needle set
-//! with [`Search::set_needle`]. It handles the hard parts of terminal search
-//! internally: results stay in sync with the live screens, survive
-//! primary/alternate screen switches (entering and leaving a fullscreen app
-//! such as vim does not restart a scrollback search), and recover from
-//! resize, reflow, resets, and scrollback pruning.
+//! You need a terminal to search. For a one-shot search, [`Search::run`]
+//! does all of the work. For a find bar over a lot of scrollback, you decide
+//! when the work happens.
 //!
-//! A search starts idle. Setting the needle starts the search, changing it
-//! restarts the search from scratch, and clearing it returns the search to
-//! idle. Matching is byte-exact except ASCII letters, which compare
-//! case-insensitively.
-//!
-//! # Driving a search
-//!
-//! Searching a large scrollback takes time, so the work is split into small
-//! steps the caller drives so that the caller can control performance more
-//! directly:
-//!
-//! - [`Search::tick`] makes a bounded amount of progress on data the search
-//!   has already copied, without borrowing the terminal.
-//! - [`Search::feed`] reads the terminal to copy in more data and pick up
-//!   terminal changes. Feeding is the only way the search learns that the
-//!   terminal changed, so keep feeding periodically while the search is in
-//!   use. This requires exclusive terminal access.
-//! - [`Search::run`] is a blocking convenience that feeds and ticks until the
-//!   search is caught up.
-//!
-//! [`Status::Complete`] means the search is caught up with the terminal as of
-//! the last feed. It never means finished forever, since later terminal
-//! writes require another feed to be seen.
-//!
-//! # Matches are selections
-//!
-//! Every match is returned as a [`Selection`] that is not rectangular, so the
-//! existing selection APIs all work on matches: format the matched text,
-//! position highlight rectangles with [`Terminal::point_from_grid_ref`], hit
-//! test, or make a match the terminal's selection.
-//!
-//! Returned matches are only valid until the next operation that modifies the
-//! terminal, including [`Terminal::vt_write`], resize, reset, and drop. The
-//! borrow checker enforces this: matches are read from a [`Snapshot`], which
-//! borrows both the search and its terminal. Read matches after a feed, use
-//! them before the terminal changes again, and re-read them rather than
-//! caching them. The selected match is kept accurate internally across
-//! terminal changes, so the safe way to follow a match is to re-read
-//! [`Snapshot::selected_match`] after each feed.
-//!
-//! # Lifetime
+//!  # Lifetime
 //!
 //! The search is bound to the terminal it was created with, but only borrows
 //! it during operations that need it, so the terminal can be used normally in
@@ -64,32 +21,7 @@
 //! return whatever the search last saw, and dropping the search releases only
 //! search-owned memory. A search cannot be rebound, so searching another
 //! terminal means creating a new search.
-//!
-//! # Example
-//!
-//! ```
-//! use libghostty_vt::{Terminal, search::{MatchBuffer, Search}};
-//!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let mut terminal = Terminal::new(80, 24)?;
-//! terminal.vt_write(b"hello world");
-//!
-//! let mut search = Search::new(&mut terminal)?;
-//! search.set_needle(&mut terminal, b"hello")?;
-//! search.run(&mut terminal)?;
-//!
-//! // Keep the match storage around to reuse it between frames.
-//! let mut storage = MatchBuffer::new();
-//! let snapshot = search.snapshot(&mut terminal)?;
-//! for selected in snapshot.matches(&mut storage)? {
-//!     selected.start().cell()?;
-//! }
-//!
-//! // Once the matches are no longer used, the terminal can change again.
-//! terminal.vt_write(b"\r\nhello again");
-//! # Ok(())
-//! # }
-//! ```
+// FIXME: Transclude examples, link to guide
 
 use std::marker::PhantomData;
 
@@ -767,7 +699,7 @@ mod tests {
         let row = |selection: &Selection<'_>| {
             snapshot
                 .terminal()
-                .point_from_grid_ref(&selection.start(), crate::terminal::PointSpace::Active)
+                .point_from_grid_ref(&selection.start(), crate::point::Space::Active)
                 .unwrap()
                 .unwrap()
         };

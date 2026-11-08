@@ -1,75 +1,85 @@
-//! Idiomatic, safe Rust bindings for
-//! [`libghostty-vt`](https://libghostty.tip.ghostty.org/),
-//! a terminal emulation library extracted from the
-//! [Ghostty](https://ghostty.org) terminal emulator.
+//! Idiomatic, safe Rust bindings for [`libghostty-vt`](https://lib.ghostty.org/vt),
+//! a portable, high-performance C library for terminal emulation. It is
+//! [open source](https://github.com/ghostty-org/ghostty) and
+//! [MIT licensed](https://github.com/ghostty-org/ghostty/blob/main/LICENSE).
 //!
-//! `libghostty-vt` contains the logic for handling the core parts of a
-//! terminal emulator: parsing terminal escape sequences, maintaining terminal
-//! state, encoding input events, etc. It can handle scrollback, line wrapping,
-//! reflow on resize, and more.
+//! We are currently in process of porting the
+//! [C documentation](https://lib.ghostty.org/vt) to Rust. In the mean time,
+//! feel free to browse through each module and consult the original
+//! [libghostty guides](https://lib.ghostty.org/vt/guides.html).
+//! They remain useful even though some details will be different in Rust.
 //!
-//! <div class="warning">
+//! # Sections
 //!
-//! This library is currently in development and the API is not yet stable.
-//! Breaking changes are expected in future versions.
-//! Use with caution in production code.
+//! libghostty-vt can be broadly broken down into these sections, whose modules
+//! are all related to each other. Start with the [Terminal](crate::terminal)
+//! module if you don't know where to begin!
 //!
-//! </div>
+//! ## Terminal
 //!
-//! The core type of `libghostty-vt` is the [`Terminal`] — start there to get a
-//! better sense of how everything is structured. You can also check out
-//! a list of all top-level modules and their functions below.
+//! - [Terminal](crate::terminal) - Create a terminal, write VT data to it,
+//!   and read its state
+//! - [Effects](crate::effect) - Respond to what programs ask of
+//!   the terminal, such as the bell, title changes, and queries
+//! - [Modes](crate::mode) - Pack DEC and ANSI mode numbers and
+//!   encode DECRPM reports
+//! - [Snapshots](crate::snapshot) - Save a terminal's full state and restore
+//!   it later
 //!
-//! # Examples
+//! ## Screen Contents
 //!
-//! [`ghostling-rs`](https://github.com/Uzaaft/libghostty-rs/blob/master/example/ghostling_rs/src/main.rs)
-//! is a minimal yet functional terminal emulator built with `libghostty-vt`,
-//! written as a single file with only around 1000 lines of heavily commented,
-//! easily digestible code. It is based on the original [Ghostling](https://github.com/ghostty-org/ghostling)
-//! which is built on the same underlying C API.
+//! - [Cells and Rows](crate::screen) - Read the contents of grid cells and rows
+//! - [Points](crate::point) - Name a grid position in the active area,
+//! - [Grid References](crate::grid_ref) - Point at a cell, read it, and keep
+//!   track of it as the terminal scrolls
+//! - [Style](crate::style) - Read a cell's colors and text attributes
+//! - [Selection](crate::selection) - Select words, lines, and ranges, and turn
+//!   pointer gestures into selections
+//! - [Search](crate::search) - Find a string in a terminal, including its scrollback
+//! - [Formatter](crate::fmt) - Turn terminal content into plain text, VT
+//!   sequences, or HTML
+//! ## Rendering
 //!
-//! Other examples are currently work-in-progress — if you have any ideas for
-//! examples, feel free to share them with us as an issue or pull request.
+//! - [Render State](crate::render) - Find out what changed since the last frame
+//!   and read the rows and cells to draw
+//! - [Kitty Graphics](crate::kitty::graphics) - 	Read the images that programs
+//!   send with the Kitty graphics protocol
 //!
-//! # Memory management and lifetimes
+//! ## Input
 //!
-//! When creating the terminal and various other objects, you can control their
-//! memory management via a **custom allocator**, usually specified with
-//! methods like [`Terminal::new_with_alloc`]. Objects that accept allocators
-//! are also bound by the `'alloc` lifetime, since they internally contain
-//! a reference to the allocator. If you do not use a custom allocator,
-//! feel free to always set the lifetime to `'static`.
+//! Turn user input into bytes for the pty.
 //!
-//! ## Using the unstable `Allocator` API
+//! - [Keys](crate::key) - Encode key events with the legacy encoding or the
+//!   Kitty keyboard protocol
+//! - [Mouse](crate::mouse) - Encode mouse events with the X10, UTF-8, SGR,
+//!   URxvt, or SGR-Pixels protocols.
+//! - [Focus](crate::focus) - Encode focus gained and lost events, for mode 1004
+//! - [Paste](crate::paste) - Paste into a terminal, and check paste data for
+//!   unsafe content
 //!
-//! You can adapt the existing, unstable `Allocator` API into a
-//! [libghostty-friendly allocator](alloc::Allocator) via its `From`
-//! implementation. Note that the `'alloc` lifetime must at least
-//! live as long as the `Allocator` instance itself.
+//! ## Building Blocks
 //!
-//! # Thread safety
+//! Parsers and encoders that work without a terminal.
 //!
-//! The entire `libghostty-vt` library is **not** thread-safe unless otherwise
-//! noted. This is because the underlying C API is not designed with thread
-//! safety in mind, and we as binding authors must rather conservatively
-//! avoid making any assumptions beyond what is presently guaranteed by the
-//! C API.
+//! - [OSC Parser](crate::osc) - Parse OSC sequences into commands
+//! - [SGR Parser](crate::sgr) - Parse SGR sequences into text attributes
+//! - [Terminal Reports](crate::report) - Reports size, color scheme, etc.
+//!   information to the running program
+//! - [Colors](crate::color) - Parse colors, generate palettes, and look up
+//!   X11 color names
+//! - [Unicode](crate::unicode) - Measure codepoints and graphemes the way
+//!   the terminal does
 //!
-//! In particular, all `libghostty-vt` types are `!Send`, meaning they cannot
-//! be *transferred* across threads, since the C API is allowed to use
-//! thread-local state; they are also `!Sync`, meaning they cannot be *shared*
-//! across threads, since data races may occur as the C API is not guarded with
-//! mutexes or other synchronization mechanisms.
-//! We currently do not expect to lift these limitations unless the C API starts
-//! to make stronger guarantees regarding thread safety.
+//! ## Library
 //!
-//! Note that this does *not* mean that `libghostty-vt` can only be used on
-//! the main thread. On the contrary, in a complex program we encourage you to
-//! create the terminal on a separate thread (or task in async programming),
-//! and use [channels](std::sync::mpsc::channel) to communicate between the
-//! terminal emulation thread/task and the main program. Under sufficient load, it is
-//! generally more efficient to offload terminal emulation to its own operating
-//! system-level thread, in order to reduce competition with other business logic.
+//! Types and settings shared by every API.
+//!
+//! - [Error Handling](crate::error)
+//! - [Build Info](crate::build_info) - Find out how this copy of the library
+//!   was built and which features it has
+//! - [Allocators](crate::alloc) - 	Run the library on your own memory allocator
+//! - [System Interface](crate::sys) - Plug in your own system functions, such
+//!   as a PNG decoder
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/ghostty-org/ghostty/2d0fb81751def478e2f8a5f7e2ee91fa9cbf9bff/images/icons/icon_128@2x.png"
 )]
@@ -100,17 +110,23 @@ pub mod terminal;
 
 pub mod alloc;
 pub mod build_info;
+pub mod color;
+pub mod effect;
 pub mod error;
 pub mod fmt;
 pub mod focus;
+pub mod grid_ref;
 pub(crate) mod io;
 pub mod key;
 pub mod kitty;
 pub mod log;
+pub mod mode;
 pub mod mouse;
 pub mod osc;
 pub mod paste;
+pub mod point;
 pub mod render;
+pub mod report;
 pub mod screen;
 pub mod search;
 pub mod selection;

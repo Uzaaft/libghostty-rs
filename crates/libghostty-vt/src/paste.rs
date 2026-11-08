@@ -9,17 +9,17 @@
 //! reader that produces the data of any one of them, and where the paste came
 //! from, and the terminal decides how its current modes apply:
 //!
-//! - If Kitty clipboard protocol paste events ([`Mode::PASTE_EVENTS`](crate::terminal::Mode::PASTE_EVENTS), mode
-//!   5522) are enabled, the paste was user-initiated ([`Source::Clipboard`]),
+//! - If Kitty clipboard protocol paste events ([`Mode::PASTE_EVENTS`], mode 5522)
+//!   are enabled, the paste was user-initiated ([`Source::Clipboard`]),
 //!   and a [clipboard read callback](Terminal::on_clipboard_read) is
 //!   installed, the terminal sends the program a paste event listing the
 //!   clipboard's MIME types with a one-time password instead of the data. The
 //!   program then reads what it wants through the clipboard read callback,
-//!   which arrives with [`granted`](crate::terminal::ClipboardRead::granted)
+//!   which arrives with [`granted`](crate::effect::ClipboardRead::granted)
 //!   set so no permission prompt is needed. No data is read for the event.
 //! - Otherwise the first text representation is written: unsafe control bytes
 //!   are replaced with spaces, and it is wrapped in bracketed paste sequences
-//!   if [`Mode::BRACKETED_PASTE`](crate::terminal::Mode::BRACKETED_PASTE) (mode 2004) is enabled, or has its newlines
+//!   if [`Mode::BRACKETED_PASTE`] (mode 2004) is enabled, or has its newlines
 //!   converted to carriage returns if not.
 //!
 //! The data is pulled through the reader only when a representation is
@@ -108,10 +108,14 @@ use std::{ffi::c_void, io::Write};
 
 use crate::{
     Terminal,
+    effect::{ClipboardLocation, ClipboardMime},
     error::{Result, from_result, from_result_with_len},
     ffi,
-    terminal::{ClipboardLocation, ClipboardMime},
 };
+
+// Ref'd in docs only
+#[expect(unused)]
+use crate::mode::Mode;
 
 /// Check if paste data is safe to paste into the terminal.
 ///
@@ -246,9 +250,9 @@ impl Default for Options {
 /// Pasting.
 impl Terminal<'_, '_> {
     /// Paste into the terminal according to its current state: a Kitty
-    /// clipboard protocol paste event if [`Mode::PASTE_EVENTS`](crate::terminal::Mode::PASTE_EVENTS) is enabled and
+    /// clipboard protocol paste event if [`Mode::PASTE_EVENTS`] is enabled and
     /// a [clipboard read callback](Self::on_clipboard_read) is installed,
-    /// otherwise the text framed per [`Mode::BRACKETED_PASTE`](crate::terminal::Mode::BRACKETED_PASTE). See the
+    /// otherwise the text framed per [`Mode::BRACKETED_PASTE`]. See the
     /// [module documentation](crate::paste) for the full behavior. Output
     /// streams through the [pty write callback](Self::on_pty_write) in chunks.
     /// The viewport is not scrolled; that is up to the embedder, as for key

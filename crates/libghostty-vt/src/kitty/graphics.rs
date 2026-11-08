@@ -1804,7 +1804,7 @@ mod placement_tests {
     use crate::{
         Terminal,
         error::Error,
-        terminal::{PointCoordinate, PointSpace},
+        point::{Coordinate, Space},
     };
 
     #[test]
@@ -1879,14 +1879,14 @@ mod placement_tests {
                 let rect = rect.unwrap();
                 let point = |grid_ref| {
                     terminal
-                        .point_from_grid_ref(&grid_ref, PointSpace::Active)
+                        .point_from_grid_ref(&grid_ref, Space::Active)
                         .unwrap()
                         .unwrap()
                 };
                 // Starts at the cursor origin, and 10 columns by 1 row
                 // means the inclusive bottom-right corner is (9, 0).
-                assert_eq!(point(rect.start()), PointCoordinate { x: 0, y: 0 });
-                assert_eq!(point(rect.end()), PointCoordinate { x: 9, y: 0 });
+                assert_eq!(point(rect.start()), Coordinate { x: 0, y: 0 });
+                assert_eq!(point(rect.end()), Coordinate { x: 9, y: 0 });
                 assert!(rect.is_rectangle());
             }
         }

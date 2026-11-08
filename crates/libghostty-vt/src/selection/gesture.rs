@@ -15,9 +15,10 @@ use crate::{
     alloc::{Allocator, Object},
     error::{Error, Result, from_optional_result, from_result},
     ffi,
-    screen::GridRef,
+    grid_ref::GridRef,
+    point,
     selection::Selection,
-    terminal::{PointCoordinate, Terminal},
+    terminal::Terminal,
 };
 
 #[doc(inline)]
@@ -32,7 +33,7 @@ pub use ffi::SelectionGestureGeometry as Geometry;
 /// # Memory management
 ///
 /// When dropped, this type will temporarily **leak** a small amount of memory
-/// belonging to the internal [`TrackedGridRef`](crate::screen::TrackedGridRef)s.
+/// belonging to the internal [`TrackedGridRef`](crate::grid_ref::TrackedGridRef)s.
 /// They will instead be reclaimed when the terminal they belong to is dropped.
 /// This memory can be preemptively reclaimed by calling the [`Gesture::reset`]
 /// method if needed.
@@ -534,7 +535,7 @@ impl<'alloc> AutoscrollTickEvent<'alloc> {
         &mut self,
         gesture: &mut Gesture<'_>,
         terminal: &'t Terminal<'_, '_>,
-        viewport: PointCoordinate,
+        viewport: point::Coordinate,
         geometry: Geometry,
     ) -> Result<Option<Selection<'t>>> {
         let viewport = ffi::PointCoordinate::from(viewport);

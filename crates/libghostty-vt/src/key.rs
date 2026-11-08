@@ -1,17 +1,12 @@
-//! Encoding key events into terminal escape sequences,
+//! Encode key events with the legacy encoding or the Kitty keyboard protocol.
 //!
-//! Supports both legacy encoding as well as Kitty Keyboard Protocol.
+//! Encode key events into terminal escape sequences, with the legacy encoding
+//! or the Kitty Keyboard Protocol.
 //!
-//! # Basic Usage
-//!
-//!  1. Create an encoder instance with [`Encoder::new`].
-//!  2. Configure encoder options with the various `Encoder::set_*` methods
-//!     or [`Encoder::set_options_from_terminal`] if you have a [`Terminal`].
-//!  3. For each key event:
-//!     *  Create a key event with [`Event::new`] (or reuse an existing one)
-//!     *  Set event properties (action, key, modifiers, etc.)
-//!     *  Encode with [`Encoder::encode_to_vec`] (with a growable `Vec` buffer)
-//!        or [`Encoder::encode`] (with a fixed byte buffer).
+//! An encoder has to follow the terminal's modes. If you have a terminal, call
+//! [`Encoder::set_options_from_terminal`] before you encode. You don't need
+//! a terminal to use this, but then you set the options yourself.
+// FIXME: link to transcluded example & guide
 use std::mem::MaybeUninit;
 
 use crate::{
