@@ -58,8 +58,8 @@ impl<'alloc> Encoder<'alloc> {
         &mut self,
         option: ffi::MouseEncoderOption::Type,
         value: *const std::ffi::c_void,
-    ) {
-        unsafe { ffi::ghostty_mouse_encoder_setopt(self.0.as_raw(), option, value) }
+    ) -> ffi::Result::Type {
+        unsafe { ffi::ghostty_mouse_encoder_set(self.0.as_raw(), option, value) }
     }
 
     /// Encode a key event into a terminal escape sequence.
@@ -125,57 +125,48 @@ impl<'alloc> Encoder<'alloc> {
     ///
     /// This sets tracking mode and output format from terminal state.
     /// It does not modify size or any-button state.
-    pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> &mut Self {
-        unsafe {
-            ffi::ghostty_mouse_encoder_setopt_from_terminal(
-                self.0.as_raw(),
-                terminal.inner.as_raw(),
-            );
-        }
-        self
+    pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> Result<&mut Self> {
+        from_result(unsafe {
+            ffi::ghostty_mouse_encoder_set_from_terminal(self.0.as_raw(), terminal.inner.as_raw())
+        })?;
+        Ok(self)
     }
     /// Set mouse tracking mode.
-    pub fn set_tracking_mode(&mut self, value: TrackingMode) -> &mut Self {
-        unsafe {
-            self.setopt(Opt::EVENT, std::ptr::from_ref(&value).cast());
-        }
-        self
+    pub fn set_tracking_mode(&mut self, value: TrackingMode) -> Result<&mut Self> {
+        from_result(unsafe { self.setopt(Opt::EVENT, std::ptr::from_ref(&value).cast()) })?;
+        Ok(self)
     }
     /// Set mouse output format.
-    pub fn set_format(&mut self, value: Format) -> &mut Self {
-        unsafe {
-            self.setopt(Opt::FORMAT, std::ptr::from_ref(&value).cast());
-        }
-        self
+    pub fn set_format(&mut self, value: Format) -> Result<&mut Self> {
+        from_result(unsafe { self.setopt(Opt::FORMAT, std::ptr::from_ref(&value).cast()) })?;
+        Ok(self)
     }
     /// Set renderer size context.
-    pub fn set_size(&mut self, value: EncoderSize) -> &mut Self {
+    pub fn set_size(&mut self, value: EncoderSize) -> Result<&mut Self> {
         let raw: ffi::MouseEncoderSize = value.into();
-        unsafe {
-            self.setopt(Opt::SIZE, std::ptr::from_ref(&raw).cast());
-        }
-        self
+        from_result(unsafe { self.setopt(Opt::SIZE, std::ptr::from_ref(&raw).cast()) })?;
+        Ok(self)
     }
     /// Set whether any mouse button is currently pressed.
-    pub fn set_any_button_pressed(&mut self, value: bool) -> &mut Self {
-        unsafe {
-            self.setopt(Opt::ANY_BUTTON_PRESSED, std::ptr::from_ref(&value).cast());
-        }
-        self
+    pub fn set_any_button_pressed(&mut self, value: bool) -> Result<&mut Self> {
+        from_result(unsafe {
+            self.setopt(Opt::ANY_BUTTON_PRESSED, std::ptr::from_ref(&value).cast())
+        })?;
+        Ok(self)
     }
     /// Set whether to enable motion deduplication by last cell.
-    pub fn set_track_last_cell(&mut self, value: bool) -> &mut Self {
-        unsafe {
-            self.setopt(Opt::TRACK_LAST_CELL, std::ptr::from_ref(&value).cast());
-        }
-        self
+    pub fn set_track_last_cell(&mut self, value: bool) -> Result<&mut Self> {
+        from_result(unsafe {
+            self.setopt(Opt::TRACK_LAST_CELL, std::ptr::from_ref(&value).cast())
+        })?;
+        Ok(self)
     }
 
     /// Reset internal encoder state.
     ///
     /// This clears motion deduplication state (last tracked cell).
-    pub fn reset(&mut self) {
-        unsafe { ffi::ghostty_mouse_encoder_reset(self.0.as_raw()) }
+    pub fn reset(&mut self) -> Result<()> {
+        from_result(unsafe { ffi::ghostty_mouse_encoder_reset(self.0.as_raw()) })
     }
 }
 
@@ -214,11 +205,11 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set the event action.
-    pub fn set_action(&mut self, action: Action) -> &mut Self {
-        unsafe {
-            ffi::ghostty_mouse_event_set_action(self.0.as_raw(), action as ffi::MouseAction::Type);
-        }
-        self
+    pub fn set_action(&mut self, action: Action) -> Result<&mut Self> {
+        from_result(unsafe {
+            ffi::ghostty_mouse_event_set_action(self.0.as_raw(), action as ffi::MouseAction::Type)
+        })?;
+        Ok(self)
     }
 
     /// Get the event action.
@@ -230,37 +221,38 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set the event button.
-    pub fn set_button(&mut self, button: Option<Button>) -> &mut Self {
+    pub fn set_button(&mut self, button: Option<Button>) -> Result<&mut Self> {
         if let Some(button) = button {
-            unsafe {
+            from_result(unsafe {
                 ffi::ghostty_mouse_event_set_button(
                     self.0.as_raw(),
                     button as ffi::MouseButton::Type,
-                );
-            }
+                )
+            })?;
         } else {
-            unsafe { ffi::ghostty_mouse_event_clear_button(self.0.as_raw()) }
+            from_result(unsafe { ffi::ghostty_mouse_event_clear_button(self.0.as_raw()) })?;
         }
-        self
+        Ok(self)
     }
 
     /// Get the event button.
-    #[must_use]
-    pub fn button(&self) -> Option<Button> {
+    pub fn button(&self) -> Result<Option<Button>> {
         let mut button = ffi::MouseButton::UNKNOWN;
         let has_button =
             unsafe { ffi::ghostty_mouse_event_get_button(self.0.as_raw(), &raw mut button) };
-        if has_button {
-            Some(button.try_into().unwrap_or(Button::Unknown))
-        } else {
-            None
+        match has_button {
+            ffi::Result::NO_VALUE => Ok(None),
+            code => {
+                from_result(code)?;
+                Ok(Some(button.try_into().unwrap_or(Button::Unknown)))
+            }
         }
     }
 
     /// Set keyboard modifiers held during the event.
-    pub fn set_mods(&mut self, mods: key::Mods) -> &mut Self {
-        unsafe { ffi::ghostty_mouse_event_set_mods(self.0.as_raw(), mods.bits()) }
-        self
+    pub fn set_mods(&mut self, mods: key::Mods) -> Result<&mut Self> {
+        from_result(unsafe { ffi::ghostty_mouse_event_set_mods(self.0.as_raw(), mods.bits()) })?;
+        Ok(self)
     }
 
     /// Get keyboard modifiers held during the event.
@@ -270,9 +262,9 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set the event position in surface-space pixels.
-    pub fn set_position(&mut self, pos: Position) -> &mut Self {
-        unsafe { ffi::ghostty_mouse_event_set_position(self.0.as_raw(), pos) }
-        self
+    pub fn set_position(&mut self, pos: Position) -> Result<&mut Self> {
+        from_result(unsafe { ffi::ghostty_mouse_event_set_position(self.0.as_raw(), pos) })?;
+        Ok(self)
     }
 
     /// Get the event position in surface-space pixels.

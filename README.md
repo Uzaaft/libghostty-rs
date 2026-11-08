@@ -73,9 +73,8 @@ used when all deployment machines support that target.
 
 The `pkg-config` path is opt-in. If you enable `libghostty-vt-sys/pkg-config`,
 the build will prefer an installed `libghostty-vt` discovered through
-`pkg-config` when `GHOSTTY_SOURCE_DIR` is unset. libghostty-vt is pre-1.0, so
-the checked-in bindings are expected to move with the pinned Ghostty source and
-do not guarantee compatibility with arbitrary installed C API revisions. An
+`pkg-config` when `GHOSTTY_SOURCE_DIR` is unset. It requires the stable 1.x C
+ABI. The vendored source and checked-in declarations target libghostty-vt 1.0.0. An
 explicit `GHOSTTY_SOURCE_DIR` always wins.
 
 Nix builds in this repository prefetch the pinned Ghostty source and Ghostty's

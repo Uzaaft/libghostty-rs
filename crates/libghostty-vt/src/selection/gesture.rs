@@ -121,7 +121,7 @@ impl<'alloc> Gesture<'alloc> {
     ///
     /// Returns `None` if there is no valid active anchor.
     pub fn anchor<'t>(&self, terminal: &'t Terminal<'_, '_>) -> Result<Option<GridRef<'t>>> {
-        let mut grid_ref = ffi::sized!(ffi::GridRef);
+        let mut grid_ref = ffi::GridRef::default();
         let result = unsafe {
             ffi::ghostty_selection_gesture_get(
                 self.inner.as_raw(),
@@ -196,7 +196,7 @@ impl Event<'_> {
         gesture: &mut Gesture<'_>,
         terminal: &'t Terminal<'_, '_>,
     ) -> Result<Option<Selection<'t>>> {
-        let mut selection = ffi::sized!(ffi::Selection);
+        let mut selection = ffi::Selection::default();
 
         let result = unsafe {
             ffi::ghostty_selection_gesture_event(

@@ -53,8 +53,8 @@ impl<'alloc> Encoder<'alloc> {
         &mut self,
         option: ffi::KeyEncoderOption::Type,
         value: *const std::ffi::c_void,
-    ) {
-        unsafe { ffi::ghostty_key_encoder_setopt(self.0.as_raw(), option, value) }
+    ) -> ffi::Result::Type {
+        unsafe { ffi::ghostty_key_encoder_set(self.0.as_raw(), option, value) }
     }
 
     /// Encode a key event into a terminal escape sequence.
@@ -133,74 +133,72 @@ impl<'alloc> Encoder<'alloc> {
     /// Note that the `macos_option_as_alt` option cannot be determined from
     /// terminal state and is reset to [`OptionAsAlt::False`] by this call.
     /// Use [`Encoder::set_macos_option_as_alt`] to set it afterward if needed.
-    pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> &mut Self {
-        unsafe {
-            ffi::ghostty_key_encoder_setopt_from_terminal(self.0.as_raw(), terminal.inner.as_raw());
-        }
-        self
+    pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> Result<&mut Self> {
+        from_result(unsafe {
+            ffi::ghostty_key_encoder_set_from_terminal(self.0.as_raw(), terminal.inner.as_raw())
+        })?;
+        Ok(self)
     }
 
     /// Set terminal DEC mode 1: cursor key application mode.
-    pub fn set_cursor_key_application(&mut self, value: bool) -> &mut Self {
-        unsafe {
+    pub fn set_cursor_key_application(&mut self, value: bool) -> Result<&mut Self> {
+        from_result(unsafe {
             self.setopt(
                 Opt::CURSOR_KEY_APPLICATION,
                 std::ptr::from_ref(&value).cast(),
-            );
-        }
-        self
+            )
+        })?;
+        Ok(self)
     }
     /// Set terminal DEC mode 66: keypad key application mode.
-    pub fn set_keypad_key_application(&mut self, value: bool) -> &mut Self {
-        unsafe {
+    pub fn set_keypad_key_application(&mut self, value: bool) -> Result<&mut Self> {
+        from_result(unsafe {
             self.setopt(
                 Opt::KEYPAD_KEY_APPLICATION,
                 std::ptr::from_ref(&value).cast(),
-            );
-        }
-        self
+            )
+        })?;
+        Ok(self)
     }
     /// Set terminal DEC mode 1035: ignore keypad with numlock.
-    pub fn set_ignore_keypad_with_numlock(&mut self, value: bool) -> &mut Self {
-        unsafe {
+    pub fn set_ignore_keypad_with_numlock(&mut self, value: bool) -> Result<&mut Self> {
+        from_result(unsafe {
             self.setopt(
                 Opt::IGNORE_KEYPAD_WITH_NUMLOCK,
                 std::ptr::from_ref(&value).cast(),
-            );
-        }
-        self
+            )
+        })?;
+        Ok(self)
     }
     /// Set terminal DEC mode 1036: alt sends escape prefix.
-    pub fn set_alt_esc_prefix(&mut self, value: bool) -> &mut Self {
-        unsafe {
-            self.setopt(Opt::ALT_ESC_PREFIX, std::ptr::from_ref(&value).cast());
-        }
-        self
+    pub fn set_alt_esc_prefix(&mut self, value: bool) -> Result<&mut Self> {
+        from_result(unsafe {
+            self.setopt(Opt::ALT_ESC_PREFIX, std::ptr::from_ref(&value).cast())
+        })?;
+        Ok(self)
     }
     /// Set xterm modifyOtherKeys mode 2.
-    pub fn set_modify_other_keys_state_2(&mut self, value: bool) -> &mut Self {
-        unsafe {
+    pub fn set_modify_other_keys_state_2(&mut self, value: bool) -> Result<&mut Self> {
+        from_result(unsafe {
             self.setopt(
                 Opt::MODIFY_OTHER_KEYS_STATE_2,
                 std::ptr::from_ref(&value).cast(),
-            );
-        }
-        self
+            )
+        })?;
+        Ok(self)
     }
     /// Set Kitty keyboard protocol flags.
-    pub fn set_kitty_flags(&mut self, value: KittyKeyFlags) -> &mut Self {
+    pub fn set_kitty_flags(&mut self, value: KittyKeyFlags) -> Result<&mut Self> {
         let value = value.bits();
-        unsafe {
-            self.setopt(Opt::KITTY_FLAGS, std::ptr::from_ref(&value).cast());
-        }
-        self
+        from_result(unsafe { self.setopt(Opt::KITTY_FLAGS, std::ptr::from_ref(&value).cast()) })?;
+        Ok(self)
     }
     /// Set macOS option-as-alt setting.
-    pub fn set_macos_option_as_alt(&mut self, value: OptionAsAlt) -> &mut Self {
-        unsafe {
-            self.setopt(Opt::MACOS_OPTION_AS_ALT, std::ptr::from_ref(&value).cast());
-        }
-        self
+    pub fn set_macos_option_as_alt(&mut self, value: OptionAsAlt) -> Result<&mut Self> {
+        from_result(unsafe {
+            self.setopt(Opt::MACOS_OPTION_AS_ALT, std::ptr::from_ref(&value).cast())
+        })?;
+        Ok(self)
     }
     /// Backarrow key mode.
     ///
@@ -208,11 +206,11 @@ impl<'alloc> Encoder<'alloc> {
     ///
     /// If `false` (the default), `backspace` emits 0x7f.
     /// If `true`, `backspace` emits 0x08.
-    pub fn set_backarrow_key_mode(&mut self, value: bool) -> &mut Self {
-        unsafe {
-            self.setopt(Opt::BACKARROW_KEY_MODE, std::ptr::from_ref(&value).cast());
-        }
-        self
+    pub fn set_backarrow_key_mode(&mut self, value: bool) -> Result<&mut Self> {
+        from_result(unsafe {
+            self.setopt(Opt::BACKARROW_KEY_MODE, std::ptr::from_ref(&value).cast())
+        })?;
+        Ok(self)
     }
 }
 
@@ -257,9 +255,11 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set the key action (press, release, repeat).
-    pub fn set_action(&mut self, action: Action) -> &mut Self {
-        unsafe { ffi::ghostty_key_event_set_action(self.inner.as_raw(), action.into()) }
-        self
+    pub fn set_action(&mut self, action: Action) -> Result<&mut Self> {
+        from_result(unsafe {
+            ffi::ghostty_key_event_set_action(self.inner.as_raw(), action.into())
+        })?;
+        Ok(self)
     }
 
     /// Get the key action (press, release, repeat).
@@ -270,9 +270,9 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set the physical key code.
-    pub fn set_key(&mut self, key: Key) -> &mut Self {
-        unsafe { ffi::ghostty_key_event_set_key(self.inner.as_raw(), key.into()) }
-        self
+    pub fn set_key(&mut self, key: Key) -> Result<&mut Self> {
+        from_result(unsafe { ffi::ghostty_key_event_set_key(self.inner.as_raw(), key.into()) })?;
+        Ok(self)
     }
 
     /// Get the physical key code.
@@ -283,9 +283,9 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set the modifier keys bitmask.
-    pub fn set_mods(&mut self, mods: Mods) -> &mut Self {
-        unsafe { ffi::ghostty_key_event_set_mods(self.inner.as_raw(), mods.bits()) }
-        self
+    pub fn set_mods(&mut self, mods: Mods) -> Result<&mut Self> {
+        from_result(unsafe { ffi::ghostty_key_event_set_mods(self.inner.as_raw(), mods.bits()) })?;
+        Ok(self)
     }
 
     /// Get the modifier keys bitmask.
@@ -295,9 +295,11 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set the consumed modifiers bitmask.
-    pub fn set_consumed_mods(&mut self, mods: Mods) -> &mut Self {
-        unsafe { ffi::ghostty_key_event_set_consumed_mods(self.inner.as_raw(), mods.bits()) }
-        self
+    pub fn set_consumed_mods(&mut self, mods: Mods) -> Result<&mut Self> {
+        from_result(unsafe {
+            ffi::ghostty_key_event_set_consumed_mods(self.inner.as_raw(), mods.bits())
+        })?;
+        Ok(self)
     }
 
     /// Get the consumed modifiers bitmask.
@@ -309,9 +311,11 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set whether the key event is part of a composition sequence.
-    pub fn set_composing(&mut self, composing: bool) -> &mut Self {
-        unsafe { ffi::ghostty_key_event_set_composing(self.inner.as_raw(), composing) }
-        self
+    pub fn set_composing(&mut self, composing: bool) -> Result<&mut Self> {
+        from_result(unsafe {
+            ffi::ghostty_key_event_set_composing(self.inner.as_raw(), composing)
+        })?;
+        Ok(self)
     }
 
     /// Get whether the key event is part of a composition sequence.
@@ -330,22 +334,14 @@ impl<'alloc> Event<'alloc> {
     ///
     /// The event makes an internal copy of the text since the C API
     /// may reuse it without any rigid lifetime guarantees.
-    pub fn set_utf8<S: Into<String>>(&mut self, text: Option<S>) -> &mut Self {
-        self.text = text.map(Into::into);
-
-        match &self.text {
-            Some(text) => unsafe {
-                ffi::ghostty_key_event_set_utf8(
-                    self.inner.as_raw(),
-                    text.as_ptr().cast(),
-                    text.len(),
-                );
-            },
-            None => unsafe {
-                ffi::ghostty_key_event_set_utf8(self.inner.as_raw(), std::ptr::null(), 0);
-            },
-        }
-        self
+    pub fn set_utf8<S: Into<String>>(&mut self, text: Option<S>) -> Result<&mut Self> {
+        let text = text.map(Into::into);
+        let raw = text
+            .as_deref()
+            .map_or_else(ffi::String::default, ffi::String::from);
+        from_result(unsafe { ffi::ghostty_key_event_set_utf8(self.inner.as_raw(), raw) })?;
+        self.text = text;
+        Ok(self)
     }
 
     /// Get the UTF-8 text generated by the key event.
@@ -356,11 +352,11 @@ impl<'alloc> Event<'alloc> {
     }
 
     /// Set the unshifted Unicode codepoint.
-    pub fn set_unshifted_codepoint(&mut self, codepoint: char) -> &mut Self {
-        unsafe {
-            ffi::ghostty_key_event_set_unshifted_codepoint(self.inner.as_raw(), codepoint.into());
-        }
-        self
+    pub fn set_unshifted_codepoint(&mut self, codepoint: char) -> Result<&mut Self> {
+        from_result(unsafe {
+            ffi::ghostty_key_event_set_unshifted_codepoint(self.inner.as_raw(), codepoint.into())
+        })?;
+        Ok(self)
     }
 
     /// Get the unshifted Unicode codepoint.

@@ -23,8 +23,11 @@ pub struct Formatter<'t, 'alloc: 'cb, 'cb: 't> {
 /// Options for [creating a terminal formatter](Formatter::new).
 #[derive(Debug)]
 pub struct FormatterOptions<'t, 's> {
-    inner: ffi::FormatterTerminalOptions,
-    _phan: PhantomData<&'s Selection<'t>>,
+    emit: Format,
+    unwrap: bool,
+    trim: bool,
+    selection: Option<&'s Selection<'t>>,
+    extras: ffi::FormatterExtras,
 }
 impl Default for FormatterOptions<'_, '_> {
     fn default() -> Self {
@@ -37,28 +40,23 @@ impl<'t, 's> FormatterOptions<'t, 's> {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: ffi::FormatterTerminalOptions {
-                extra: ffi::FormatterTerminalExtra {
-                    screen: ffi::FormatterScreenExtra {
-                        ..ffi::sized!(ffi::FormatterScreenExtra)
-                    },
-                    ..ffi::sized!(ffi::FormatterTerminalExtra)
-                },
-                ..ffi::sized!(ffi::FormatterTerminalOptions)
-            },
-            _phan: PhantomData,
+            emit: Format::Plain,
+            unwrap: false,
+            trim: false,
+            selection: None,
+            extras: ffi::FORMATTER_EXTRAS_NONE,
         }
     }
     /// Specify the output format to emit.
     #[must_use]
     pub fn with_format(mut self, value: Format) -> Self {
-        self.inner.emit = value.into();
+        self.emit = value;
         self
     }
     /// Specify whether to unwrap soft-wrapped lines.
     #[must_use]
     pub fn with_unwrap(mut self, value: bool) -> Self {
-        self.inner.unwrap = value;
+        self.unwrap = value;
         self
     }
     /// Specify whether to trim trailing whitespace on non-blank lines.
@@ -70,7 +68,7 @@ impl<'t, 's> FormatterOptions<'t, 's> {
     /// rows unless this is set.
     #[must_use]
     pub fn with_trim(mut self, value: bool) -> Self {
-        self.inner.trim = value;
+        self.trim = value;
         self
     }
     /// Specify the selection to restrict output to a range.
@@ -79,7 +77,16 @@ impl<'t, 's> FormatterOptions<'t, 's> {
     /// the entire screen.
     #[must_use]
     pub fn with_selection(mut self, value: &'s Selection<'t>) -> Self {
-        self.inner.selection = &raw const value.inner;
+        self.selection = Some(value);
+        self
+    }
+
+    fn with_extra(mut self, flag: ffi::FormatterExtras, value: bool) -> Self {
+        if value {
+            self.extras |= flag;
+        } else {
+            self.extras &= !flag;
+        }
         self
     }
 
@@ -87,78 +94,66 @@ impl<'t, 's> FormatterOptions<'t, 's> {
 
     /// Specify whether to emit the palette using OSC 4 sequences.
     #[must_use]
-    pub fn with_palette(mut self, value: bool) -> Self {
-        self.inner.extra.palette = value;
-        self
+    pub fn with_palette(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_PALETTE, value)
     }
     /// Specify terminal modes that differ from their defaults using CSI h/l.
     #[must_use]
-    pub fn with_modes(mut self, value: bool) -> Self {
-        self.inner.extra.modes = value;
-        self
+    pub fn with_modes(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_MODES, value)
     }
     /// Specify whether to emit scrolling region state using DECSTBM and DECSLRM sequences.
     #[must_use]
-    pub fn with_scrolling_region(mut self, value: bool) -> Self {
-        self.inner.extra.scrolling_region = value;
-        self
+    pub fn with_scrolling_region(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_SCROLLING_REGION, value)
     }
     /// Specify tabstop positions by clearing all tabs and setting each one.
     #[must_use]
-    pub fn with_tabstops(mut self, value: bool) -> Self {
-        self.inner.extra.tabstops = value;
-        self
+    pub fn with_tabstops(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_TABSTOPS, value)
     }
     /// Specify the present working directory using OSC 7.
     #[must_use]
-    pub fn with_pwd(mut self, value: bool) -> Self {
-        self.inner.extra.pwd = value;
-        self
+    pub fn with_pwd(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_PWD, value)
     }
     /// Specify keyboard modes such as `ModifyOtherKeys`.
     #[must_use]
-    pub fn with_keyboard(mut self, value: bool) -> Self {
-        self.inner.extra.keyboard = value;
-        self
+    pub fn with_keyboard(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_KEYBOARD, value)
     }
 
     // --- Screen settings --- //
 
     /// Specify whether to emit cursor position using CUP (CSI H).
     #[must_use]
-    pub fn with_cursor(mut self, value: bool) -> Self {
-        self.inner.extra.screen.cursor = value;
-        self
+    pub fn with_cursor(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_CURSOR, value)
     }
     /// Emit current SGR style state based on the cursor's active `style_id`.
     #[must_use]
-    pub fn with_style(mut self, value: bool) -> Self {
-        self.inner.extra.screen.style = value;
-        self
+    pub fn with_style(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_STYLE, value)
     }
     /// Emit current hyperlink state using OSC 8 sequences.
     #[must_use]
-    pub fn with_hyperlink(mut self, value: bool) -> Self {
-        self.inner.extra.screen.hyperlink = value;
-        self
+    pub fn with_hyperlink(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_HYPERLINK, value)
     }
     /// Emit character protection mode using DECSCA.
     #[must_use]
-    pub fn with_protection(mut self, value: bool) -> Self {
-        self.inner.extra.screen.protection = value;
-        self
+    pub fn with_protection(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_PROTECTION, value)
     }
     /// Emit Kitty keyboard protocol state using CSI > u and CSI = sequences.
     #[must_use]
-    pub fn with_kitty_keyboard(mut self, value: bool) -> Self {
-        self.inner.extra.screen.kitty_keyboard = value;
-        self
+    pub fn with_kitty_keyboard(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_KITTY_KEYBOARD, value)
     }
     /// Emit character set designations and invocations.
     #[must_use]
-    pub fn with_charsets(mut self, value: bool) -> Self {
-        self.inner.extra.screen.charsets = value;
-        self
+    pub fn with_charsets(self, value: bool) -> Self {
+        self.with_extra(ffi::FORMATTER_EXTRA_CHARSETS, value)
     }
 }
 
@@ -193,19 +188,44 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         let mut raw: ffi::Formatter = std::ptr::null_mut();
 
         let result = unsafe {
-            ffi::ghostty_formatter_terminal_new(
-                alloc,
-                &raw mut raw,
-                terminal.inner.as_raw(),
-                opts.inner,
-            )
+            ffi::ghostty_formatter_terminal_new(alloc, &raw mut raw, terminal.inner.as_raw())
         };
         from_result(result)?;
 
-        Ok(Self {
+        let formatter = Self {
             inner: Object::new(raw)?,
             _terminal: PhantomData,
-        })
+        };
+        let emit = i32::from(opts.emit);
+        for (key, value) in [
+            (ffi::FormatterOption::EMIT, std::ptr::from_ref(&emit).cast()),
+            (
+                ffi::FormatterOption::UNWRAP,
+                std::ptr::from_ref(&opts.unwrap).cast(),
+            ),
+            (
+                ffi::FormatterOption::TRIM,
+                std::ptr::from_ref(&opts.trim).cast(),
+            ),
+            (
+                ffi::FormatterOption::EXTRAS,
+                std::ptr::from_ref(&opts.extras).cast(),
+            ),
+        ] {
+            from_result(unsafe {
+                ffi::ghostty_formatter_set(formatter.inner.as_raw(), key, value)
+            })?;
+        }
+        if let Some(selection) = opts.selection {
+            from_result(unsafe {
+                ffi::ghostty_formatter_set(
+                    formatter.inner.as_raw(),
+                    ffi::FormatterOption::SELECTION,
+                    std::ptr::from_ref(&selection.inner).cast(),
+                )
+            })?;
+        }
+        Ok(formatter)
     }
 
     /// Run the formatter and stream output to a writer.
@@ -306,11 +326,10 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
                 std::ptr::from_mut(&mut len),
             )
         };
-        // This should always fail with OutOfSpace.
         match from_result(result) {
-            Err(Error::OutOfSpace { .. }) => Ok(len),
+            // Empty output succeeds without needing a buffer.
+            Ok(()) | Err(Error::OutOfSpace { .. }) => Ok(len),
             Err(e) => Err(e),
-            Ok(()) => Err(Error::InvalidValue),
         }
     }
 }
@@ -416,6 +435,14 @@ mod tests {
         assert_eq!(&buf[..len], b"one\ntwo");
     }
 
+    #[test]
+    fn empty_output_needs_no_space() {
+        let terminal = Terminal::new(10, 3).unwrap();
+        let mut formatter = Formatter::new(&terminal, FormatterOptions::new()).unwrap();
+        assert_eq!(formatter.format_len().unwrap(), 0);
+        assert_eq!(formatter.format_buf(&mut []).unwrap(), 0);
+    }
+
     /// Mirrors upstream's `PageList VT without trim keeps trailing blank
     /// rows` test in `src/terminal/formatter.zig`.
     #[test]
@@ -434,15 +461,12 @@ mod tests {
         assert_eq!(format(Format::Plain, false), b"one\ntwo");
     }
 
-    /// The one-shot selection API goes through the same upstream
+    /// The selection option goes through the same upstream
     /// `PageListFormatter`, so the selection's trailing blank rows are kept
     /// too, and only up to the selection's last row.
     #[test]
     fn only_untrimmed_vt_keeps_trailing_blank_rows_in_selection() {
-        use crate::{
-            selection::FormatOptions,
-            terminal::{Point, PointCoordinate},
-        };
+        use crate::terminal::{Point, PointCoordinate};
 
         let mut terminal = Terminal::new(10, 6).unwrap();
         terminal.vt_write(b"one\r\ntwo");
@@ -454,14 +478,19 @@ mod tests {
         // Rows 0 to 3: two with text, then two blank ones.
         let selection = Selection::new(at(0, 0), at(9, 3), false);
         let format = |format, trim| {
-            let options = FormatOptions::new()
-                .with_emit_format(format)
+            let options = FormatterOptions::new()
+                .with_format(format)
+                .with_palette(true)
+                .with_style(true)
                 .with_trim(trim)
                 .with_selection(&selection);
-            let bytes = terminal.format_selection_alloc(None, options).unwrap();
-            bytes.unwrap().to_vec()
+            Formatter::new(&terminal, options)
+                .unwrap()
+                .format_alloc(None)
+                .unwrap()
+                .to_vec()
         };
-        // Unlike `Formatter`, the selection API always emits upstream's
+        // Enable the palette and style extras to exercise upstream's
         // `.styles` extras around VT content: the whole 256-color palette as
         // OSC 4 sequences (each ending in ST) before it, and the SGR reset
         // after it. Strip them one by one, unwrapping at each step, so that

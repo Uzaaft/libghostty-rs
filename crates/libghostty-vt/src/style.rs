@@ -139,15 +139,18 @@ impl TryFrom<ffi::Style> for Style {
             fg_color: StyleColor::try_from(value.fg_color)?,
             bg_color: StyleColor::try_from(value.bg_color)?,
             underline_color: StyleColor::try_from(value.underline_color)?,
-            bold: value.bold,
-            italic: value.italic,
-            faint: value.faint,
-            blink: value.blink,
-            inverse: value.inverse,
-            invisible: value.invisible,
-            strikethrough: value.strikethrough,
-            overline: value.overline,
-            underline: Underline::try_from(value.underline).map_err(|_| Error::InvalidValue)?,
+            bold: value.flags & ffi::STYLE_FLAG_BOLD != 0,
+            italic: value.flags & ffi::STYLE_FLAG_ITALIC != 0,
+            faint: value.flags & ffi::STYLE_FLAG_FAINT != 0,
+            blink: value.flags & ffi::STYLE_FLAG_BLINK != 0,
+            inverse: value.flags & ffi::STYLE_FLAG_INVERSE != 0,
+            invisible: value.flags & ffi::STYLE_FLAG_INVISIBLE != 0,
+            strikethrough: value.flags & ffi::STYLE_FLAG_STRIKETHROUGH != 0,
+            overline: value.flags & ffi::STYLE_FLAG_OVERLINE != 0,
+            underline: Underline::try_from(i32::from(
+                (value.flags & ffi::STYLE_UNDERLINE_MASK) >> ffi::STYLE_UNDERLINE_SHIFT,
+            ))
+            .map_err(|_| Error::InvalidValue)?,
         })
     }
 }
@@ -155,19 +158,47 @@ impl TryFrom<ffi::Style> for Style {
 impl From<Style> for ffi::Style {
     fn from(value: Style) -> Self {
         Self {
-            size: std::mem::size_of::<Self>(),
             fg_color: value.fg_color.into(),
             bg_color: value.bg_color.into(),
             underline_color: value.underline_color.into(),
-            bold: value.bold,
-            italic: value.italic,
-            faint: value.faint,
-            blink: value.blink,
-            inverse: value.inverse,
-            invisible: value.invisible,
-            strikethrough: value.strikethrough,
-            overline: value.overline,
-            underline: i32::from(value.underline),
+            flags: (if value.bold { ffi::STYLE_FLAG_BOLD } else { 0 })
+                | (if value.italic {
+                    ffi::STYLE_FLAG_ITALIC
+                } else {
+                    0
+                })
+                | (if value.faint {
+                    ffi::STYLE_FLAG_FAINT
+                } else {
+                    0
+                })
+                | (if value.blink {
+                    ffi::STYLE_FLAG_BLINK
+                } else {
+                    0
+                })
+                | (if value.inverse {
+                    ffi::STYLE_FLAG_INVERSE
+                } else {
+                    0
+                })
+                | (if value.invisible {
+                    ffi::STYLE_FLAG_INVISIBLE
+                } else {
+                    0
+                })
+                | (if value.strikethrough {
+                    ffi::STYLE_FLAG_STRIKETHROUGH
+                } else {
+                    0
+                })
+                | (if value.overline {
+                    ffi::STYLE_FLAG_OVERLINE
+                } else {
+                    0
+                })
+                | ((value.underline as u16) << ffi::STYLE_UNDERLINE_SHIFT),
+            reserved: 0,
         }
     }
 }
@@ -175,7 +206,7 @@ impl From<Style> for ffi::Style {
 impl TryFrom<ffi::StyleColor> for StyleColor {
     type Error = Error;
     fn try_from(value: ffi::StyleColor) -> Result<Self> {
-        Ok(match value.tag {
+        Ok(match i32::from(value.tag) {
             ffi::StyleColorTag::NONE => Self::None,
             ffi::StyleColorTag::PALETTE => {
                 Self::Palette(PaletteIndex(unsafe { value.value.palette }))
@@ -190,15 +221,21 @@ impl From<StyleColor> for ffi::StyleColor {
     fn from(value: StyleColor) -> Self {
         match value {
             StyleColor::None => Self {
-                tag: ffi::StyleColorTag::NONE,
+                tag: u8::try_from(ffi::StyleColorTag::NONE).expect("style color tag fits u8"),
                 value: ffi::StyleColorValue::default(),
             },
-            StyleColor::Palette(PaletteIndex(palette)) => Self {
-                tag: ffi::StyleColorTag::PALETTE,
-                value: ffi::StyleColorValue { palette },
-            },
+            StyleColor::Palette(PaletteIndex(palette)) => {
+                // The compact C color requires its two unused bytes to be zero.
+                let mut color = ffi::StyleColorValue::default();
+                color.palette = palette;
+                Self {
+                    tag: u8::try_from(ffi::StyleColorTag::PALETTE)
+                        .expect("style color tag fits u8"),
+                    value: color,
+                }
+            }
             StyleColor::Rgb(rgb) => Self {
-                tag: ffi::StyleColorTag::RGB,
+                tag: u8::try_from(ffi::StyleColorTag::RGB).expect("style color tag fits u8"),
                 value: ffi::StyleColorValue { rgb: rgb.into() },
             },
         }
@@ -551,5 +588,48 @@ fn x11_color_name_from_entry(entry: &ffi::ColorX11Entry) -> X11ColorName {
     X11ColorName {
         name,
         color: entry.color.into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        Terminal,
+        terminal::{Point, PointCoordinate},
+    };
+
+    #[test]
+    fn compact_palette_color_zeroes_unused_bytes() {
+        let color = ffi::StyleColor::from(StyleColor::Palette(PaletteIndex(37)));
+        // SAFETY: The complete union is initialized, and RGB contains only u8 fields.
+        let bytes = unsafe { color.value.rgb };
+        assert_eq!([bytes.r, bytes.g, bytes.b], [37, 0, 0]);
+    }
+
+    #[test]
+    fn compact_style_preserves_terminal_attributes_and_colors() {
+        let mut terminal = Terminal::new(4, 2).unwrap();
+        terminal.vt_write(b"\x1b[1;2;3;4:3;5;7;8;9;53;38;2;1;2;3mX");
+        let style = terminal
+            .grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))
+            .unwrap()
+            .style()
+            .unwrap();
+        assert!(style.bold && style.faint && style.italic && style.blink);
+        assert!(style.inverse && style.invisible && style.strikethrough && style.overline);
+        assert_eq!(style.underline, Underline::Curly);
+        assert_eq!(
+            style.fg_color,
+            StyleColor::Rgb(RgbColor { r: 1, g: 2, b: 3 })
+        );
+        let raw = ffi::Style::from(style);
+        assert_eq!(raw.reserved, 0);
+        assert_eq!(Style::try_from(raw).unwrap(), style);
+        let invalid = ffi::Style {
+            flags: 7 << ffi::STYLE_UNDERLINE_SHIFT,
+            ..raw
+        };
+        assert!(matches!(Style::try_from(invalid), Err(Error::InvalidValue)));
     }
 }

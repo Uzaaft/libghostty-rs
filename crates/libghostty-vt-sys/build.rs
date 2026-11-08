@@ -4,7 +4,7 @@ use std::process::Command;
 
 /// Pinned ghostty commit. Update this to pull a newer version.
 const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-const GHOSTTY_COMMIT: &str = "0b8b9984ee560456194262d190aa850224edb1f4";
+const GHOSTTY_COMMIT: &str = "0fa3d577a5614150ff8e2c152de5fb9d5c6d2dec";
 
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
@@ -113,8 +113,7 @@ fn main() {
     }
 
     // When the pkg-config feature is enabled, prefer an installed library over
-    // fetching Ghostty. libghostty is pre-1.0, so this crate intentionally does
-    // not promise compatibility with every installed C API revision.
+    // fetching Ghostty. Require the stable 1.x C ABI used by these bindings.
     #[cfg(feature = "pkg-config")]
     if try_pkg_config(link_mode, &target) {
         return;
@@ -204,6 +203,10 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
     let mut build = Command::new(zig);
     build
         .arg("build")
+        .arg(format!(
+            "-j{}",
+            env::var("NUM_JOBS").expect("Cargo sets NUM_JOBS")
+        ))
         .arg("-Demit-lib-vt=true")
         .arg(format!("-Doptimize={optimize}"))
         // Cargo artifacts may run on older CPUs than the build host. Without
@@ -341,6 +344,7 @@ fn warn_unused_xcframework(lib_dir: &Path) {
 #[cfg(feature = "pkg-config")]
 fn try_pkg_config(link_mode: LinkMode, target: &str) -> bool {
     let mut config = pkg_config::Config::new();
+    config.range_version("1.0.0".."2.0.0");
     let lib = match link_mode {
         LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
         LinkMode::Static => config

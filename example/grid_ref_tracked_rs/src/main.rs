@@ -1,9 +1,9 @@
 use std::{error::Error, io};
 
 use libghostty_vt::{
+    Terminal,
     screen::TrackedGridRef,
     terminal::{Point, PointCoordinate, PointSpace},
-    Terminal,
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;

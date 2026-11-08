@@ -880,15 +880,15 @@ impl<'alloc> Input<'alloc> {
             }
 
             self.key_event
-                .set_action(action)
-                .set_key(key)
-                .set_mods(mods)
-                .set_consumed_mods(consumed)
+                .set_action(action)?
+                .set_key(key)?
+                .set_mods(mods)?
+                .set_consumed_mods(consumed)?
                 // The unshifted codepoint is the character the key produces
                 // with no modifiers.  The Kitty protocol needs it to identify
                 // keys independent of the current shift state.
-                .set_unshifted_codepoint(ucp)
-                .set_utf8(maybe_text);
+                .set_unshifted_codepoint(ucp)?
+                .set_utf8(maybe_text)?;
 
             if maybe_text.is_some() {
                 text.clear();
@@ -897,7 +897,7 @@ impl<'alloc> Input<'alloc> {
             self.key_encoder
                 // Sync encoder options from the terminal so mode changes (e.g.
                 // application cursor keys, Kitty keyboard protocol) are honoured.
-                .set_options_from_terminal(terminal)
+                .set_options_from_terminal(terminal)?
                 .encode_to_vec(&self.key_event, &mut self.response)?;
 
             if !self.response.is_empty() {
@@ -937,14 +937,14 @@ impl<'alloc> Input<'alloc> {
 
         let (x, y) = mouse_position();
         self.mouse_event
-            .set_mods(mods)
-            .set_position(mouse::Position { x, y });
+            .set_mods(mods)?
+            .set_position(mouse::Position { x, y })?;
 
         self.mouse_encoder
             // Sync encoder tracking mode and format from terminal state so
             // mode changes (e.g. applications enabling SGR mouse reporting)
             // are honoured automatically.
-            .set_options_from_terminal(terminal)
+            .set_options_from_terminal(terminal)?
             // Provide the encoder with the current terminal geometry so it
             // can convert pixel positions to cell coordinates.
             .set_size(mouse::EncoderSize {
@@ -956,11 +956,11 @@ impl<'alloc> Input<'alloc> {
                 padding_bottom: PADDING as u32,
                 padding_left: PADDING as u32,
                 padding_right: PADDING as u32,
-            })
-            .set_any_button_pressed(any_pressed)
+            })?
+            .set_any_button_pressed(any_pressed)?
             // Enable motion deduplication so the encoder suppresses redundant
             // motion events within the same cell.
-            .set_track_last_cell(true);
+            .set_track_last_cell(true)?;
 
         // Check each mouse button for press/release events.
         for (mb, btn) in Self::ALL_MOUSE_BUTTONS {
@@ -980,7 +980,7 @@ impl<'alloc> Input<'alloc> {
                 continue;
             };
 
-            self.mouse_event.set_action(action).set_button(Some(btn));
+            self.mouse_event.set_action(action)?.set_button(Some(btn))?;
             self.mouse_encoder
                 .encode_to_vec(&self.mouse_event, &mut self.response)?;
         }
@@ -995,13 +995,13 @@ impl<'alloc> Input<'alloc> {
             }
 
             self.mouse_event
-                .set_action(mouse::Action::Motion)
+                .set_action(mouse::Action::Motion)?
                 .set_button(
                     Self::ALL_MOUSE_BUTTONS
                         .into_iter()
                         .find(|(mb, _)| is_mouse_button_down(*mb))
                         .map(|(_, btn)| btn),
-                );
+                )?;
             self.mouse_encoder
                 .encode_to_vec(&self.mouse_event, &mut self.response)?;
         }
@@ -1020,12 +1020,12 @@ impl<'alloc> Input<'alloc> {
                 };
 
                 self.mouse_event
-                    .set_button(Some(scroll_btn))
-                    .set_action(mouse::Action::Press);
+                    .set_button(Some(scroll_btn))?
+                    .set_action(mouse::Action::Press)?;
                 self.mouse_encoder
                     .encode_to_vec(&self.mouse_event, &mut self.response)?;
 
-                self.mouse_event.set_action(mouse::Action::Release);
+                self.mouse_event.set_action(mouse::Action::Release)?;
                 self.mouse_encoder
                     .encode_to_vec(&self.mouse_event, &mut self.response)?;
             } else {
@@ -1034,7 +1034,7 @@ impl<'alloc> Input<'alloc> {
                 // for a comfortable pace.  Delta is negative to scroll
                 // up (into history), positive to scroll down.
                 let scroll_delta: isize = (wheel_y * -2.5) as isize;
-                terminal.scroll_viewport(ScrollViewport::Delta(scroll_delta));
+                terminal.scroll_viewport(ScrollViewport::Delta(scroll_delta))?;
             }
         }
         Ok(())
@@ -1299,11 +1299,11 @@ impl SelectionState<'_> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         let grid_ref = terminal.grid_ref(point)?;
         let geometry = Geometry {
-                columns: terminal.cols()?.into(),
-                cell_width: dims.cell_width as u32,
-                padding_left: PADDING as u32,
-                screen_height: dims.window_height as u32,
-            };
+            columns: terminal.cols()?.into(),
+            cell_width: dims.cell_width as u32,
+            padding_left: PADDING as u32,
+            screen_height: dims.window_height as u32,
+        };
 
         let selection = self
             .drag_event

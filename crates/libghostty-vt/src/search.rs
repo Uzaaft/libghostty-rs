@@ -443,12 +443,12 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     fn select(
         &mut self,
         terminal: &mut Terminal<'_, '_>,
-        key: ffi::SearchOption::Type,
+        select: unsafe extern "C" fn(ffi::Search) -> ffi::Result::Type,
     ) -> Result<bool> {
         self.check_terminal(terminal)?;
         // SAFETY: The value must be NULL, and the exclusive terminal borrow
         // serializes reading and scrolling it.
-        let result = unsafe { ffi::ghostty_search_set(self.inner.as_raw(), key, std::ptr::null()) };
+        let result = unsafe { select(self.inner.as_raw()) };
         Ok(from_optional_result(result, ())?.is_some())
     }
 
@@ -461,14 +461,14 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// match according to [`Self::set_scroll`]. Returns `false` when there
     /// are no matches.
     pub fn select_next(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<bool> {
-        self.select(terminal, ffi::SearchOption::SELECT_NEXT)
+        self.select(terminal, ffi::ghostty_search_select_next)
     }
 
     /// Select the previous match, moving toward newer content, wrapping
     /// around past the newest match. Otherwise identical to
     /// [`Self::select_next`].
     pub fn select_prev(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<bool> {
-        self.select(terminal, ffi::SearchOption::SELECT_PREV)
+        self.select(terminal, ffi::ghostty_search_select_prev)
     }
 
     /// Feed the search, then borrow its matches together with the terminal.
@@ -531,7 +531,7 @@ impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
 
     /// The selected match, or `None` when nothing is selected.
     pub fn selected_match(&self) -> Result<Option<Selection<'_>>> {
-        let mut raw = ffi::sized!(ffi::Selection);
+        let mut raw = ffi::Selection::default();
         // SAFETY: Reading only touches search-owned memory.
         let result = unsafe {
             ffi::ghostty_search_get(
@@ -571,9 +571,7 @@ impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
                 // Growing is only needed when the storage is too small, so
                 // existing capacity is reused on later snapshots.
                 // libghostty reports the required length, which is larger.
-                storage
-                    .inner
-                    .resize(buffer.len, ffi::sized!(ffi::Selection));
+                storage.inner.resize(buffer.len, ffi::Selection::default());
                 continue;
             }
             from_result(result)?;

@@ -1063,40 +1063,20 @@ impl<'t> Image<'t> {
     /// image was still pending, the image can stay pending and this keeps
     /// returning `None`.
     pub fn data(&self) -> Result<Option<&'t [u8]>> {
-        // A pending payload is reported as `NO_VALUE`, which `get` would
-        // turn into `Err(Error::InvalidValue)`. Pending is a normal state
-        // for a stored image, so read the pointer with `get_optional`.
-        let Some(ptr) = self.get_optional::<*const u8>(ffi::KittyGraphicsImageData::DATA_PTR)?
+        let Some(pixels) = self.get_optional::<ffi::String>(ffi::KittyGraphicsImageData::PIXELS)?
         else {
             return Ok(None);
         };
-        // Upstream never reports success with a NULL pointer: the pointer
-        // comes from a Zig slice, whose pointer can't be NULL. But
-        // `slice::from_raw_parts` needs a non-NULL pointer even for an empty
-        // slice, and a NULL slipping through would be UB rather than an
-        // error, so keep this cheap check rather than rely on a property
-        // the header doesn't spell out. A NULL pointer has no pixels to
-        // borrow, so report it the same way as a pending payload.
-        if ptr.is_null() {
-            return Ok(None);
-        }
-
-        let len = self.get::<usize>(ffi::KittyGraphicsImageData::DATA_LEN)?;
-
-        // SAFETY: `ptr` is non-NULL (checked above) and, per the header,
-        // points to the `DATA_LEN` bytes of the image's pixel data. `u8`
-        // has an alignment of 1, so any non-NULL pointer is aligned. The
-        // header says the data stays valid as long as the terminal is not
-        // mutated, and `'t` borrows the terminal immutably, so the bytes
-        // outlive the returned slice.
-        Ok(Some(unsafe { std::slice::from_raw_parts(ptr, len) }))
+        // SAFETY: The C API returns the borrowed pixel slice and its actual
+        // length together; the terminal borrow keeps it alive.
+        Ok(Some(unsafe { pixels.to_bytes() }))
     }
     /// Length of the raw pixel data in bytes. Always equal to
     /// width * height * bytes-per-pixel for the reported format. For a
     /// pending image, this is the expected length reserved against the
     /// storage limit even though [`Image::data`] is not available yet.
     pub fn data_len(&self) -> Result<usize> {
-        self.get(ffi::KittyGraphicsImageData::DATA_LEN)
+        self.get(ffi::KittyGraphicsImageData::EXPECTED_LEN)
     }
 }
 
@@ -1214,9 +1194,9 @@ impl<'t> PlacementIteration<'t, '_> {
 
     /// Only return placements in one layer. See [`Layer`].
     pub fn set_layer(&self, layer: Layer) -> Result<()> {
-        self.set::<ffi::KittyPlacementLayer::Type>(
+        self.set::<u32>(
             ffi::KittyGraphicsPlacementIteratorOption::LAYER,
-            &layer.into(),
+            &u32::from(layer),
         )
     }
 
@@ -1357,7 +1337,7 @@ impl<'t> PlacementIteration<'t, '_> {
         if self.terminal != terminal.id {
             return Err(Error::InvalidValue);
         }
-        let mut sel = ffi::sized!(ffi::Selection);
+        let mut sel = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_rect(
                 self.iterator.inner.as_raw(),
@@ -1531,18 +1511,18 @@ pub struct SourceRect {
 /// follows the same rules, and it also covers virtual placements, which are
 /// always drawn below the text.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, int_enum::IntEnum)]
-#[repr(i32)]
+#[repr(u32)]
 pub enum Layer {
     /// Every placement. This is the default.
     #[default]
-    All = ffi::KittyPlacementLayer::ALL,
+    All = 0,
     /// Placements drawn below the cell backgrounds: z < [`i32::MIN`] / 2.
-    BelowBg = ffi::KittyPlacementLayer::BELOW_BG,
+    BelowBg = ffi::IMAGE_LAYER_MASK_BELOW_BACKGROUND,
     /// Placements drawn above the cell backgrounds and below the text:
     /// [`i32::MIN`] / 2 ≤ z < 0.
-    BelowText = ffi::KittyPlacementLayer::BELOW_TEXT,
+    BelowText = ffi::IMAGE_LAYER_MASK_BELOW_TEXT,
     /// Placements drawn above the text: z ≥ 0.
-    AboveText = ffi::KittyPlacementLayer::ABOVE_TEXT,
+    AboveText = ffi::IMAGE_LAYER_MASK_ABOVE_TEXT,
 }
 
 /// Pixel format of a Kitty graphics image.
