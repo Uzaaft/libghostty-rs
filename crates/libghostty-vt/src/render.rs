@@ -1639,12 +1639,10 @@ impl Drop for ImageIterator<'_> {
     }
 }
 
-// `ghostty_render_state_image_get_multi` is deliberately not wrapped, like
-// every other `*_get_multi` in this crate. It is the same as calling
-// `ghostty_render_state_image_get` once per key and only saves calls, and
-// each of those calls is a cheap direct FFI call from Rust. A safe wrapper
-// over its type-erased `void**` out-parameters would just duplicate the typed
-// getters below.
+// `ghostty_render_state_image_get_multi` is not wrapped. Unlike the per-cell
+// hot path covered by `Cell::get_multi`, image placements have no demonstrated
+// need for batching. Keep their typed getters rather than duplicating them
+// in a batch wrapper.
 impl ImageIteration<'_, '_> {
     /// Move an image iteration to the next image placement.
     ///
@@ -2319,6 +2317,138 @@ mod tests {
         assert_eq!(
             codepoints(&second_row.collect::<Vec<_>>()),
             [0x63, 0x64, 0, 0]
+        );
+    }
+
+    #[test]
+    fn cell_get_multi_matches_scalar_getters() {
+        use crate::screen::{CellContentTag, CellSemanticContent, CellWide, cell};
+
+        let mut terminal = Terminal::new(8, 1).unwrap();
+        // Keep styling and hyperlink flags independent to catch swapped outputs.
+        terminal.vt_write(
+            "a\x1b[1mB\x1b[0m\x1b]8;;https://example.com\x1b\\c\x1b]8;;\x1b\\界e\u{301}\x1b[1\"q\x1b]133;P;k=i\x07P".as_bytes(),
+        );
+        let mut state = RenderState::new().unwrap();
+        let snapshot = state.update(&terminal).unwrap();
+        let mut rows = RowIterator::new().unwrap();
+        let mut iteration = rows.update(&snapshot).unwrap();
+        let cells: Vec<_> = iteration.next().unwrap().cells_raw().unwrap().collect();
+        for cell in &cells {
+            // Deliberately reorder the queries, including a duplicate key.
+            let (
+                hyperlink,
+                codepoint,
+                tag,
+                styling,
+                wide,
+                style,
+                text,
+                protected,
+                semantic,
+                duplicate,
+            ) = cell
+                .get_multi((
+                    cell::HasHyperlink,
+                    cell::Codepoint,
+                    cell::ContentTag,
+                    cell::HasStyling,
+                    cell::Wide,
+                    cell::StyleId,
+                    cell::HasText,
+                    cell::Protected,
+                    cell::SemanticContent,
+                    cell::Codepoint,
+                ))
+                .unwrap();
+            assert_eq!(
+                (
+                    codepoint, tag, wide, text, styling, style, hyperlink, protected, semantic
+                ),
+                (
+                    cell.codepoint().unwrap(),
+                    cell.content_tag().unwrap(),
+                    cell.wide().unwrap(),
+                    cell.has_text().unwrap(),
+                    cell.has_styling().unwrap(),
+                    cell.style_id().unwrap(),
+                    cell.has_hyperlink().unwrap(),
+                    cell.is_protected().unwrap(),
+                    cell.semantic_content().unwrap()
+                )
+            );
+            assert_eq!(duplicate, codepoint);
+            assert_eq!(cell.get_multi((cell::Codepoint,)).unwrap(), (codepoint,));
+        }
+        // Independent expectations catch a shared error in a typed key used
+        // by both the named getter and the batch path.
+        assert_eq!(
+            cells
+                .iter()
+                .map(|c| c.codepoint().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                u32::from('a'),
+                u32::from('B'),
+                u32::from('c'),
+                u32::from('界'),
+                0,
+                u32::from('e'),
+                u32::from('P'),
+                0
+            ]
+        );
+        assert!(cells[1].has_styling().unwrap());
+        assert!(!cells[1].has_hyperlink().unwrap());
+        assert!(cells[2].has_hyperlink().unwrap());
+        assert!(!cells[2].has_styling().unwrap());
+        assert_eq!(cells[3].wide().unwrap(), CellWide::Wide);
+        assert_eq!(cells[4].wide().unwrap(), CellWide::SpacerTail);
+        assert_eq!(
+            cells[5].content_tag().unwrap(),
+            CellContentTag::CodepointGrapheme
+        );
+        assert!(cells[6].is_protected().unwrap());
+        assert!(!cells[0].is_protected().unwrap());
+        assert_eq!(
+            cells[6].semantic_content().unwrap(),
+            CellSemanticContent::Prompt
+        );
+        assert_eq!(
+            cells[0].semantic_content().unwrap(),
+            CellSemanticContent::Output
+        );
+    }
+
+    #[test]
+    fn cell_get_multi_reads_background_colors() {
+        use crate::{
+            screen::{CellContentTag, cell},
+            style::{PaletteIndex, RgbColor},
+            terminal::{Point, PointCoordinate},
+        };
+
+        let mut terminal = Terminal::new(2, 1).unwrap();
+        let point = Point::Viewport(PointCoordinate { x: 0, y: 0 });
+        terminal.vt_write(b"\x1b[48;5;173m\x1b[2K");
+        let cell = terminal.grid_ref(point).unwrap().cell().unwrap();
+        let (palette, tag) = cell
+            .get_multi((cell::ColorPalette, cell::ContentTag))
+            .unwrap();
+        assert_eq!(tag, CellContentTag::BgColorPalette);
+        assert_eq!(palette, PaletteIndex(173));
+
+        terminal.vt_write(b"\x1b[48;2;18;52;86m\x1b[2K");
+        let cell = terminal.grid_ref(point).unwrap().cell().unwrap();
+        let (tag, rgb) = cell.get_multi((cell::ContentTag, cell::ColorRgb)).unwrap();
+        assert_eq!(tag, CellContentTag::BgColorRgb);
+        assert_eq!(
+            rgb,
+            RgbColor {
+                r: 18,
+                g: 52,
+                b: 86
+            }
         );
     }
 
