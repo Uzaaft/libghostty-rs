@@ -15,8 +15,8 @@ It's also built for being updated over and over from the same terminal. An
 update only redoes what changed, and it tells you what changed so you can redraw
 only that.
 
-If you only want the screen as text, you don't need this page. Use the @ref
-formatter instead. Images have their own guide, @ref guide-images.
+If you only want the screen as text, you don't need this page. Use the
+[Formatter](crate::fmt) instead. Images have their own guide, [Images](images.md#guide-images).
 
 ## Drawing a frame {#guide-rendering-frame}
 
@@ -27,37 +27,45 @@ There are three steps:
    snapshot of the render state.
 3. Read from the snapshot to draw.
 
-@snippet c-vt-render/src/main.c render-state-update
+```rs
+{{#include ../../../example/rust-vt-render/src/main.rs:render-state-update}}
+```
 
-Full program: @ref c-vt-render/src/main.c
+Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 
 Now read what you need. The colors come as one struct:
 
-@snippet c-vt-render/src/main.c render-colors
+```rs
+{{#include ../../../example/rust-vt-render/src/main.rs:render-colors}}
+```
 
-Full program: @ref c-vt-render/src/main.c
+Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 
 So does the cursor:
 
-@snippet c-vt-render/src/main.c render-cursor
+```rs
+{{#include ../../../example/rust-vt-render/src/main.rs:render-cursor}}
+```
 
-Full program: @ref c-vt-render/src/main.c
+Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 
 Rows and cells have their own iterators. Row and cell data is only valid until
 the next update.
 
-@snippet c-vt-render/src/main.c render-row-iterate
+```rs
+{{#include ../../../example/rust-vt-render/src/main.rs:render-row-iterate}}
+```
 
-Full program: @ref c-vt-render/src/main.c
+Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 
 ## Two-phase updates {#guide-rendering-two-phase}
 
-[`RenderState::update`] needs exclusive access to the terminal for the
+[`RenderState::update()`] needs exclusive access to the terminal for the
 whole call. If a renderer thread shares a lock with an IO thread, you can hold
 that lock for less time by splitting the update in two.
 
-[`RenderState::begin_update`] needs the terminal and returns a [`render::Update`]
-object. [`render::Update::end`] finishes any work that was deferred, and it
+[`RenderState::begin_update()`] needs the terminal and returns a [`render::Update`]
+object. [`render::Update::end()`] finishes any work that was deferred, and it
 only touches memory the render state owns. So lock, begin, unlock, and then end
 while the IO thread goes back to modifying the terminal:
 
@@ -70,7 +78,7 @@ let snapshot = update.end();
 ```
 
 Every begin needs an end before you read the render state, because it's
-incomplete until then. [`RenderState::update`] is the same as calling the two
+incomplete until then. [`RenderState::update()`] is the same as calling the two
 back to back.
 
 ## Dirty tracking {#guide-rendering-dirty}
@@ -82,20 +90,24 @@ There are two independent layers. A global state says if the frame is clean,
 partially dirty or fully dirty. A flag on each row says which rows changed in a
 partially dirty frame.
 
-@snippet c-vt-render/src/main.c render-dirty-check
+```rs
+{{#include ../../../example/rust-vt-render/src/main.rs:render-dirty-check}}
+```
 
-Full program: @ref c-vt-render/src/main.c
+Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 
 An update only ever sets dirty state, it never clears it. That's your job. Once
 you've drawn a complete frame, [`Snapshot::clean`] clears both layers in one
 call:
 
-@snippet c-vt-render/src/main.c render-dirty-reset
+```rs
+{{#include ../../../example/rust-vt-render/src/main.rs:render-dirty-reset}}
+```
 
-Full program: @ref c-vt-render/src/main.c
+Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 
 If you only use part of a frame, clear what you used with
-[`Snapshot::set_dirty`] and [`RowIteration::set_dirty`] instead.
+[`Snapshot::set_dirty()`] and [`RowIteration::set_dirty()`] instead.
 Be careful here, because clearing one layer doesn't clear the other. Setting the
 global state to false leaves every row flag as it was, so you have to manage
 both.
@@ -116,15 +128,15 @@ Today the only way to start a hold is synchronized output (DEC private mode
 2026, [`Mode::SYNC_OUTPUT`]). The callback is named for what you should do
 rather than for that mode, so that other sources of holds can be added later.
 
-[`RenderState::update`] doesn't check for any of this. It always captures
+[`RenderState::update()`] doesn't check for any of this. It always captures
 the terminal as it is right now, so a renderer that updates on every draw shows
 half-drawn frames. To avoid that:
 
-1. Set a [`Terminal::on_render_hold`] callback on the terminal.
+1. Set a [`Terminal::on_render_hold()`] callback on the terminal.
 2. When a hold begins, update the render state from inside the callback. At that
    moment the terminal holds exactly the frame the program wants left on screen.
    Nothing after the start of the hold has been processed yet, even if more
-   bytes follow in the same [`Terminal::vt_write`].
+   bytes follow in the same [`Terminal::vt_write()`].
 3. Don't update the render state again until the hold ends. You can keep drawing
    it in the meantime, and it won't change.
 4. End the hold yourself if it lasts too long.
@@ -148,7 +160,7 @@ You're free to ignore a hold whenever live content matters more, such as when
 someone scrolls or starts a selection.
 
 Like every callback, this one runs on the thread that called
-[`Terminal::vt_write`]. If another thread draws the render state, protect
+[`Terminal::vt_write()`]. If another thread draws the render state, protect
 the update in the callback the same way you protect any other access to it.
 
 ## Overscan {#guide-rendering-overscan}
@@ -162,16 +174,16 @@ smoothly. While the grid is shifted, part of a row just outside the viewport
 shows at one edge, and you need that row's content to draw it. Overscan captures
 extra rows above and below the viewport for this.
 
-Request it with [`RenderState::set_overscan`]. The request applies to every
+Request it with [`RenderState::set_overscan()`]. The request applies to every
 update after you set it, and you should expect a full redraw on the update after
 a change. The row iterator then visits the extra rows along with the viewport,
-from top to bottom. [`RowIteration::viewport_y`] tells you where
+from top to bottom. [`RowIteration::viewport_y()`] tells you where
 each row belongs: rows above the viewport are negative, viewport rows are 0
 through `snapshot.rows() - 1`, and rows below the viewport start at `snapshot.rows()`.
 
 Extra rows are only captured when they exist. There's nothing above the first
 line of scrollback, and there's nothing below the viewport while it's scrolled
-to the bottom, which is the usual case. After an update, [`Snapshot::overscan`]
+to the bottom, which is the usual case. After an update, [`Snapshot::overscan()`]
 reports how many rows were actually captured on each side. Don't shift the grid
 toward a side where nothing was captured.
 
@@ -179,8 +191,8 @@ Extra rows carry the same data as viewport rows, including cells, styles, dirty
 flags and selection. The cursor is only reported when it's inside the viewport.
 
 The render state doesn't store the scroll position. If you need it, read
-[`Terminal::scrollbar`] or [`Terminal::viewport_active`] at the same time as you
-call [`RenderState::begin_update`], while you have exclusive access to the
+[`Terminal::scrollbar()`] or [`Terminal::viewport_active()`] at the same time as you
+call [`RenderState::begin_update()`], while you have exclusive access to the
 terminal. The values then describe the same moment as the render state.
 
 This draws one frame of a smooth scroll. `offset_px` comes from your own scroll
@@ -208,7 +220,7 @@ while let Some(row) = row_iter.next() {
 
 ## Row identity {#guide-rendering-row-identity}
 
-Every row has an id, [`RowIteration::id`], that stays with the row
+Every row has an id, [`RowIteration::id()`], that stays with the row
 as it moves. When the viewport scrolls by one row, each row shows up one
 position higher or lower in the next update but keeps its id. Ids work with or
 without overscan.
