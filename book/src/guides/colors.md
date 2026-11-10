@@ -21,9 +21,9 @@ Passing `None` clears a default and leaves that color unset.
 
 | Option                                 | Input type              | Description               |
 | -------------------------------------- | ----------------------- | ------------------------- |
-| [`Terminal::set_default_fg_color`] | `Option<RgbColor>`      | Default foreground color  |
-| [`Terminal::set_default_bg_color`] | `Option<RgbColor>`      | Default background color  |
-| [`Terminal::set_default_cursor_color`]     | `Option<RgbColor>`      | Default cursor color      |
+| [`Terminal::set_default_fg_color`] | `Option<Rgb>`      | Default foreground color  |
+| [`Terminal::set_default_bg_color`] | `Option<Rgb>`      | Default background color  |
+| [`Terminal::set_default_cursor_color`]     | `Option<Rgb>`      | Default cursor color      |
 | [`Terminal::set_default_color_palette`]    | `Option<Palette>` | Default 256-color palette |
 
 The palette is a little different. Passing `None` resets it to the built-in
@@ -42,13 +42,13 @@ and the default if not. The default value ignores overrides.
 
 | Data                                            | Output type             | Description                                    |
 | ----------------------------------------------- | ----------------------- | ---------------------------------------------- |
-| [`Terminal::fg_color`]        | `Option<RgbColor>`      | Effective foreground (override or default)     |
-| [`Terminal::bg_color`]        | `Option<RgbColor>`      | Effective background (override or default)     |
-| [`Terminal::cursor_color`]            | `Option<RgbColor>`      | Effective cursor (override or default)         |
+| [`Terminal::fg_color`]        | `Option<Rgb>`      | Effective foreground (override or default)     |
+| [`Terminal::bg_color`]        | `Option<Rgb>`      | Effective background (override or default)     |
+| [`Terminal::cursor_color`]            | `Option<Rgb>`      | Effective cursor (override or default)         |
 | [`Terminal::color_palette`]           | `Palette` | Current palette (with any OSC overrides)       |
-| [`Terminal::default_fg_color`]| `Option<RgbColor>`      | Default foreground only (ignores OSC override) |
-| [`Terminal::default_bg_color`]| `Option<RgbColor>`      | Default background only (ignores OSC override) |
-| [`Terminal::default_cursor_color`]    | `Option<RgbColor>`      | Default cursor only (ignores OSC override)     |
+| [`Terminal::default_fg_color`]| `Option<Rgb>`      | Default foreground only (ignores OSC override) |
+| [`Terminal::default_bg_color`]| `Option<Rgb>`      | Default background only (ignores OSC override) |
+| [`Terminal::default_cursor_color`]    | `Option<Rgb>`      | Default cursor only (ignores OSC override)     |
 | [`Terminal::default_color_palette`]   | `Palette` | Default palette only (ignores OSC overrides)   |
 
 The foreground, background and cursor getters return `None` if
@@ -72,7 +72,7 @@ Full program: @ref c-vt-colors/src/main.c
 Your theme probably starts out as text. These functions parse the same color
 strings as Ghostty's config and theme files, and none of them need a terminal.
 
-[`RgbColor::parse`] accepts:
+[`Rgb::parse`] accepts:
 
 - X11 color names, matched ASCII case-insensitively.
 - 3- or 6-digit hex colors, with or without a leading `#`.
@@ -80,17 +80,17 @@ strings as Ghostty's config and theme files, and none of them need a terminal.
 - XParseColor-style `rgb:<red>/<green>/<blue>` values.
 - XParseColor-style `rgbi:<red>/<green>/<blue>` values.
 
-Leading and trailing spaces and tabs are ignored. Use [`RgbColor::parse_x11_color`]
+Leading and trailing spaces and tabs are ignored. Use [`Rgb::parse_x11_color`]
 when you only want to accept X11 names.
 
 ```rs
-let color = match RgbColor::parse("ForestGreen") {
+let color = match Rgb::parse("ForestGreen") {
     Ok(color) => color,
     Err(e) => { /* Handle invalid color input. */ },
 };
 
-let color = RgbColor::parse("#abc").unwrap();
-let color = RgbColor::parse("rgb:12/34/56").unwrap();
+let color = Rgb::parse("#abc").unwrap();
+let color = Rgb::parse("rgb:12/34/56").unwrap();
 ```
 
 [`X11ColorNames::new`] returns the table of X11 names, if you want to offer
@@ -109,7 +109,7 @@ for name in X11ColorNames::new() {
 [`Palette::default`] gives you the same 256-color palette the
 terminal uses by default. [`Palette::parse_palette_entry`] parses one Ghostty
 palette override in `INDEX=COLOR` form. The index can be decimal or use a `0x`,
-`0o` or `0b` prefix, and the color side accepts anything [`RgbColor::parse`]
+`0o` or `0b` prefix, and the color side accepts anything [`Rgb::parse`]
 does.
 
 ```rs
@@ -129,8 +129,8 @@ let palette = Palette::default();
 let mut skip = PaletteMask::default();
 skip.set(PaletteIndex(16));
 
-let background = RgbColor { r: 40, g: 44, b: 52 };
-let foreground = RgbColor { r: 220, g: 223, b: 228 };
+let background = Rgb { r: 40, g: 44, b: 52 };
+let foreground = Rgb { r: 220, g: 223, b: 228 };
 
 let new_palette = Palette::generate(
     Some(&palette),
@@ -141,8 +141,8 @@ let new_palette = Palette::generate(
 );
 ```
 
-If your UI needs to make decisions from a color, [`RgbColor::luminance`],
-[`RgbColor::perceived_luminance`] and [`RgbColor::contrast`] give you the
+If your UI needs to make decisions from a color, [`Rgb::luminance`],
+[`Rgb::perceived_luminance`] and [`Rgb::contrast`] give you the
 luminance and contrast values.
 
 ## Light and dark reports {#guide-colors-scheme}
@@ -152,7 +152,7 @@ that fit. There are two ways they find out.
 
 A program can ask with `CSI ? 996 n`. Register a callback with
 [`Terminal::on_color_scheme`] and fill in the current scheme, or
-return `false` to ignore the query. See [Effects](guides/effects.md).
+return `false` to ignore the query. See [Effects](effects.md).
 
 Or a program can set mode 2031 and expect you to tell it when the scheme
 changes. For this one, encode the report yourself with

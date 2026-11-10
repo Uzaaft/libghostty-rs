@@ -8,14 +8,16 @@ Every feature in libghostty-vt builds on the basics shown here: the function
 call style, error handling, and option setting. If you go through this page,
 then you'll be able to easily adopt the remainder of the library.
 
-We'll walk through @ref rust-vt-stream/src/main.rs:"c-vt-stream". [Installing](installing.md)
-shows how to build it, and in the repo it's one `cargo run`.
+We'll walk through [rust-vt-stream](/example/rust-vt-stream/src/main.rs).
+[Installing](installing.md) shows how to build it, and in the repo it's one
+`cargo run`.
 
 ## Create a Terminal {#first-terminal-create}
 
 ```rs
-{{#include ../code/rust-vt-stream/src/main.rs:vt-stream-init}}
+{{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-init}}
 ```
+Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
 [`Terminal::new`] takes the size in columns and rows. If you want to use a
 custom allocator, use [`Terminal::new_with_alloc`]. See [Memory](../memory.md).
@@ -28,8 +30,9 @@ the [`Result`](error::Result) of every function.
 ## Write Bytes {#first-terminal-write}
 
 ```rs
-{{#include ../code/rust-vt-stream/src/main.rs:vt-stream-write}}
+{{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-write}}
 ```
+Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
 [`Terminal::vt_write`] takes the raw bytes a program wrote (e.g. from a
 pty, session recording, network, etc.). libghostty-vt parses all escape
@@ -41,7 +44,7 @@ need to line your writes up with anything. A sequence or a UTF-8 character can
 be split across two calls and the parser picks up where it left off.
 
 It is safe to pass untrusted data to this function. Bad input gets skipped. By
-default, without any [effects](guides/effects.md), untrusted data can't cause
+default, without any [effects](../guides/effects.md), untrusted data can't cause
 any damage. Memory usage is bounded and no side effects are possible.
 libghostty-vt is fuzzed 24/7 with multiple dedicated machines to keep this
 function safe against all forms of data input.
@@ -67,8 +70,9 @@ through a pty, such as a text file, that's now your job. Beware!
 > Use a render state instead. See [Draw the Screen](#first-terminal-render).
 
 ```rs
-{{#include ../code/rust-vt-stream/src/main.rs:vt-stream-read}}
+{{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-read}}
 ```
+Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
 A terminal screen is a grid of cells with styles, wide characters, wrapped rows,
 etc. The formatter processes this grid state and produces the screen state into
@@ -106,8 +110,9 @@ rendering. It does dirty tracking, viewport handling, smooth scroll handling,
 and more.
 
 ```rs
-{{#include ../code/rust-vt-stream/src/main.rs:vt-stream-render}}
+{{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-render}}
 ```
+Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
 A real renderer repeats three steps for every frame: update, draw, clean. Create
 the handles once, outside of that loop.
@@ -127,13 +132,14 @@ multi-threaded terminal and renderers.
 > This is to prevent users from accessing stale or invalid state when iterators
 > aren't yet ready.
 >
-> This design is symmetrical across all three objects of the render state API:
+> This design is symmetrical across all handles of the render state API:
 >
 > | Handle created on startup | State on each frame |
-> |-------------------|-------------------|
-> | [`RenderState`]   | [`Snapshot`]      |
-> | [`RowIterator`]   | [`RowIteration`]  |
-> | [`CellIterator`]  | [`CellIteration`] |
+> |---------------------------|---------------------|
+> | [`RenderState`]           | [`Snapshot`]        |
+> | [`RowIterator`]           | [`RowIteration`]    |
+> | [`CellIterator`]          | [`CellIteration`]   |
+> | [`ImageIterator`]         | [`ImageIteration`]  |
 
 [`RowIteration::next_dirty`] skips the rows that didn't change, which is most of
 them in most frames. Once you've drawn a complete frame, [`Snapshot::clean`]
@@ -168,5 +174,5 @@ See [Handles](../conventions.md#conventions-handles).
 
 ## What to Read Next {#first-terminal-next}
 
-- [Effects](guides/effects.md) - Answer the things a program asks of the terminal.
-- @ref example-programs - Complete programs for everything else.
+- [Effects](../guides/effects.md) - Answer the things a program asks of the terminal.
+- [Examples](../examples.md) - Complete programs for everything else.

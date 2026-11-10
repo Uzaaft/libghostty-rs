@@ -8,14 +8,13 @@ Four of the rules are short and they're on this page. The others have pages of
 their own:
 
 - [Getting and Setting Values](values.md)
-- [Sized Structs](sized-structs.md)
 - [Memory](memory.md)
 - [Optional Features](features.md)
 - [Stability](stability.md)
 
 ## Results {#conventions-results}
 
-Functions that can fail return a [`libghostty_vt::error::Result`]. The error
+Functions that can fail return an [`error::Result`]. The error
 can be of the following:
 
 | Result                      | What it means                                                                                                       |
@@ -39,27 +38,27 @@ to something the library manages; the structure of the thing is not public
 API for you to dig into. For example: [`Terminal`].
 
 A handle you create is yours. Most come from a `new` function, such as
-[`Terminal::new`]. If you need to, you can also explicitly pass an allocator
+[`Terminal::new()`]. If you need to, you can also explicitly pass an allocator
 when allocating memory for the object with the `new_with_alloc` functions,
-such as [`Terminal::new_with_alloc`]. See [Memory](memory.md).
+such as [`Terminal::new_with_alloc()`]. See [Memory](memory.md).
 
 A borrowed handle belongs to something else, so you don't free it. It also
 doesn't last. The [`kitty::Graphics`] handle you get from
-[`Terminal::kitty_graphics`] is only valid until the next call that changes the
-terminal, such as [`Terminal::vt_write`]. Each borrowed handle documents
+[`Terminal::kitty_graphics()`] is only valid until the next call that changes the
+terminal, such as [`Terminal::vt_write()`]. Each borrowed handle documents
 how long it lasts.
 
 Some handles you create still point at a terminal, and it matters which one you
 drop first:
 
 - A [`Formatter`] borrows its terminal. The terminal must outlive the formatter.
-- A [`Search`](search::Search) or a [`TrackedGridRef`](screen::TrackedGridRef) can
+- A [`Search`](search::Search) or a [`TrackedGridRef`](grid_ref::TrackedGridRef) can
   outlive its terminal. If the terminal is dropped first, a search fails cleanly on
   any call that needs the terminal, a tracked reference reports no value, and you can
   still drop both.
 
-Memory works the same way as handles. [`Bytes`](alloc::Bytes) represents a buffer
-the library allocates for you, such as the output of [`fmt::Formatter::format_alloc`]
+Memory works the same way as handles. [`Bytes`] represents a buffer
+the library allocates for you, such as the output of [`fmt::Formatter::format_alloc()`]
 which is owned by the caller. See [Allocating and Freeing Buffers](memory.md#memory-buffers).
 
 ## Threads {#conventions-threads}

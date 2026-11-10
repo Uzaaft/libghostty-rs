@@ -65,14 +65,14 @@ byte count. The address you return must be a multiple of `1 << alignment` bytes.
 
 ## Allocating and Freeing Buffers {#memory-buffers}
 
-[`Bytes`](alloc::Bytes) is the primary type for buffers allocated by or for libghostty.
+[`Bytes`] is the primary type for buffers allocated by or for libghostty.
 Use them when:
 
 - You need a buffer to hand to a libghostty-vt function, such as returning a
   [image](kitty::graphics::DecodedImage) decoded by the installed Kitty graphics
   [PNG decoder](kitty::graphics::DecodePng).
 - You want libghostty to handle allocation for you while still having ownership
-  over the returned data, such as in the case of [`Formatter::format_alloc`].
+  over the returned data, such as in the case of [`Formatter::format_alloc()`].
 
 Memory must only be freed by the same allocator that created it. On some
 platforms the library and your program use different heaps. On Windows, for
@@ -84,6 +84,6 @@ this will never happen normally through our `Drop` implementations.
 
 Some callbacks receive an allocator from the library, such as the PNG decoder
 set with [`kitty::graphics::set_png_decoder`]. Use that allocator only through
-allocating functions, such as [`Bytes::new_with_alloc`](alloc::Bytes::new_with_alloc).
+allocating functions, such as [`Bytes::new_zeroed_with_alloc()`].
 Its inner workings are implementation details that may silently change in future
 releases.

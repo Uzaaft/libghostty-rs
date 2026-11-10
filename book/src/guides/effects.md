@@ -51,25 +51,25 @@ There are 19 effects:
 
 | Function | Callback type                        | Trigger                                                                 |
 | ------------------------------------------ | ------------------------------------ | ----------------------------------------------------------------------- |
-| [`on_pty_write`](Terminal::on_pty_write)            | [`PtyWriteFn`](terminal::PtyWriteFn)            | VT query and mode reports written back to the pty                       |
-| [`on_bell`](Terminal::on_bell)                 | [`BellFn`](terminal::BellFn)                | BEL character (0x07)                                                    |
-| [`on_title_changed`](Terminal::on_title_changed)        | [`TitleChangedFn`](terminal::TitleChangedFn)        | Title change via OSC 0 / OSC 2                                          |
-| [`on_pwd_changed`](Terminal::on_pwd_changed)          | [`PwdChangedFn`](terminal::PwdChangedFn)          | Pwd change via OSC 7 / OSC 9 / OSC 1337                                 |
-| [`on_enquiry`](Terminal::on_enquiry)              | [`EnquiryFn`](terminal::EnquiryFn)             | ENQ character (0x05)                                                    |
-| [`on_xtversion`](Terminal::on_xtversion)            | [`XtversionFn`](terminal::XtversionFn)           | XTVERSION query (`CSI > q`)                                             |
-| [`on_size`](Terminal::on_size)                 | [`SizeFn`](terminal::SizeFn)                | XTWINOPS query (`CSI 14/16/18/19 t`) or mode 2048 enable                |
-| [`on_color_scheme`](Terminal::on_color_scheme)         | [`ColorSchemeFn`](terminal::ColorSchemeFn)         | Color scheme query (`CSI ? 996 n`)                                      |
-| [`on_device_attributes`](Terminal::on_device_attributes)    | [`DeviceAttributesFn`](terminal::DeviceAttributesFn)    | Device attributes query (`CSI c`, `CSI > c`, `CSI = c`)                 |
-| [`on_clipboard_write`](Terminal::on_clipboard_write)      | [`ClipboardWriteFn`](terminal::ClipboardWriteFn)      | Clipboard write via OSC 52 / OSC 1337 / OSC 5522                        |
-| [`on_clipboard_read`](Terminal::on_clipboard_read)       | [`ClipboardReadFn`](terminal::ClipboardReadFn)       | Clipboard read via OSC 52 `?` / OSC 5522                                |
-| [`on_desktop_notification`](Terminal::on_desktop_notification) | [`DesktopNotificationFn`](terminal::DesktopNotificationFn) | Desktop notification via OSC 9 / OSC 777                                |
-| [`on_progress_report`](Terminal::on_progress_report)      | [`ProgressReportFn`](terminal::ProgressReportFn)      | Progress report via OSC 9;4                                             |
-| [`on_program_status`](Terminal::on_program_status)       | [`ProgramStatusFn`](terminal::ProgramStatusFn)       | Program status report via OSC 7501                                      |
-| [`on_unknown_sequence`](Terminal::on_unknown_sequence)     | [`UnknownSequenceFn`](terminal::UnknownSequenceFn)     | APC or OSC sequence we don't implement. See @ref guide-custom-sequences |
-| [`on_render_hold`](Terminal::on_render_hold)          | [`RenderHoldFn`](terminal::RenderHoldFn)          | Synchronized output (mode 2026) begins or ends                          |
-| [`on_semantic_prompt`](Terminal::on_semantic_prompt)      | [`SemanticPromptFn`](terminal::SemanticPromptFn)      | Shell reports a prompt or command step via OSC 133                      |
-| [`on_reset`](Terminal::on_reset)                | [`ResetFn`](terminal::ResetFn)               | Full reset (RIS, `ESC c`)                                               |
-| [`on_resize_window`](Terminal::on_resize_window)        | [`ResizeWindowFn`](terminal::ResizeWindowFn)        | Window resize request (`CSI 8 t`)                                       |
+| [`on_pty_write`](Terminal::on_pty_write)            | [`PtyWriteFn`](effect::PtyWriteFn)            | VT query and mode reports written back to the pty                       |
+| [`on_bell`](Terminal::on_bell)                 | [`BellFn`](effect::BellFn)                | BEL character (0x07)                                                    |
+| [`on_title_changed`](Terminal::on_title_changed)        | [`TitleChangedFn`](effect::TitleChangedFn)        | Title change via OSC 0 / OSC 2                                          |
+| [`on_pwd_changed`](Terminal::on_pwd_changed)          | [`PwdChangedFn`](effect::PwdChangedFn)          | Pwd change via OSC 7 / OSC 9 / OSC 1337                                 |
+| [`on_enquiry`](Terminal::on_enquiry)              | [`EnquiryFn`](effect::EnquiryFn)             | ENQ character (0x05)                                                    |
+| [`on_xtversion`](Terminal::on_xtversion)            | [`XtversionFn`](effect::XtversionFn)           | XTVERSION query (`CSI > q`)                                             |
+| [`on_size`](Terminal::on_size)                 | [`SizeFn`](effect::SizeFn)                | XTWINOPS query (`CSI 14/16/18/19 t`) or mode 2048 enable                |
+| [`on_color_scheme`](Terminal::on_color_scheme)         | [`ColorSchemeFn`](effect::ColorSchemeFn)         | Color scheme query (`CSI ? 996 n`)                                      |
+| [`on_device_attributes`](Terminal::on_device_attributes)    | [`DeviceAttributesFn`](effect::DeviceAttributesFn)    | Device attributes query (`CSI c`, `CSI > c`, `CSI = c`)                 |
+| [`on_clipboard_write`](Terminal::on_clipboard_write)      | [`ClipboardWriteFn`](effect::ClipboardWriteFn)      | Clipboard write via OSC 52 / OSC 1337 / OSC 5522                        |
+| [`on_clipboard_read`](Terminal::on_clipboard_read)       | [`ClipboardReadFn`](effect::ClipboardReadFn)       | Clipboard read via OSC 52 `?` / OSC 5522                                |
+| [`on_desktop_notification`](Terminal::on_desktop_notification) | [`DesktopNotificationFn`](effect::DesktopNotificationFn) | Desktop notification via OSC 9 / OSC 777                                |
+| [`on_progress_report`](Terminal::on_progress_report)      | [`ProgressReportFn`](effect::ProgressReportFn)      | Progress report via OSC 9;4                                             |
+| [`on_program_status`](Terminal::on_program_status)       | [`ProgramStatusFn`](effect::ProgramStatusFn)       | Program status report via OSC 7501                                      |
+| [`on_unknown_sequence`](Terminal::on_unknown_sequence)     | [`UnknownSequenceFn`](effect::UnknownSequenceFn)     | APC or OSC sequence we don't implement. See @ref guide-custom-sequences |
+| [`on_render_hold`](Terminal::on_render_hold)          | [`RenderHoldFn`](effect::RenderHoldFn)          | Synchronized output (mode 2026) begins or ends                          |
+| [`on_semantic_prompt`](Terminal::on_semantic_prompt)      | [`SemanticPromptFn`](effect::SemanticPromptFn)      | Shell reports a prompt or command step via OSC 133                      |
+| [`on_reset`](Terminal::on_reset)                | [`ResetFn`](effect::ResetFn)               | Full reset (RIS, `ESC c`)                                               |
+| [`on_resize_window`](Terminal::on_resize_window)        | [`ResizeWindowFn`](effect::ResizeWindowFn)        | Window resize request (`CSI 8 t`)                                       |
 
 ## Common callbacks {#guide-effects-common}
 

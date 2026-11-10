@@ -74,12 +74,12 @@ If you retain the continuation and don't need tracking after you've exported it,
 call [`Terminal::set_continuation_max_bytes()`] with zero before you write any
 new input. Exporting an empty continuation doesn't turn tracking off.
 
-Without [`snapshot::Decoder::set_compress_history()`], restored scrollback is
-uncompressed, even if the original terminal had compressed it. That can be many
-times more memory than the terminal needed before, and it stays that way until
-you call [`Terminal::compress()`]. With the option on, the decode never holds
-more than one uncompressed history page at a time. The snapshot format doesn't
-change, so this works with any snapshot.
+Without [`snapshot::Decoder::set_compress_history_enabled()`], restored
+scrollback is uncompressed, even if the original terminal had compressed it.
+That can be many times more memory than the terminal needed before, and it
+stays that way until you call [`Terminal::compress()`]. With the option on,
+the decode never holds more than one uncompressed history page at a time.
+The snapshot format doesn't change, so this works with any snapshot.
 
 @snippet c-vt-snapshot/src/main.c snapshot-compress-history
 
@@ -103,10 +103,10 @@ This is the path that gets a terminal on screen first:
    you an [`snapshot::IncrementalDecoder`].
    [`snapshot::IncrementalDecoder::terminal()`] gives you
    a reference to the underlying terminal, usable right away for rendering and live input.
-2. [`snapshot::Decoder::next()`] decodes one record per call: a history page with the
+2. [`snapshot::IncrementalDecoder::next()`] decodes one record per call: a history page with the
    Kitty graphics placements pinned to it, or the pixels of one image or animation frame.
    The current progress is returned as a [`snapshot::Progress`] struct.
-3. `Ok(None)` from [`snapshot:Decoder::next()`] means FINISH was
+3. `Ok(None)` from [`snapshot::IncrementalDecoder::next()`] means FINISH was
    validated. Calling it again returns the same thing.
 
 History pages arrive newest to oldest, so each one is prepended to the
@@ -142,8 +142,8 @@ report zero bytes. That happens if live input deleted the image or sent a new
 image with the same id, if the image didn't fit the storage limit, or if its
 screen was removed or replaced.
 
-[`snapshot::IncrementalDecoder::progress_remaining`] counts the page records left
-in the same screen's history, not in the whole snapshot.
+The `remaining` field on [`snapshot::ProgressKind::Page`] counts the page records
+left in the same screen's history, not in the whole snapshot.
 
 You can stop early. Freeing the decoder leaves you a usable terminal with
 whatever history was already restored. After a decoding error the terminal is
@@ -161,7 +161,7 @@ changes. A renderer that watches that value picks up the new pixels on its next 
 
 Pixels can arrive between history pages, so they're only known to be done when
 next returns `None`. To show progress, compare
-[`snapshot::IncrementalDecoder::kitty_pending_bytes_primary`] with what arrives.
+[`snapshot::Decoder::kitty_pending_bytes_primary`] with what arrives.
 [`snapshot::IncrementalDecoder::next`] has an example.
 
 ## The format {#guide-snapshots-format}

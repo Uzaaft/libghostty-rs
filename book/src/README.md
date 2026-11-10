@@ -45,29 +45,23 @@ and commercial. We don't have any tracking of course but by our best estimates
 libghostty-vt is used by tens of millions of people daily across every major
 desktop and mobile platform.
 
-> [!IMPORTANT]
-> libghostty-vt is pre-1.0. The core code is extremely stable and
-> already in use by millions worldwide, but we're still stabilizing the ABI.
-> We will ship a stable ABI with 1.0 soon. See [Stability](stability.md) for exactly what
-> can break.
-
 ## Where to Next?
 
 - Getting the library? See [Installing](getting-started/installing.md).
 - Building a terminal? Read [Your First Terminal](getting-started/first-terminal.md).
 - Only need one piece? The parsers and encoders work without a terminal. See
-  @ref api_building_blocks "Building Blocks" and @ref api_input "Input".
-- Read @ref conventions for general library-wide conventions.
+  [Building Blocks](libghostty_vt#building-blocks) and [Input](libghostty_vt#input).
+- Read [API Conventions](conventions.md) for general library-wide conventions.
 
 ## Example
 
 Here is a complete program. It creates a terminal, writes some text with a color
-sequence in it, and prints what ended up on the screen. We left out the error
-checks to keep it short.
+sequence in it, and prints what ended up on the screen.
 
-@snippet c-vt-hello/src/main.c hello
-
-Full program: @ref c-vt-hello/src/main.c
+```rs
+{{#include ../../example/rust-vt-hello/src/main.rs}}
+```
+Full program: [rust-vt-hello/src/main.rs](/example/rust-vt-hello/src/main.rs)
 
 It prints `Hello, world!` in plain text. The color is in the terminal's state
 but the way we configured the formatter doesn't show it. This has no GUI window

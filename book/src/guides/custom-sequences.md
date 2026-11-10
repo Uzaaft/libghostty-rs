@@ -42,7 +42,7 @@ terminator, or supported protocols that you turned off.
 The callback runs while the terminal is processing input, so it can answer a
 query by writing straight to the pty. The reply stays in order with the
 terminal's own replies. Use the terminator from the request in your reply, since
-that's what the program expects. The rules from [Effects](guides/effects.md)-rules all
+that's what the program expects. The rules from [Effects](effects.md)-rules all
 apply here.
 
 ```c

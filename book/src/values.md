@@ -35,6 +35,6 @@ means the library doesn't know the value at all. `None` means the library
 knows the value, but something you passed with it is wrong.
 
 The same check applies to enum values you pass as plain arguments or inside
-option values, such as a [`key::Action`] or the variant of a [`terminal::Point`].
+option values, such as a [`key::Action`] or the variant of a [`Point`](point::Point).
 A value the library doesn't recognize returns [`Error::InvalidValue`] and leaves
 the object unchanged.

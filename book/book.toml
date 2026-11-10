@@ -3,6 +3,12 @@ title = "Guide to libghostty-vt, Rust Edition"
 authors = ["Leah Amelia Chen"]
 language = "en"
 
+[output.html]
+git-repository-url = "https://github.com/Uzaaft/libghostty-rs"
+
 [preprocessor.rustdoc-links]
 after = ["links"]
-build.preludes = ["libghostty_vt::{*,terminal::Mode,render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration},style::*,fmt::Formatter}"]
+build.preludes = ["libghostty_vt::{*,alloc::Bytes,mode::Mode,render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration},color::*,fmt::Formatter}"]
+
+[preprocessor.permalinks]
+after = ["rustdoc-links"]

@@ -34,9 +34,9 @@ to draw and the image list is empty.
 
 Programs can send image data directly in the sequence. Loading it from a file, a
 temporary file or shared memory is off by default. Turn those on with
-[`Terminal::set_kitty_image_medium_file()`],
-[`Terminal::set_kitty_image_medium_temp_file()`] and
-[`Terminal::set_kitty_image_medium_shared_mem()`].
+[`Terminal::set_kitty_image_from_file_allowed()`],
+[`Terminal::set_kitty_image_temp_file_dir()`] and
+[`Terminal::set_kitty_image_from_shared_mem_allowed()`].
 
 Each screen, main and alternate, has its own storage. Get a handle to the active
 one with [`Terminal::kitty_graphics()`]. The handle is borrowed, so see
@@ -55,10 +55,10 @@ turns PNG support off again.
 
 The callback gets the PNG bytes and fills in a [`kitty::graphics::DecodedImage`].
 Pixels are 8-bit RGBA, row by row from the top-left, with no padding, so a complete
-image is `width * height * 4` bytes. Allocate them with [`Bytes::new_with_alloc()`]
+image is `width * height * 4` bytes. Allocate them with [`Bytes::new_zeroed_with_alloc()`]
 and the allocator we pass you, and return it. We own the buffer after that.
 
-That allocator limits how much memory one image can use, so `Bytes::new_with_alloc`
+That allocator limits how much memory one image can use, so `Bytes::new_zeroed_with_alloc`
 can return `None` for a very large image. Treat that as a failure: free anything you
 allocated and return `None`, and the image is rejected. [`kitty::graphics::DecodePng`]
 has the rest of the contract.
@@ -261,7 +261,7 @@ one safe to use as a cache key on its own.
 
 You draw every placement the same way, so you can skip the next three sections
 unless you're curious how a list entry got there, or you're reading
-#[`ImageIteration::kitty_kin`]d.
+[`ImageIteration::kitty_kind`].
 
 A program can place an image at a cell on the screen. The image is attached to
 that cell, so it moves when the text moves: when new output scrolls the screen,

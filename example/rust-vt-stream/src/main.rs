@@ -1,9 +1,13 @@
-use libghostty_vt::{fmt, Terminal};
-use std::error::Error;
+use libghostty_vt::{
+    fmt,
+    render::{CellIterator, RenderState, RowIterator},
+    Terminal,
+};
+use std::{error::Error, io::Write};
 
 fn main() -> Result<(), Box<dyn Error>> {
     // ANCHOR: vt-stream-init
-    let terminal = Terminal::new(80, 24)?;
+    let mut terminal = Terminal::new(80, 24)?;
     // ANCHOR_END: vt-stream-init
 
     // ANCHOR: vt-stream-write
@@ -30,8 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // ANCHOR: vt-stream-read
     // Get the final terminal state as a plain string using the formatter
-    let formatter = fmt::Formatter::new(&terminal)?;
-
+    let mut formatter = fmt::Formatter::new(&terminal)?;
     formatter.set_format(fmt::Format::Plain)?.set_trim(true)?;
 
     let buf = formatter.format_alloc(None)?;
@@ -62,7 +65,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             // A real renderer draws the cell here. We print it, with its bold
             // style, which the plain text from the formatter didn't have.
-            if grapheme.is_empty() {
+            if graphemes.is_empty() {
                 print!(" ");
                 continue;
             }
