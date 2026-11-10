@@ -86,26 +86,38 @@ as the answer to a device status report or a mode query. Write the bytes to your
 pty. The data is only valid during the call, so copy it if you can't write it
 right away.
 
-@snippet c-vt-effects/src/main.c effects-write-pty
+```rs
+{{#include ../../../example/rust-vt-effects/src/main.rs:effects-write-pty}}
+```
 
-Full program: @ref c-vt-effects/src/main.c
+Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
 
 ### The bell
 
-The bell has no data at all. This one counts bells in the userdata pointer.
+The bell has no data at all. This one counts bells with a state variable
+placed within a [`Cell`](std::cell::Cell), which allows for
+[_interior mutability_](https://doc.rust-lang.org/reference/interior-mutability.html).
 
-@snippet c-vt-effects/src/main.c effects-bell
+```rs
+{{#include ../../../example/rust-vt-effects/src/main.rs:effects-state-lifetime}}
 
-Full program: @ref c-vt-effects/src/main.c
+    // ...
+
+{{#include ../../../example/rust-vt-effects/src/main.rs:effects-bell}}
+```
+
+Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
 
 ### Title changes
 
 The callback tells you the title changed, but not what it changed to. You can
-read the new title with `GHOSTTY_TERMINAL_DATA_TITLE` inside the callback.
+read the new title with [`Terminal::title`] inside the callback.
 
-@snippet c-vt-effects/src/main.c effects-title-changed
+```rs
+{{#include ../../../example/rust-vt-effects/src/main.rs:effects-title-changed}}
+```
 
-Full program: @ref c-vt-effects/src/main.c
+Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
 
 ### Clipboard writes
 
@@ -118,9 +130,11 @@ write is denied. Every entry in `contents` is a representation of the same
 value, so commit them together. A `contents_len` of zero asks you to clear the
 clipboard.
 
-@snippet c-vt-effects/src/main.c effects-clipboard-write
+```rs
+{{#include ../../../example/rust-vt-effects/src/main.rs:effects-clipboard-write}}
+```
 
-Full program: @ref c-vt-effects/src/main.c
+Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
 
 ### Clipboard reads
 
@@ -128,9 +142,11 @@ Reads work the same way. Ask first unless `granted` is set, and call `reply`
 before you return. If you return without replying, the program gets an empty
 clipboard for OSC 52 and `EPERM` for OSC 5522.
 
-@snippet c-vt-effects/src/main.c effects-clipboard-read
+```rs
+{{#include ../../../example/rust-vt-effects/src/main.rs:effects-clipboard-read}}
+```
 
-Full program: @ref c-vt-effects/src/main.c
+Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
 
 ### Sequences we don't implement
 
@@ -142,6 +158,8 @@ own guide. See @ref guide-custom-sequences.
 This registers the callbacks above, along with the unknown sequence callback,
 and then writes a sequence for each one so you can watch them fire.
 
-@snippet c-vt-effects/src/main.c effects-register
+```rs
+{{#include ../../../example/rust-vt-effects/src/main.rs:effects-register}}
+```
 
-Full program: @ref c-vt-effects/src/main.c
+Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)

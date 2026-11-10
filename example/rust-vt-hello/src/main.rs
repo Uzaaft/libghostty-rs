@@ -1,7 +1,9 @@
-use libghostty_vt::{fmt::Formatter, Terminal};
-use std::{error::Error, io::Write};
+//! The smallest complete program: create a terminal, write text with a color
+//! sequence in it, and print the screen. This is the program on the main page.
+// ANCHOR: hello
+use libghostty_vt::{error::Error, fmt::Formatter, Terminal};
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Error> {
     // Create an 80x24 terminal with the default allocator.
     let mut terminal = Terminal::new(80, 24)?;
 
@@ -15,9 +17,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut formatter = Formatter::new(&terminal)?;
     let buf = formatter.format_alloc(None)?;
 
-    let mut stdout = std::io::stdout();
-    stdout.write_all(&buf)?;
-    stdout.write_all(b"\n")?;
-
+    println!("{}", buf.escape_ascii());
     Ok(())
 }
+// ANCHOR_END: hello

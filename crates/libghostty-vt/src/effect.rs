@@ -1061,6 +1061,7 @@ impl<'t> ClipboardWrite<'t> {
     /// `remember` records a session grant so future requests from the same
     /// program skip the permission prompt. It is only honored on success when
     /// [`can_remember`](Self::can_remember) is set.
+    // FIXME: Reinstate reply object, make it resilient to breakages
     pub fn reply(self, result: std::result::Result<(), ClipboardWriteError>, remember: bool) {
         let reply = ffi::ClipboardWriteReply {
             result: result.map_or_else(Into::into, |()| ffi::ClipboardWriteResult::SUCCESS),
@@ -1346,6 +1347,7 @@ impl<'t> ClipboardRead<'t> {
     /// both callbacks share state through a [`RefCell`](std::cell::RefCell),
     /// don't keep it borrowed across `reply`: the pty write callback's borrow
     /// would panic, and a panic in a callback aborts the process.
+    // FIXME: Reinstate reply object, make it resilient to breakages
     pub fn reply(
         self,
         result: std::result::Result<&[ClipboardReplyContent<'_>], ClipboardReadError>,

@@ -59,7 +59,7 @@ Here is a complete program. It creates a terminal, writes some text with a color
 sequence in it, and prints what ended up on the screen.
 
 ```rs
-{{#include ../../example/rust-vt-hello/src/main.rs}}
+{{#include ../../example/rust-vt-hello/src/main.rs:hello}}
 ```
 Full program: [rust-vt-hello/src/main.rs](/example/rust-vt-hello/src/main.rs)
 

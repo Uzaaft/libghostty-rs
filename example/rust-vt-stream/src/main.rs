@@ -3,7 +3,7 @@ use libghostty_vt::{
     render::{CellIterator, RenderState, RowIterator},
     Terminal,
 };
-use std::{error::Error, io::Write};
+use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // ANCHOR: vt-stream-init
@@ -38,9 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     formatter.set_format(fmt::Format::Plain)?.set_trim(true)?;
 
     let buf = formatter.format_alloc(None)?;
-    let mut stdout = std::io::stdout();
-    stdout.write_all(&buf)?;
-    stdout.write_all(b"\n")?;
+    println!("{}", buf.escape_ascii());
     // ANCHOR_END: vt-stream-read
 
     // ANCHOR: vt-stream-render

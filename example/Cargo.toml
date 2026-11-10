@@ -9,8 +9,9 @@
 members = [
   "ghostling_rs",
   "grid_ref_tracked_rs",
-  "rust-vt-stream",
   "rust-vt-hello",
+  "rust-vt-stream",
+  "rust-vt-effects",
   "rust-vt-search",
   "wasm_rs",
 ]

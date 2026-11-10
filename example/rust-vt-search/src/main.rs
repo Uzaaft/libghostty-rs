@@ -1,11 +1,14 @@
+//! Search the terminal for a string, step through the matches like a find bar,
+//! and read the viewport matches to draw highlights.
+// ANCHOR: search-main
 use libghostty_vt::{
+    error::Error,
     point::Space,
     search::{MatchBuffer, Search},
     Terminal,
 };
-use std::error::Error;
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Error> {
     // Create a terminal and fill it with some content to search.
     let mut terminal = Terminal::new(80, 24)?;
     terminal.vt_write(b"$ make test\r\n");
@@ -80,3 +83,4 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+// ANCHOR_END: search-main
