@@ -40,7 +40,7 @@
 //! and a refused or failed paste writes nothing at all.
 //!
 //! ```rust
-//! use libghostty_vt::{Error, Terminal, paste::Options, terminal::ClipboardMime};
+//! use libghostty_vt::{Error, Terminal, paste::Options, effect::ClipboardMime};
 //! use std::io::Write;
 //!
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -391,10 +391,7 @@ impl Write for PasteWriter {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
-    use crate::{
-        Error,
-        terminal::{ClipboardReadError, Mode},
-    };
+    use crate::{Error, effect::ClipboardReadError, mode::Mode};
     use std::cell::{Cell, RefCell};
 
     const TEXT: [ClipboardMime<'static>; 1] = [ClipboardMime::new(b"text/plain")];

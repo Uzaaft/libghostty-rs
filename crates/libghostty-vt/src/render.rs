@@ -2423,9 +2423,9 @@ mod tests {
     #[test]
     fn cell_get_multi_reads_background_colors() {
         use crate::{
+            color::{PaletteIndex, Rgb},
             point::{Coordinate, Point},
             screen::{CellContentTag, cell},
-            style::{PaletteIndex, Rgb},
         };
 
         let mut terminal = Terminal::new(2, 1).unwrap();

@@ -248,11 +248,11 @@ impl Cell {
     /// no partial result is returned. The batch uses no heap allocation.
     ///
     /// ```
-    /// use libghostty_vt::{Terminal, screen::cell, terminal::{Point, PointCoordinate}};
+    /// use libghostty_vt::{Terminal, screen::cell, point::{Point, Coordinate}};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut terminal = Terminal::new(80, 24)?;
     /// terminal.vt_write(b"A");
-    /// let cell = terminal.grid_ref(Point::Viewport(PointCoordinate { x: 0, y: 0 }))?.cell()?;
+    /// let cell = terminal.grid_ref(Point::Viewport(Coordinate { x: 0, y: 0 }))?.cell()?;
     /// let (codepoint, has_text) = cell.get_multi((cell::Codepoint, cell::HasText))?;
     /// assert_eq!(codepoint, u32::from('A'));
     /// assert!(has_text);

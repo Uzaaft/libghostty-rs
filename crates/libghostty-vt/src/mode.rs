@@ -6,7 +6,7 @@
 //! The number alone isn't enough. ANSI mode 4 is insert mode, and DEC private
 //! mode 4 is slow scroll. Use these to name a mode when you read or set one
 //! on a terminal with [`Terminal::set_mode`](super::Terminal::set_mode), or to
-//! encode a DECRPM report with [`Mode::encode_report`]. You don't need a
+//! encode a DECRPM report with [`Mode::encode`]. You don't need a
 //! terminal to pack one.
 use crate::{
     error::{Result, from_result_with_len},
@@ -59,18 +59,18 @@ impl Mode {
     /// sized buffer.
     ///
     /// ```
-    /// use libghostty_vt::terminal::mode::{Mode, ReportState};
+    /// use libghostty_vt::mode::{Mode, ReportState};
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let mut buf = [0u8; 32];
     ///
     /// // Report DECCKM (DEC private mode 1) as set.
-    /// let len = Mode::DECCKM.encode_report(ReportState::Set, &mut buf)?;
+    /// let len = Mode::DECCKM.encode(ReportState::Set, &mut buf)?;
     /// assert_eq!(&buf[..len], b"\x1b[?1;1$y");
     /// # Ok(())
     /// # }
     /// ```
-    pub fn encode_report(self, state: ReportState, buf: &mut [u8]) -> Result<usize> {
+    pub fn encode(self, state: ReportState, buf: &mut [u8]) -> Result<usize> {
         let mut written = 0;
         // SAFETY: The pointer and length describe `buf`, a valid writable
         // region, and upstream only writes within `buf_len`, even when it
@@ -211,4 +211,46 @@ pub enum ReportState {
     PermanentlySet = ffi::ModeReportState::PERMANENTLY_SET,
     /// Mode is permanently reset
     PermanentlyReset = ffi::ModeReportState::PERMANENTLY_RESET,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Error;
+
+    /// DECRPM reports follow the forms in the header: `CSI ? Ps1 ; Ps2 $ y`
+    /// for DEC private modes and `CSI Ps1 ; Ps2 $ y` for ANSI modes, where
+    /// Ps2 is the numeric report state.
+    #[test]
+    fn mode_encode_report() {
+        use crate::mode::{
+            Mode,
+            ReportState::{NotRecognized, PermanentlyReset, PermanentlySet, Reset, Set},
+        };
+
+        let mut buf = [0u8; 32];
+        for (mode, state, expected) in [
+            (Mode::DECCKM, Set, b"\x1b[?1;1$y".as_slice()),
+            (Mode::INSERT, Reset, b"\x1b[4;2$y"), // ANSI modes drop the `?`.
+            (Mode::DECCKM, PermanentlyReset, b"\x1b[?1;4$y"),
+            (Mode::INSERT, PermanentlySet, b"\x1b[4;3$y"),
+            (Mode::new(9999, Kind::Dec), NotRecognized, b"\x1b[?9999;0$y"),
+        ] {
+            let len = mode.encode(state, &mut buf).unwrap();
+            assert_eq!(&buf[..len], expected, "{mode:?}, {state:?}");
+        }
+    }
+
+    /// A short (or empty) buffer reports how much space the sequence needs,
+    /// so callers can retry with a big enough one.
+    #[test]
+    fn mode_encode_report_out_of_space() {
+        use crate::mode::{Mode, ReportState};
+
+        let result = Mode::DECCKM.encode(ReportState::Set, &mut [0u8; 2]);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 8 })));
+
+        let result = Mode::DECCKM.encode(ReportState::Set, &mut []);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 8 })));
+    }
 }

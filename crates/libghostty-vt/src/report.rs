@@ -146,3 +146,48 @@ impl From<ColorScheme> for ffi::ColorScheme::Type {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::Error;
+
+    /// Mirrors upstream's size report tests. Rows and columns differ, as do
+    /// cell width and height, so swapping either pair (or text-area pixels
+    /// for cell pixels) changes the output.
+    const SIZE_REPORT_SIZE: SizeReportSize = SizeReportSize {
+        rows: 24,
+        columns: 80,
+        cell_width: 9,
+        cell_height: 18,
+    };
+
+    /// Each style follows its form in the header. Mode 2048 and CSI 14 t
+    /// report the text area in pixels (rows * cell height = 432, columns *
+    /// cell width = 720), while CSI 16 t reports a single cell.
+    #[test]
+    fn size_report_encode_report() {
+        let mut buf = [0u8; 32];
+        for (style, expected) in [
+            (SizeReport::Mode2048, b"\x1b[48;24;80;432;720t".as_slice()),
+            (SizeReport::Csi14T, b"\x1b[4;432;720t"),
+            (SizeReport::Csi16T, b"\x1b[6;18;9t"),
+            (SizeReport::Csi18T, b"\x1b[8;24;80t"),
+            (SizeReport::Csi19T, b"\x1b[9;24;80t"),
+        ] {
+            let len = style.encode(&SIZE_REPORT_SIZE, &mut buf).unwrap();
+            assert_eq!(&buf[..len], expected, "{style:?}");
+        }
+    }
+
+    /// A short (or empty) buffer reports how much space the sequence needs,
+    /// so callers can retry with a big enough one.
+    #[test]
+    fn size_report_encode_report_out_of_space() {
+        let result = SizeReport::Mode2048.encode(&SIZE_REPORT_SIZE, &mut [0u8; 4]);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 19 })));
+
+        let result = SizeReport::Mode2048.encode(&SIZE_REPORT_SIZE, &mut []);
+        assert!(matches!(result, Err(Error::OutOfSpace { required: 19 })));
+    }
+}
