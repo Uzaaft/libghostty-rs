@@ -81,9 +81,11 @@ depending on the encoder's options.
 
 This one has no terminal, so it turns on the Kitty keyboard protocol by hand:
 
-@snippet c-vt-encode-key/src/main.c key-encode
+```rs
+{{#include ../../../example/rust-vt-encode-key/src/main.rs:key-encode}}
+```
 
-Full program: @ref c-vt-encode-key/src/main.c
+Full program: [rust-vt-encode-key/src/main.rs](/example/rust-vt-encode-key/src/main.rs)
 
 Not every key event produces output. An unmodified modifier key usually doesn't,
 for example. Those events return `Ok(0)`, so check the count before you write to
@@ -111,9 +113,11 @@ The default is a 1x1 pixel screen with 1x1 pixel cells, which is never what you 
 Call [`mouse::Encoder::set_any_button_pressed`] as well, to say whether a button
 is held. Neither one comes from the terminal.
 
-@snippet c-vt-encode-mouse/src/main.c mouse-encode
+```rs
+{{#include ../../../example/rust-vt-encode-mouse/src/main.rs:mouse-encode}}
+```
 
-Full program: @ref c-vt-encode-mouse/src/main.c
+Full program: [rust-vt-encode-mouse/src/main.rs](/example/rust-vt-encode-mouse/src/main.rs)
 
 As with keys, not every event produces output, so check the count. And as with
 keys, a 128-byte buffer is enough for typical events.
@@ -138,9 +142,11 @@ if terminal.mode(Mode::FOCUS_EVENT).ok_or(false) {
 
 If the buffer is too small, you get [`Error::OutOfSpace`] and the size you need.
 
-@snippet c-vt-encode-focus/src/main.c focus-encode
+```rs
+{{#include ../../../example/rust-vt-encode-focus/src/main.rs:focus-encode}}
+```
 
-Full program: @ref c-vt-encode-focus/src/main.c
+Full program: [rust-vt-encode-focus/src/main.rs](/example/rust-vt-encode-focus/src/main.rs)
 
 ## Paste {#guide-input-paste}
 
@@ -192,9 +198,11 @@ and buffers it whole while the rule is applied. So your source doesn't have to
 stay the same between reads. The confirmed retry just pastes whatever the source
 holds by then, and a refused or failed paste writes nothing at all.
 
-@snippet c-vt-paste/src/main.c terminal-paste
+```rs
+{{#include ../../../example/rust-vt-paste/src/main.rs:terminal-paste}}
+```
 
-Full program: @ref c-vt-paste/src/main.c
+Full program: [rust-vt-paste/src/main.rs](/example/rust-vt-paste/src/main.rs)
 
 ### Without a terminal
 
@@ -202,13 +210,17 @@ If you encode without a terminal, there are two building blocks.
 [`paste::is_safe`] checks whether paste data contains potentially dangerous
 sequences. It's conservative, and it ignores terminal state.
 
-@snippet c-vt-paste/src/main.c paste-safety
+```rs
+{{#include ../../../example/rust-vt-paste/src/main.rs:paste-safety}}
+```
 
-Full program: @ref c-vt-paste/src/main.c
+Full program: [rust-vt-paste/src/main.rs](/example/rust-vt-paste/src/main.rs)
 
 [`paste::encode`] encodes paste data for the pty, including bracketed paste
 wrapping and unsafe byte stripping. It modifies your input buffer in place.
 
-@snippet c-vt-paste/src/main.c paste-encode
+```rs
+{{#include ../../../example/rust-vt-paste/src/main.rs:paste-encode}}
+```
 
-Full program: @ref c-vt-paste/src/main.c
+Full program: [rust-vt-paste/src/main.rs](/example/rust-vt-paste/src/main.rs)
