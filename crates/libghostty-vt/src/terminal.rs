@@ -1,6 +1,6 @@
 //! Types and functions around terminal state management.
 
-use std::{io::Write, marker::PhantomData, mem::MaybeUninit, num::NonZeroU16, ptr::NonNull};
+use std::{io::Write, marker::PhantomData, mem::MaybeUninit, num::NonZeroU16};
 
 use crate::{
     alloc::{Allocator, Bytes, Object},
@@ -618,14 +618,17 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// If the tracked grid reference outlives this terminal, the handle remains
     /// valid, but it will always return `false` or `Ok(None)`.
-    pub fn track_grid_ref(&self, point: Point) -> Result<TrackedGridRef> {
+    /// It must not outlive this terminal's allocator.
+    pub fn track_grid_ref(&self, point: Point) -> Result<TrackedGridRef<'alloc>> {
         let mut raw: ffi::TrackedGridRef = std::ptr::null_mut();
         let result = unsafe {
             ffi::ghostty_terminal_grid_ref_track(self.inner.as_raw(), point.into(), &raw mut raw)
         };
         from_result(result)?;
 
-        let inner = NonNull::new(raw).ok_or(Error::InvalidValue)?;
+        // Upstream retains the terminal's allocator to free the handle even
+        // after the terminal is gone. Preserve that allocator's lifetime.
+        let inner = Object::new(raw)?;
         Ok(TrackedGridRef::new(inner, self.inner.ptr))
     }
 
@@ -6246,7 +6249,7 @@ mod tests {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
 
-    fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> u32 {
+    fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef<'_>) -> u32 {
         let snapshot = tracked
             .snapshot(terminal)
             .expect("tracked snapshot should not fail")
@@ -6323,8 +6326,10 @@ mod tests {
 
     #[test]
     fn tracked_grid_ref_survives_terminal_drop() {
+        let allocator = Allocator::GLOBAL;
         let tracked = {
-            let mut terminal = tiny_terminal();
+            let mut terminal = Terminal::new_with_alloc(&allocator, 5, 3)
+                .expect("terminal should initialize with custom allocator");
             terminal.vt_write(b"alpha");
             terminal
                 .track_grid_ref(Point::Active(PointCoordinate { x: 0, y: 0 }))

@@ -8,7 +8,7 @@ use libghostty_vt::{
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
-fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> Result<char> {
+fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef<'_>) -> Result<char> {
     let snapshot = tracked
         .snapshot(terminal)?
         .ok_or_else(|| io::Error::other("tracked grid reference has no value"))?;
