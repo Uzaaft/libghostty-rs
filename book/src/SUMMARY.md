@@ -11,7 +11,7 @@
   - [Rendering](guides/rendering.md)
   - [Input](guides/input.md)
   - [Colors](guides/colors.md)
-  - [Grid](guides/grid.md)
+  - [The Grid](guides/grid.md)
   - [Selection](guides/selection.md)
   - [Scrollback](guides/scrollback.md)
   - [Search](guides/search.md)

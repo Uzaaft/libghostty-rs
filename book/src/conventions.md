@@ -52,7 +52,7 @@ Some handles you create still point at a terminal, and it matters which one you
 drop first:
 
 - A [`Formatter`] borrows its terminal. The terminal must outlive the formatter.
-- A [`Search`](search::Search) or a [`TrackedGridRef`](grid_ref::TrackedGridRef) can
+- A [`Search`] or a [`TrackedGridRef`](grid_ref::TrackedGridRef) can
   outlive its terminal. If the terminal is dropped first, a search fails cleanly on
   any call that needs the terminal, a tracked reference reports no value, and you can
   still drop both.

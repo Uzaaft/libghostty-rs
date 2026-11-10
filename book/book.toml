@@ -8,7 +8,16 @@ git-repository-url = "https://github.com/Uzaaft/libghostty-rs"
 
 [preprocessor.rustdoc-links]
 after = ["links"]
-build.preludes = ["libghostty_vt::{*,alloc::Bytes,mode::Mode,render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration},color::*,fmt::Formatter}"]
+build.preludes = [
+  "libghostty_vt::*",
+  "libghostty_vt::alloc::Bytes",
+  "libghostty_vt::mode::Mode",
+  "libghostty_vt::render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration}",
+  "libghostty_vt::color::*",
+  "libghostty_vt::fmt::Formatter",
+  "libghostty_vt::search::Search",
+  "libghostty_vt::selection::Selection",
+]
 
 [preprocessor.permalinks]
 after = ["rustdoc-links"]

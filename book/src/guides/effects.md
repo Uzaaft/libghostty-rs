@@ -30,14 +30,17 @@ first parameter, as well as other parameters depending on the exact callback.
 
 ## The rules for callbacks {#guide-effects-rules}
 
-Callbacks run synchronously, in the middle of [`Terminal::vt_write`] or
-[`Terminal::vt_write_until`]. All of these rules come from that.
+Callbacks run synchronously, in the middle of [`Terminal::vt_write()`] or
+[`Terminal::vt_write_until()`]. All of these rules come from that.
 
 You can't write to the same terminal from a callback. The terminal is still
 working through the first write, and it isn't reentrant. This applies to both
-[`Terminal::vt_write`] and [`Terminal::vt_write_until`]. For this reason,
-callbacks only receive a _shared_ reference to the terminal, which cannot call
-mutating functions like [`vt_write`](Terminal::vt_write).
+[`vt_write()`] and [`vt_write_until()`]. For this reason, callbacks only
+receive a _shared_ reference to the terminal, which cannot call
+mutating functions like [`vt_write()`].
+
+[`vt_write()`]: Terminal::vt_write
+[`vt_write_until()`]: Terminal::vt_write_until
 
 Don't block, and don't do anything expensive. Further IO processing waits until
 your callback returns, so a slow callback is a slow terminal.

@@ -19,8 +19,8 @@ We'll walk through [rust-vt-stream](/example/rust-vt-stream/src/main.rs).
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
-[`Terminal::new`] takes the size in columns and rows. If you want to use a
-custom allocator, use [`Terminal::new_with_alloc`]. See [Memory](../memory.md).
+[`Terminal::new()`] takes the size in columns and rows. If you want to use a
+custom allocator, use [`Terminal::new_with_alloc()`]. See [Memory](../memory.md).
 
 libghostty-vt functions never crash your program by design, given valid use of
 the API. All failure scenarios including allocation failures are handled and
@@ -34,7 +34,7 @@ the [`Result`](error::Result) of every function.
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
-[`Terminal::vt_write`] takes the raw bytes a program wrote (e.g. from a
+[`Terminal::vt_write()`] takes the raw bytes a program wrote (e.g. from a
 pty, session recording, network, etc.). libghostty-vt parses all escape
 sequences and applies their logic appropriately to the terminal state. Above,
 `\x1b[1;32m` turns on bold green. `\x1b[5B` moves the cursor down five rows.
@@ -117,7 +117,7 @@ Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 A real renderer repeats three steps for every frame: update, draw, clean. Create
 the handles once, outside of that loop.
 
-[`RenderState::update`] is the only step that touches the terminal, which
+[`RenderState::update()`] is the only step that touches the terminal, which
 creates a [`Snapshot`] of the render state. After that, you draw from the
 snapshot alone, so your renderer doesn't get in the way of the program writing
 to the terminal. The update only redoes what changed. Because only update needs
@@ -141,8 +141,8 @@ multi-threaded terminal and renderers.
 > | [`CellIterator`]          | [`CellIteration`]   |
 > | [`ImageIterator`]         | [`ImageIteration`]  |
 
-[`RowIteration::next_dirty`] skips the rows that didn't change, which is most of
-them in most frames. Once you've drawn a complete frame, [`Snapshot::clean`]
+[`RowIteration::next_dirty()`] skips the rows that didn't change, which is most of
+them in most frames. Once you've drawn a complete frame, [`Snapshot::clean()`]
 marks it as done. An update never clears the dirty state, so without this call
 every row stays dirty.
 
@@ -157,7 +157,7 @@ libghostty-vt does allocate at times, and they need to be dropped. Fortunately,
 the Rust bindings use Rust's lifetime and RAII rules as much as possible to
 drop them in the correct order.
 
-The buffer from [`Formatter::format_alloc`] is yours. You can drop it whenever
+The buffer from [`Formatter::format_alloc()`] is yours. You can drop it whenever
 you want, as long as the buffer does not outlive the allocator it that gave
 its memory. See [Allocating and Dropping Buffers](../memory.md#memory-buffers).
 
