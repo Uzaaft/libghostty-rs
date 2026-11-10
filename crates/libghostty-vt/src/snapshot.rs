@@ -554,6 +554,27 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     pub fn history_rows_alternate(&self) -> Result<Option<u64>> {
         self.get_optional(Data::HISTORY_ROWS_ALTERNATE)
     }
+
+    /// Number of Kitty graphics images restored for the primary screen at
+    /// READY.
+    ///
+    /// These images can be placed and queried right away, but their pixels
+    /// arrive later through [`IncrementalDecoder::next`]. Until then,
+    /// `kitty::graphics::Image::data` returns `Ok(None)` for them.
+    /// This value becomes available after READY validates, and is zero in a
+    /// library built without Kitty graphics.
+    pub fn kitty_images_primary(&self) -> Result<u32> {
+        self.get(Data::KITTY_IMAGES_PRIMARY)
+    }
+
+    /// Number of Kitty graphics images restored for the alternate screen at
+    /// READY.
+    ///
+    /// Returns `Ok(None)` when the snapshot does not declare an alternate
+    /// screen. See [`Self::kitty_images_primary`].
+    pub fn kitty_images_alternate(&self) -> Result<Option<u32>> {
+        self.get_optional(Data::KITTY_IMAGES_ALTERNATE)
+    }
 }
 
 impl Drop for Decoder<'_, '_> {
@@ -891,6 +912,47 @@ mod tests {
         let bytes = snapshot_with_history();
         let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
         assert!(decode_pages(&mut incremental) > 0);
+    }
+
+    #[test]
+    fn decoder_reports_kitty_metadata_for_each_screen() {
+        for alternate in [false, true] {
+            let mut terminal = Terminal::new(80, 24).unwrap();
+            // Two primary images, one alternate image. Different totals catch
+            // an accessor that queries the other screen's key.
+            terminal.vt_write(b"\x1b_Ga=T,f=32,s=2,v=1,i=7,q=2;AAAA/wAAAP8=\x1b\\");
+            terminal.vt_write(b"\x1b_Ga=t,f=32,s=1,v=1,i=8,q=2;AAAA/w==\x1b\\");
+            if alternate {
+                terminal.vt_write(b"\x1b[?1049h");
+                terminal.vt_write(b"\x1b_Ga=T,f=32,s=1,v=1,i=9,q=2;AAAA/w==\x1b\\");
+            }
+            let mut bytes = Vec::new();
+            terminal.encode_snapshot(&mut bytes).unwrap();
+
+            let decoder = Decoder::new_buf(&bytes).unwrap();
+            assert!(matches!(
+                decoder.kitty_images_primary(),
+                Err(Error::InvalidValue)
+            ));
+            assert_eq!(decoder.kitty_images_alternate().unwrap(), None);
+            let mut incremental = decoder.ready().unwrap();
+            // The Cargo feature gates Rust APIs, not the linked library's
+            // capabilities (e.g. when using pkg-config).
+            let kitty_graphics = crate::build_info::supports_kitty_graphics().unwrap();
+            let primary_images = if kitty_graphics { 2 } else { 0 };
+            let alternate_images = u32::from(kitty_graphics);
+            for finished in [false, true] {
+                if finished {
+                    while incremental.next().unwrap().is_some() {}
+                }
+                let decoder = incremental.decoder();
+                assert_eq!(decoder.kitty_images_primary().unwrap(), primary_images);
+                assert_eq!(
+                    decoder.kitty_images_alternate().unwrap(),
+                    alternate.then_some(alternate_images)
+                );
+            }
+        }
     }
 
     /// The pixels of a Kitty image arrive through `next` as their own
