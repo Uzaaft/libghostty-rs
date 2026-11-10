@@ -13,6 +13,10 @@ members = [
   "rust-vt-stream",
   "rust-vt-effects",
   "rust-vt-render",
+  "rust-vt-encode-key",
+  "rust-vt-encode-mouse",
+  "rust-vt-encode-focus",
+  "rust-vt-paste",
   "rust-vt-search",
   "wasm_rs",
 ]

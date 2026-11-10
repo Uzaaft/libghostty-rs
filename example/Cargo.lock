@@ -442,7 +442,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_encode_focus"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
+name = "rust_vt_encode_key"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
+name = "rust_vt_encode_mouse"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_hello"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
+name = "rust_vt_paste"
 version = "0.0.0"
 dependencies = [
  "libghostty-vt",

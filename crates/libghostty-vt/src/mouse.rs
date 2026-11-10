@@ -320,7 +320,7 @@ pub enum Format {
 ///
 /// This describes the rendered terminal geometry used to convert surface-space
 /// positions into encoded coordinates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub struct EncoderSize {
     /// Full screen width in pixels.
     pub screen_width: u32,
