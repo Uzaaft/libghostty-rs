@@ -24,18 +24,19 @@ use nix::sys::wait;
 
 use libghostty_vt::{
     alloc::Bytes,
-    build_info,
+    build_info, color,
+    effect::{
+        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
+        PrimaryDeviceAttributes, SecondaryDeviceAttributes,
+    },
     key::{self, Key},
     kitty::graphics::{self, DecodePng, DecodedImage, Graphics},
     mouse,
+    point::{Coordinate, Point},
     render::{CellIterator, ImageIterator, ImageLayer, ImageProtocol, RenderState, RowIterator},
+    report::SizeReportSize,
     selection::gesture::{DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
-    style::RgbColor,
-    terminal::{
-        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType, Point,
-        PointCoordinate, PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes,
-        SizeReportSize, Terminal,
-    },
+    terminal::{ScrollViewport, Terminal},
 };
 
 use crate::pty::{Child, Pty, PtyError};
@@ -757,8 +758,8 @@ impl<'alloc> Renderer<'alloc> {
 }
 
 /// Convert Ghostty colors to macroquad colors
-fn color(rgb: RgbColor) -> Color {
-    let RgbColor { r, g, b } = rgb;
+fn color(rgb: color::Rgb) -> Color {
+    let color::Rgb { r, g, b } = rgb;
     color_u8!(r, g, b, 255)
 }
 
@@ -1104,7 +1105,7 @@ impl<'alloc> Input<'alloc> {
             0
         };
 
-        Ok(Point::Viewport(PointCoordinate { x, y }))
+        Ok(Point::Viewport(Coordinate { x, y }))
     }
 
     // Decide whether the mouse is over an area where a selection drag can begin.
@@ -1299,11 +1300,11 @@ impl SelectionState<'_> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         let grid_ref = terminal.grid_ref(point)?;
         let geometry = Geometry {
-                columns: terminal.cols()?.into(),
-                cell_width: dims.cell_width as u32,
-                padding_left: PADDING as u32,
-                screen_height: dims.window_height as u32,
-            };
+            columns: terminal.cols()?.into(),
+            cell_width: dims.cell_width as u32,
+            padding_left: PADDING as u32,
+            screen_height: dims.window_height as u32,
+        };
 
         let selection = self
             .drag_event
