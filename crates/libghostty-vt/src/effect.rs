@@ -25,6 +25,7 @@ use crate::{
 };
 
 // Only referenced in docs.
+#[allow(unused)]
 use crate::{Terminal, mode::Mode};
 
 /// You might be wondering just what the heck this is.

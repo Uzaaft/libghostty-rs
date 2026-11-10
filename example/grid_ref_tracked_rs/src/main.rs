@@ -1,8 +1,8 @@
 use std::{error::Error, io};
 
 use libghostty_vt::{
-    screen::TrackedGridRef,
-    terminal::{Point, PointCoordinate, PointSpace},
+    grid_ref::TrackedGridRef,
+    point::{Coordinate, Point, Space},
     Terminal,
 };
 
@@ -28,7 +28,7 @@ fn main() -> Result<()> {
 
     terminal.vt_write(b"alpha\r\nbravo\r\ncharlie");
 
-    let alpha = Point::Active(PointCoordinate { x: 0, y: 0 });
+    let alpha = Point::Active(Coordinate { x: 0, y: 0 });
     let mut tracked = terminal.track_grid_ref(alpha)?;
 
     // Writing another line scrolls the original "alpha" row into scrollback.
@@ -42,7 +42,7 @@ fn main() -> Result<()> {
     );
 
     let screen = tracked
-        .point(PointSpace::Screen)?
+        .point(Space::Screen)?
         .ok_or_else(|| io::Error::other("tracked grid reference has no screen point"))?;
     println!("tracked screen point: {},{}", screen.x, screen.y);
 
@@ -61,7 +61,7 @@ fn main() -> Result<()> {
     // The same handle can be moved to a new point after it loses its value.
     terminal.vt_write(b"echo");
 
-    let echo = Point::Active(PointCoordinate { x: 0, y: 0 });
+    let echo = Point::Active(Coordinate { x: 0, y: 0 });
     tracked.set(&mut terminal, echo)?;
     assert!(
         tracked.has_value(),
