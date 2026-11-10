@@ -23,7 +23,7 @@
 //! }
 //! ```
 
-use std::mem::MaybeUninit;
+use std::{ffi::CStr, mem::MaybeUninit};
 
 use crate::{
     error::{Error, Result, from_result},
@@ -98,20 +98,18 @@ pub fn optimize_mode() -> Result<OptimizeMode> {
 
 /// The full version string (e.g. "1.2.3" or "1.2.3-dev+abcdef").
 ///
-/// The bytes are not guaranteed to be valid UTF-8.
-///
 /// # Example
 /// ```rust
-/// use libghostty_vt::build_info::*;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let version = version_string()?;
-/// // Validate it yourself if you need a `&str`.
-/// println!("libghostty-vt {}", std::str::from_utf8(version)?);
+/// let version = libghostty_vt::build_info::version_string()?;
+/// println!("libghostty-vt {:?}", version);
 /// # Ok(())
 /// # }
 /// ```
-pub fn version_string() -> Result<&'static [u8]> {
-    build_string(Info::VERSION_STRING)
+pub fn version_string() -> &'static CStr {
+    // SAFETY: libghostty promises to return a NUL-terminated string
+    // that is always valid.
+    unsafe { CStr::from_ptr(ffi::ghostty_version()) }
 }
 /// The major version number.
 pub fn major_version() -> Result<usize> {
