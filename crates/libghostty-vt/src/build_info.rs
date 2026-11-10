@@ -101,7 +101,7 @@ pub fn optimize_mode() -> Result<OptimizeMode> {
 /// # Example
 /// ```rust
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let version = libghostty_vt::build_info::version_string()?;
+/// let version = libghostty_vt::build_info::version_string();
 /// println!("libghostty-vt {:?}", version);
 /// # Ok(())
 /// # }

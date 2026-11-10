@@ -317,8 +317,9 @@ impl Terminal<'_, '_> {
     /// ```no_run
     /// use libghostty_vt::{
     ///     Error,
-    ///     terminal::{Terminal, Point, PointCoordinate},
-    ///     screen::GridRef,
+    ///     Terminal,
+    ///     point::{Point, Coordinate},
+    ///     grid_ref::GridRef,
     ///     selection::{Selection, SelectWordBetweenOptions},
     /// };
     /// # fn main() -> libghostty_vt::error::Result<()> {
@@ -329,7 +330,7 @@ impl Terminal<'_, '_> {
     /// // select the nearest word between the original click and current drag point
     /// // in both directions, then combine the outer word bounds.
     /// fn ref_at<'t>(terminal: &'t Terminal<'_, '_>, x: u16, y: u32) -> Result<GridRef<'t>, Error> {
-    ///     terminal.grid_ref(Point::Active(PointCoordinate { x, y }))
+    ///     terminal.grid_ref(Point::Active(Coordinate { x, y }))
     /// }
     ///
     /// let click_ref = ref_at(&terminal, 2, 0)?; // the "git" in "git status"

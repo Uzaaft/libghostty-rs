@@ -11,9 +11,9 @@ use std::{
 
 use libghostty_vt::{
     Error, Terminal,
+    effect::{ClipboardMime, ClipboardReadError},
     paste::Options,
     sys::set_secure_random_source,
-    terminal::{ClipboardMime, ClipboardReadError},
 };
 
 static CALLS: AtomicUsize = AtomicUsize::new(0);
