@@ -12,6 +12,7 @@ members = [
   "rust-vt-hello",
   "rust-vt-stream",
   "rust-vt-effects",
+  "rust-vt-render",
   "rust-vt-search",
   "wasm_rs",
 ]

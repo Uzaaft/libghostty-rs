@@ -449,6 +449,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_render"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_search"
 version = "0.0.0"
 dependencies = [
