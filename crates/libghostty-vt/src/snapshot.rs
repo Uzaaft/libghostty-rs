@@ -555,27 +555,6 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
         self.get_optional(Data::HISTORY_ROWS_ALTERNATE)
     }
 
-    /// Number of Kitty graphics images restored for the primary screen at
-    /// READY.
-    ///
-    /// These images can be placed and queried right away, but their pixels
-    /// arrive later through [`IncrementalDecoder::next`]. Until then,
-    /// `kitty::graphics::Image::data` returns `Ok(None)` for them.
-    /// This value becomes available after READY validates, and is zero in a
-    /// library built without Kitty graphics.
-    pub fn kitty_images_primary(&self) -> Result<u32> {
-        self.get(Data::KITTY_IMAGES_PRIMARY)
-    }
-
-    /// Number of Kitty graphics images restored for the alternate screen at
-    /// READY.
-    ///
-    /// Returns `Ok(None)` when the snapshot does not declare an alternate
-    /// screen. See [`Self::kitty_images_primary`].
-    pub fn kitty_images_alternate(&self) -> Result<Option<u32>> {
-        self.get_optional(Data::KITTY_IMAGES_ALTERNATE)
-    }
-
     /// Bytes of Kitty graphics pixels for the primary screen that were still
     /// to come at READY.
     ///
@@ -744,6 +723,26 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
                 decoder: &self.decoder,
             },
         )
+    }
+
+    /// Number of Kitty graphics images restored for the primary screen at
+    /// READY.
+    ///
+    /// These images can be placed and queried right away, but their pixels
+    /// arrive later through [`Self::next`]. Until then,
+    /// `kitty::graphics::Image::data` returns `Ok(None)` for them.
+    /// This value is zero in a library built without Kitty graphics.
+    pub fn kitty_images_primary(&self) -> Result<u32> {
+        self.decoder.get(Data::KITTY_IMAGES_PRIMARY)
+    }
+
+    /// Number of Kitty graphics images restored for the alternate screen at
+    /// READY.
+    ///
+    /// Returns `Ok(None)` when the snapshot does not declare an alternate
+    /// screen. See [`Self::kitty_images_primary`].
+    pub fn kitty_images_alternate(&self) -> Result<Option<u32>> {
+        self.decoder.get_optional(Data::KITTY_IMAGES_ALTERNATE)
     }
 
     /// Get a reference to the underlying decoder.
@@ -954,11 +953,6 @@ mod tests {
 
             let decoder = Decoder::new_buf(&bytes).unwrap();
             assert!(matches!(
-                decoder.kitty_images_primary(),
-                Err(Error::InvalidValue)
-            ));
-            assert_eq!(decoder.kitty_images_alternate().unwrap(), None);
-            assert!(matches!(
                 decoder.kitty_pending_bytes_primary(),
                 Err(Error::InvalidValue)
             ));
@@ -977,9 +971,9 @@ mod tests {
                     while incremental.next().unwrap().is_some() {}
                 }
                 let decoder = incremental.decoder();
-                assert_eq!(decoder.kitty_images_primary().unwrap(), primary_images);
+                assert_eq!(incremental.kitty_images_primary().unwrap(), primary_images);
                 assert_eq!(
-                    decoder.kitty_images_alternate().unwrap(),
+                    incremental.kitty_images_alternate().unwrap(),
                     alternate.then_some(alternate_images)
                 );
                 // These are totals captured at READY, not a remaining-byte
