@@ -11,6 +11,7 @@ members = [
   "grid_ref_tracked_rs",
   "rust-vt-stream",
   "rust-vt-hello",
+  "rust-vt-search",
   "wasm_rs",
 ]
 resolver = "2"
