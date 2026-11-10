@@ -652,7 +652,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// returns `Ok(None)`.
     pub fn point_from_grid_ref(
         &self,
-        grid_ref: &GridRef<'_>,
+        grid_ref: GridRef<'_>,
         space: point::Space,
     ) -> Result<Option<point::Coordinate>> {
         let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();

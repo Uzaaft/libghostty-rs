@@ -34,7 +34,7 @@ use crate::{
 /// This API is not meant to be used as the core of render loop.
 /// It isn't built to sustain the framerates needed for rendering large screens.
 /// Use the render state API for that.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GridRef<'t> {
     pub(crate) inner: ffi::GridRef,
     pub(crate) _phan: PhantomData<&'t ffi::Terminal>,
