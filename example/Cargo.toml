@@ -16,6 +16,8 @@ members = [
   "rust-vt-encode-key",
   "rust-vt-encode-mouse",
   "rust-vt-encode-focus",
+  "rust-vt-colors",
+  "rust-vt-color-scheme",
   "rust-vt-paste",
   "rust-vt-search",
   "wasm_rs",
