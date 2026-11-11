@@ -8,19 +8,20 @@
 # load the workspace at all.
 members = [
   "ghostling_rs",
-  "rust-vt-hello",
-  "rust-vt-stream",
-  "rust-vt-effects",
-  "rust-vt-render",
-  "rust-vt-encode-key",
-  "rust-vt-encode-mouse",
-  "rust-vt-encode-focus",
   "rust-vt-colors",
   "rust-vt-color-scheme",
-  "rust-vt-grid-traverse",
+  "rust-vt-effects",
+  "rust-vt-encode-focus",
+  "rust-vt-encode-key",
+  "rust-vt-encode-mouse",
   "rust-vt-grid-ref-tracked",
+  "rust-vt-grid-traverse",
+  "rust-vt-hello",
   "rust-vt-paste",
+  "rust-vt-render",
   "rust-vt-search",
+  "rust-vt-selection",
+  "rust-vt-stream",
   "wasm_rs",
 ]
 resolver = "2"
