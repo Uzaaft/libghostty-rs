@@ -149,13 +149,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
 
 [[package]]
-name = "grid_ref_tracked_rs"
-version = "0.0.0"
-dependencies = [
- "libghostty-vt",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -471,6 +464,13 @@ dependencies = [
 
 [[package]]
 name = "rust_vt_encode_mouse"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
+name = "rust_vt_grid_ref_tracked"
 version = "0.0.0"
 dependencies = [
  "libghostty-vt",

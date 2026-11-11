@@ -8,7 +8,6 @@
 # load the workspace at all.
 members = [
   "ghostling_rs",
-  "grid_ref_tracked_rs",
   "rust-vt-hello",
   "rust-vt-stream",
   "rust-vt-effects",
@@ -18,6 +17,8 @@ members = [
   "rust-vt-encode-focus",
   "rust-vt-colors",
   "rust-vt-color-scheme",
+  "rust-vt-grid-traverse",
+  "rust-vt-grid-ref-tracked",
   "rust-vt-paste",
   "rust-vt-search",
   "wasm_rs",
