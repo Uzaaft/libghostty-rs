@@ -11,12 +11,15 @@ after = ["links"]
 build.preludes = [
   "libghostty_vt::*",
   "libghostty_vt::alloc::Bytes",
-  "libghostty_vt::mode::Mode",
-  "libghostty_vt::render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration}",
   "libghostty_vt::color::*",
   "libghostty_vt::fmt::Formatter",
+  "libghostty_vt::grid_ref::*",
+  "libghostty_vt::mode::Mode",
+  "libghostty_vt::render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration}",
+  "libghostty_vt::screen::{Cell,Row}",
   "libghostty_vt::search::Search",
   "libghostty_vt::selection::Selection",
+  "libghostty_vt::style::Style",
 ]
 
 [preprocessor.permalinks]
