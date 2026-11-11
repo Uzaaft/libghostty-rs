@@ -67,6 +67,9 @@ fn main() {
         // These headers only need freestanding C headers. Use Clang's builtins
         // instead of the host libc headers when parsing a different ABI.
         .clang_arg("-ffreestanding")
+        // Nix can mark the installed headers as system headers. Keep their
+        // documentation on every target, including GNU and MSVC modes.
+        .clang_arg("-fretain-comments-from-system-headers")
         // Wasm only adds utility functions; the C types are shared.
         .clang_arg("-D__wasm__")
         .allowlist_function("[Gg]hostty.*")
