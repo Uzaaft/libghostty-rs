@@ -2,8 +2,8 @@
 
 pub const VT_VERSION_MAJOR: u32 = 1;
 pub const VT_VERSION_MINOR: u32 = 0;
-pub const VT_VERSION_PATCH: u32 = 0;
-pub const VT_VERSION: &::std::ffi::CStr = c"1.0.0";
+pub const VT_VERSION_PATCH: u32 = 1;
+pub const VT_VERSION: &::std::ffi::CStr = c"1.0.1";
 pub const IMAGE_LAYER_MASK_BELOW_BACKGROUND: u32 = 1;
 pub const IMAGE_LAYER_MASK_BELOW_TEXT: u32 = 2;
 pub const IMAGE_LAYER_MASK_ABOVE_TEXT: u32 = 4;
