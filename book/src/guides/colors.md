@@ -167,7 +167,7 @@ A program can ask with `CSI ? 996 n`. Register a callback with
 return `false` to ignore the query. See [Effects](effects.md).
 
 Or a program can set mode 2031 and expect you to tell it when the scheme changes.
-For this one, encode the report yourself with [`ColorScheme::encode()`]
+For this one, encode the report yourself with [`report::ColorScheme::encode()`]
 and write it to the pty. Only send it if [`Mode::COLOR_SCHEME_REPORT`] is set,
 which you read with [`Terminal::mode()`]. Dark schemes encode as `ESC [ ? 997 ; 1 n`
 and light schemes as `ESC [ ? 997 ; 2 n`, which are the same bytes as the terminal's

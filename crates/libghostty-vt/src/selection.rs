@@ -234,6 +234,20 @@ impl Terminal<'_, '_> {
         Ok(self)
     }
 
+    /// Derive a selection snapshot between two grid references.
+    ///
+    /// This is an alias of [`Selection::new`], albeit slightly simpler to write.
+    ///
+    /// The returned selection is not installed as the terminal's current selection.
+    pub fn select<'t>(
+        &'t self,
+        start: GridRef<'t>,
+        end: GridRef<'t>,
+        rectangle: bool,
+    ) -> Selection<'t> {
+        Selection::new(self, start, end, rectangle)
+    }
+
     /// Derive a selection snapshot covering all selectable terminal content.
     ///
     /// The returned selection is not installed as the terminal's current selection.

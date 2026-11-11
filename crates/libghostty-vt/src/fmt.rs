@@ -179,9 +179,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// be a valid snapshot for this formatter's terminal. Pass `None` to clear
     /// it and format the whole screen again.
     ///
-    /// To format the terminal's active selection safely, use
-    /// [`Self::new_selection`]. For clipboard text, use plain output with
-    /// unwrap and trim both true.
+    /// For clipboard text, use plain output with unwrap and trim both true.
     pub fn set_selection(&mut self, value: Option<Selection<'t>>) -> Result<&mut Self> {
         if let Some(sel) = value.as_ref() {
             // Block any attempts at setting a selection from the wrong terminal.
@@ -419,7 +417,7 @@ mod tests {
             let end = terminal
                 .grid_ref(Point::Active(Coordinate { x: 4, y: 0 }))
                 .unwrap();
-            let selection = Selection::new(&terminal, start, end, false);
+            let selection = terminal.select(start, end, false);
             formatter.set_selection(Some(selection)).unwrap();
             assert!(
                 formatter

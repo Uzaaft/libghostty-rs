@@ -28,8 +28,8 @@ fn main() -> Result<(), Error> {
     // later as a row-local selected cell range.
     let selection_start = terminal.grid_ref(Point::Active(Coordinate { x: 0, y: 1 }))?;
     let selection_end = terminal.grid_ref(Point::Active(Coordinate { x: 9, y: 1 }))?;
-    let selection = Selection::new(selection_start, selection_end, false);
-    terminal.set_selection(Some(&selection))?;
+    let selection = terminal.select(selection_start, selection_end, false);
+    terminal.set_selection(Some(selection))?;
 
     let snapshot = render_state.update(&terminal)?;
     // ANCHOR_END: render-state-update

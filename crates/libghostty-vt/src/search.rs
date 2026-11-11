@@ -432,7 +432,7 @@ impl Snapshot<'_, '_, '_> {
     ///
     /// This indexes the newest to oldest ordering of [`Snapshot::matches`],
     /// where 0 is the newest match, so a "k of n" find bar renders
-    /// `index + 1` of [`Self::total_matches`].
+    /// `index + 1` of [`Search::total_matches`].
     pub fn selected_index(&self) -> Result<Option<usize>> {
         let mut index = 0usize;
         // SAFETY: Reading only touches search-owned memory.

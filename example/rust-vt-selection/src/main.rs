@@ -9,8 +9,10 @@ use libghostty_vt::{
 use std::io::Write;
 
 // ANCHOR: selection-main
-fn ref_at<'t>(terminal: &'t Terminal<'_, '_>, x: u16, y: u32) -> Result<GridRef<'t>, Error> {
-    terminal.grid_ref(Point::Active(Coordinate { x, y }))
+fn ref_at<'t>(terminal: &'t Terminal<'_, '_>, x: u16, y: u32) -> GridRef<'t> {
+    terminal
+        .grid_ref(Point::Active(Coordinate { x, y }))
+        .expect("ref should exist")
 }
 
 fn print_selection<'t>(
@@ -46,7 +48,7 @@ fn main() -> Result<(), Error> {
     terminal.vt_write(b"nothing to commit, working tree clean");
 
     // Double-click style word selection under the cursor.
-    let grid_ref = ref_at(&terminal, 6, 0)?; // the "status" in "git status"
+    let grid_ref = ref_at(&terminal, 6, 0); // the "status" in "git status"
     let selection = terminal
         .select_word(grid_ref)
         .finish()?
@@ -58,8 +60,8 @@ fn main() -> Result<(), Error> {
     // "git" and drags to "status". The pointer may pass over whitespace, so
     // select the nearest word between the original click and current drag point
     // in both directions, then combine the outer word bounds.
-    let click_ref = ref_at(&terminal, 2, 0)?; // the "git" in "git status"
-    let drag_ref = ref_at(&terminal, 6, 0)?; // the "status" in "git status"
+    let click_ref = ref_at(&terminal, 2, 0); // the "git" in "git status"
+    let drag_ref = ref_at(&terminal, 6, 0); // the "status" in "git status"
 
     let start_word = terminal
         .select_word_between(click_ref, drag_ref)
@@ -70,13 +72,13 @@ fn main() -> Result<(), Error> {
         .finish()?
         .expect("word should be selected");
 
-    let selection = Selection::new(&terminal, start_word.start(), end_word.end(), false);
+    let selection = terminal.select(start_word.start(), end_word.end(), false);
     print_selection(&terminal, "double-click drag", selection)?;
     // ANCHOR_END: selection-word-between
 
     // Triple-click style line selection. With semantic prompt boundaries enabled,
     // this selects only the input area rather than the leading "$ " prompt.
-    let grid_ref = ref_at(&terminal, 2, 0)?; // the "git status" input area.
+    let grid_ref = ref_at(&terminal, 2, 0); // the "git status" input area.
     let selection = terminal
         .select_line(grid_ref)
         .with_semantic_prompt_boundary(true)
@@ -85,7 +87,7 @@ fn main() -> Result<(), Error> {
     print_selection(&terminal, "line", selection)?;
 
     // Select exactly the command output for the command under the cursor.
-    let output_ref = ref_at(&terminal, 0, 1)?;
+    let output_ref = ref_at(&terminal, 0, 1);
     let selection = terminal
         .select_output(output_ref)?
         .expect("output should be selected");

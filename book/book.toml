@@ -19,6 +19,7 @@ build.preludes = [
   "libghostty_vt::screen::{Cell,Row}",
   "libghostty_vt::search::Search",
   "libghostty_vt::selection::Selection",
+  "libghostty_vt::selection::gesture::{self,*}",
   "libghostty_vt::style::Style",
 ]
 

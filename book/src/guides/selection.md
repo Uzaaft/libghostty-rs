@@ -16,72 +16,70 @@ so you don't have to write that logic.
 
 ## What a selection is {#guide-selection-what}
 
-A GhosttySelection is two cells, `start` and `end`, and both are included. By
+A [`Selection`] is two cells, `start` and `end`, and both are included. By
 default it's linear: it runs from `start` to `end` the way text flows, wrapping
 from the end of one row to the start of the next. Set `rectangle` to true for a
 rectangular block instead, with `start` and `end` at opposite corners.
 
 The ends keep the direction of the selection. If someone drags up or to the
 left, `start` comes after `end` in the terminal, so don't assume `start` is the
-top-left end. ghostty_terminal_selection_ordered() gives you the ends in the
+top-left end. [`Selection::to_ordered()`] gives you the ends in the
 order you ask for.
 
-Both ends are GhosttyGridRef values, so a selection is an untracked snapshot and
+Both ends are [`GridRef`] values, so a selection is an untracked snapshot and
 follows the same rule as any untracked reference. It's only valid until the next
-call that changes the terminal, including freeing it. See @ref
-guide-grid-lifetime.
+call that changes the terminal, including freeing it.
+See [When a reference dies](grid.md#guide-grid-lifetime).
 
 To keep a selection across changes, you have two choices. Install it as the
 terminal's selection, or keep tracked references for the ends and build a new
-GhosttySelection from fresh snapshots when you need one.
+[`Selection`] from fresh snapshots when you need one.
 
 ### The terminal's selection
 
 The active screen has a selection, and the terminal owns it. Passing a selection
-to ghostty_terminal_set() with #GHOSTTY_TERMINAL_OPT_SELECTION copies it right
-away and converts it to tracked state, so what you passed doesn't need to
-outlive the call. Passing `NULL` clears it.
+to [`Terminal::set_selection()`] copies it right away and converts it to tracked
+state, so what you passed doesn't need to outlive the call. Passing `None` clears
+it.
 
-Read it back with `GHOSTTY_TERMINAL_DATA_SELECTION`, which returns
-#GHOSTTY_NO_VALUE if there's no active selection. The struct you get is yours to
-keep, but the references in it are untracked again. They're only valid until the
-next call that changes the terminal.
+Read it back with [`Terminal::selection()`], which returns `None` if there's no
+active selection. The struct you get is yours to keep, but the references in it
+are untracked again. They're only valid until the next call that changes the
+terminal.
 
 Nothing in this guide installs a selection for you. Every function below returns
 a snapshot, and you decide what to do with it.
 
 ## Making a selection {#guide-selection-making}
 
-You can fill in a selection by hand. This selects the first ten cells of the
-second row and makes that the terminal's selection:
+You can fill in a selection by hand with [`Terminal::select`] (or equivalently,
+[`Selection::new`]). This selects the first ten cells of the second row and
+makes that the terminal's selection:
 
-```c
-GhosttyPoint start_pt = {
-    .tag = GHOSTTY_POINT_TAG_ACTIVE,
-    .value = {.coordinate = {.x = 0, .y = 1}},
-};
-GhosttyPoint end_pt = {
-    .tag = GHOSTTY_POINT_TAG_ACTIVE,
-    .value = {.coordinate = {.x = 9, .y = 1}},
+```rs
+use libghostty_vt::{
+    point::{Coordinate, Point},
+    selection::Selection,
+    Terminal,
 };
 
-GhosttySelection selection = {0};
-ghostty_terminal_grid_ref(terminal, start_pt, &selection.start);
-ghostty_terminal_grid_ref(terminal, end_pt, &selection.end);
-ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SELECTION, &selection);
+let start = terminal.grid_ref(Point::Active(Coordinate { x: 0, y: 1 }))?;
+let end = terminal.grid_ref(Point::Active(Coordinate { x: 9, y: 1 }))?;
+let selection = terminal.select(start, end, false);
+terminal.set_selection(Some(selection))?;
 ```
 
 Usually you want the terminal's rules instead:
 
 | Function                               | What it selects                                                                    |
 | -------------------------------------- | ---------------------------------------------------------------------------------- |
-| ghostty_terminal_select_word()         | The word under a grid reference.                                                   |
-| ghostty_terminal_select_word_between() | The nearest word between two grid references, searching from `start` toward `end`. |
-| ghostty_terminal_select_line()         | The line under a grid reference.                                                   |
-| ghostty_terminal_select_output()       | The command output under a grid reference. This needs OSC 133 prompt markers.      |
-| ghostty_terminal_select_all()          | All selectable content.                                                            |
+| [`Terminal::select_word()`]         | The word under a grid reference.                                                   |
+| [`Terminal::select_word_between()`] | The nearest word between two grid references, searching from `start` toward `end`. |
+| [`Terminal::select_line()`]         | The line under a grid reference.                                                   |
+| [`Terminal::select_output()`]       | The command output under a grid reference. This needs OSC 133 prompt markers.      |
+| [`Terminal::select_all()`]          | All selectable content.                                                            |
 
-Each returns #GHOSTTY_NO_VALUE when there's nothing to select there.
+Each returns `None` when there's nothing to select there.
 
 The word functions use Ghostty's default word boundaries unless you pass your
 own codepoints. The line function trims Ghostty's default whitespace unless you
@@ -89,22 +87,26 @@ pass your own. Set `semantic_prompt_boundary` and the line stops at semantic
 prompt changes, so a line at a shell prompt selects the input and leaves out the
 `$ `.
 
-@snippet c-vt-selection/src/main.c selection-main
+```rs
+{{#include ../../../example/rust-vt-selection/src/main.rs:selection-main}}
+```
 
-Full program: @ref c-vt-selection/src/main.c
+Full program: [rust-vt-selection/src/main.rs](/example/rust-vt-selection/src/main.rs)
 
 ### Double-click and drag
 
-Word-granular dragging needs ghostty_terminal_select_word_between(). If someone
+Word-granular dragging needs [`Terminal::select_word_between()`]. If someone
 double-clicks a word and drags across spaces or punctuation toward another word,
 selecting only the word under the pointer flickers or collapses whenever the
 pointer is between words. So ask for the nearest word between the click and the
 drag point, ask again in the other direction, and combine the two. The gesture
 API below does this for you.
 
-@snippet c-vt-selection/src/main.c selection-word-between
+```rs
+{{#include ../../../example/rust-vt-selection/src/main.rs:selection-word-between}}
+```
 
-Full program: @ref c-vt-selection/src/main.c
+Full program: [rust-vt-selection/src/main.rs](/example/rust-vt-selection/src/main.rs)
 
 ### Working with a selection
 
@@ -114,11 +116,11 @@ the terminal since. We don't check, so a stale reference is on you.
 
 | Function                              | What it does                                                                             |
 | ------------------------------------- | ---------------------------------------------------------------------------------------- |
-| ghostty_terminal_selection_adjust()   | Moves the selection's logical end, as keyboard selection does. The result is a snapshot. |
-| ghostty_terminal_selection_order()    | Tells you which way the ends are ordered.                                                |
-| ghostty_terminal_selection_ordered()  | Returns a new snapshot with the ends in the order you ask for.                           |
-| ghostty_terminal_selection_contains() | Tests whether a point is inside, for rectangular selections too.                         |
-| ghostty_terminal_selection_equal()    | Tests whether two selections have the same ends and shape.                               |
+| [`Selection::adjust()`]   | Moves the selection's logical end, as keyboard selection does. The result is a snapshot. |
+| [`Selection::order()`]    | Tells you which way the ends are ordered.                                                |
+| [`Selection::to_ordered()`]  | Returns a new snapshot with the ends in the order you ask for.                           |
+| [`Selection::contains()`] | Tests whether a point is inside, for rectangular selections too.                         |
+| [`Selection::equals()`]    | Tests whether two selections have the same ends and shape.                               |
 
 ## Mouse gestures {#guide-selection-gestures}
 
@@ -126,93 +128,82 @@ A selection gesture is a state machine that turns pointer events into
 selections. It handles click counts, dragging, and what each click count
 selects. You feed it events and it hands back snapshots.
 
-Create one GhosttySelectionGesture per stream of pointer events with
-ghostty_selection_gesture_new(). It isn't bound to a terminal, so the functions
-that need one take it as an argument. Then create a GhosttySelectionGestureEvent
-for each event type you use with ghostty_selection_gesture_event_new(). The type
-is fixed, but the object is reusable: change its options with
-ghostty_selection_gesture_event_set() and apply it with
-ghostty_selection_gesture_event().
+Create one [`Gesture`] per stream of pointer events with
+[`Gesture::new()`]. It isn't bound to a terminal, so the functions
+that need one take it as an argument. Then create a gesture event
+for each event type you use with its corresponding `new` function,
+(e.g. [`PressEvent::new()`]). The type is fixed, but the
+object is reusable: change its options with the various setters
+ and apply it with the corresponding `apply()` method (e.g.
+[`PressEvent::apply()`]).
 
-| Event type                                            | Required options   | Optional                                |
+| Event type                                            | `apply` arguments | Optional                                |
 | ----------------------------------------------------- | ------------------ | --------------------------------------- |
-| #GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_PRESS           | Ref                | The rest use their defaults.            |
-| #GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DRAG            | Ref, geometry      | Position, rectangle, word boundaries.   |
-| #GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_RELEASE         | None               | Ref. Unset means it wasn't over a cell. |
-| #GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_AUTOSCROLL_TICK | Viewport, geometry | Position, rectangle, word boundaries.   |
-| #GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_DEEP_PRESS      | None               | Word boundaries.                        |
+| [`PressEvent`]           | Ref                | The rest use their defaults.            |
+| [`DragEvent`]            | Ref, geometry      | Position, rectangle, word boundaries.   |
+| [`ReleaseEvent`]         | None               | Ref. Unset means it wasn't over a cell. |
+| [`AutoscrollTickEvent`] | Viewport, geometry | Position, rectangle, word boundaries.   |
+| [`DeepPressEvent`]      | None               | Word boundaries.                        |
 
-A press only gets repeat clicks if you give it
-#GHOSTTY_SELECTION_GESTURE_EVENT_OPT_TIME_NS. Without a time, only single-click
-behavior is available. By default a single click selects by cell, a double click
-by word and a triple click by line. Change that with
-#GHOSTTY_SELECTION_GESTURE_EVENT_OPT_BEHAVIORS, which can also select command
-output.
+A press only gets repeat clicks if you call [`PressEvent::set_time()`].
+Without a time, only single-click behavior is available. By default a single
+click selects by cell, a double click by word and a triple click by line.
+Change that with [`PressEvent::set_behaviors()`], which can also
+select command output.
 
-#GHOSTTY_NO_VALUE from ghostty_selection_gesture_event() isn't an error. It
-means this event doesn't produce a selection right now, as with a normal single
-press. A release never produces one. When you do get a selection, it isn't
-installed anywhere. You decide whether to draw it, copy it, or install it as the
-terminal's selection.
+Getting `Ok(None)` from `apply()` isn't an error. It means this event doesn't
+produce a selection right now, as with a normal single press. A release never
+produces one, and in fact always returns a `Ok(())` when successful. When you
+do get a selection, it isn't installed anywhere. You decide whether to draw it,
+copy it, or install it as the terminal's selection.
 
-@snippet c-vt-selection-gesture/src/main.c selection-gesture-main
+```rs
+{{#include ../../../example/rust-vt-selection-gesture/src/main.rs:selection-gesture-main}}
+```
 
-Full program: @ref c-vt-selection-gesture/src/main.c
+Full program: [rust-vt-selection-gesture/src/main.rs](/example/rust-vt-selection-gesture/src/main.rs)
 
 ### Dragging past the edge
 
 When a drag reaches the top or bottom of the surface, the gesture wants the
-viewport to scroll. Read #GHOSTTY_SELECTION_GESTURE_DATA_AUTOSCROLL after each
-drag. While it's up or down, run a timer of your own that sends
-#GHOSTTY_SELECTION_GESTURE_EVENT_TYPE_AUTOSCROLL_TICK events. Each tick scrolls
-the viewport one row and continues the drag. The interval is up to you, and
-about 15 milliseconds is a reasonable default. Scroll faster by ticking faster.
-If a tick returns #GHOSTTY_NO_VALUE, the gesture has cancelled itself, so stop
-the timer.
+viewport to scroll. Read [`Gesture::autoscroll()`] after each drag. While it's
+up or down, run a timer of your own that sends [`AutoscrollTickEvent`]
+events. Each tick scrolls the viewport one row and continues the drag.
+The interval is up to you, and about 15 milliseconds is a reasonable default.
+Scroll faster by ticking faster. If a tick returns [`Autoscroll::None`],
+the gesture has cancelled itself, so stop the timer.
 
 ### Rules for gestures
 
 Calls that use a gesture aren't safe to run concurrently, and they have to be
 serialized with changes to the terminal.
 
-ghostty_selection_gesture_reset() cancels the current click sequence and
+[`Gesture::reset()`] cancels the current click sequence and
 releases the gesture's tracked state without freeing it.
-
-Free a gesture with ghostty_selection_gesture_free(), passing the terminal you
-last used with it. If that terminal is already gone, pass `NULL`.
 
 ## Copying it out {#guide-selection-copying}
 
-A selection names cells. To get the text, use a @ref formatter "formatter" with
-#GHOSTTY_FORMATTER_OPT_SELECTION. For the same text Ghostty puts on the
-clipboard, use plain output with #GHOSTTY_FORMATTER_OPT_UNWRAP and
-#GHOSTTY_FORMATTER_OPT_TRIM both true:
+A selection names cells. To get the text, use a [formatter](Formatter) with
+[`Formatter::set_selection`]. For the same text Ghostty puts on the
+clipboard, use plain output with [`Formatter::set_unwrap`] and
+[`Formatter::set_trim`] both true:
 
-```c
-GhosttySelection selection = {0};
-if (ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_SELECTION,
-                         &selection) != GHOSTTY_SUCCESS) {
-  return;
-}
+```rs
+use libghostty_vt::{fmt::{Format, Formatter}};
 
-GhosttyFormatter formatter;
-ghostty_formatter_terminal_new(NULL, &formatter, terminal);
+let Some(selection) = terminal.selection()? else {
+    return;
+};
 
-GhosttyFormatterFormat emit = GHOSTTY_FORMATTER_FORMAT_PLAIN;
-bool yes = true;
-ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_EMIT, &emit);
-ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_UNWRAP, &yes);
-ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_TRIM, &yes);
-ghostty_formatter_set(formatter, GHOSTTY_FORMATTER_OPT_SELECTION, &selection);
+let mut formatter = Formatter::new(&terminal)?;
+formatter
+    .set_format(Format::Plain)?
+    .set_unwrap(true)?
+    .set_trim(true)?
+    .set_selection(Some(selection))?;
 
-uint8_t *buf = NULL;
-size_t len = 0;
-ghostty_formatter_format_alloc(formatter, NULL, &buf, &len);
-
+let buf = formatter.format_alloc(None);
 // Put buf on the clipboard.
-
-ghostty_free(NULL, buf, len);
-ghostty_formatter_free(formatter);
 ```
 
 The formatter keeps its own copy of the selection, but that copy is still only

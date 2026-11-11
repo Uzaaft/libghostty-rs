@@ -519,6 +519,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_selection_gesture"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_stream"
 version = "0.0.0"
 dependencies = [

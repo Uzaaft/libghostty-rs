@@ -52,10 +52,9 @@ Some handles you create still point at a terminal, and it matters which one you
 drop first:
 
 - A [`Formatter`] borrows its terminal. The terminal must outlive the formatter.
-- A [`Search`] or a [`TrackedGridRef`](grid_ref::TrackedGridRef) can
-  outlive its terminal. If the terminal is dropped first, a search fails cleanly on
-  any call that needs the terminal, a tracked reference reports no value, and you can
-  still drop both.
+- A [`Search`] or a [`TrackedGridRef`] can outlive its terminal. If the terminal
+  is dropped first, a search fails cleanly on any call that needs the terminal,
+  a tracked reference reports no value, and you can still drop both.
 
 Memory works the same way as handles. [`Bytes`] represents a buffer
 the library allocates for you, such as the output of [`fmt::Formatter::format_alloc()`]
