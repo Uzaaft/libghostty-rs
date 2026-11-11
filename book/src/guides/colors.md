@@ -30,9 +30,11 @@ The palette is a little different. Passing `None` resets it to the built-in
 default palette, and setting it keeps any per-index overrides that programs have
 applied. Only the unmodified indices are updated.
 
-@snippet c-vt-colors/src/main.c colors-set-defaults
+```rs
+{{#include ../../../example/rust-vt-colors/src/main.rs:colors-set-defaults}}
+```
 
-Full program: @ref c-vt-colors/src/main.c
+Full program: [rust-vt-colors/src/main.rs](/example/rust-vt-colors/src/main.rs)
 
 ## Reading colors {#guide-colors-reading}
 
@@ -56,16 +58,20 @@ there's neither a default nor an override. So handle that case, because a new
 terminal starts with these unset. The palette getters always succeed, since the
 palette always has a value. If nothing else is set, it's the built-in default.
 
-@snippet c-vt-colors/src/main.c colors-read
+```rs
+{{#include ../../../example/rust-vt-colors/src/main.rs:colors-read}}
+```
 
-Full program: @ref c-vt-colors/src/main.c
+Full program: [rust-vt-colors/src/main.rs](/example/rust-vt-colors/src/main.rs)
 
 Here are the two layers working together. A program overrides the foreground
 with OSC 10, and then clearing the default leaves the override in place.
 
-@snippet c-vt-colors/src/main.c colors-main
+```rs
+{{#include ../../../example/rust-vt-colors/src/main.rs:colors-main}}
+```
 
-Full program: @ref c-vt-colors/src/main.c
+Full program: [rust-vt-colors/src/main.rs](/example/rust-vt-colors/src/main.rs)
 
 ## Parsing colors {#guide-colors-parsing}
 
@@ -83,19 +89,25 @@ strings as Ghostty's config and theme files, and none of them need a terminal.
 Leading and trailing spaces and tabs are ignored. Use [`Rgb::parse_x11_color`]
 when you only want to accept X11 names.
 
+The [`FromStr`](std::str::FromStr) implementation on `Rgb` is identical to
+[`Rgb::parse`], so you may use it instead if you have a color string.
+
 ```rs
 let color = match Rgb::parse("ForestGreen") {
     Ok(color) => color,
     Err(e) => { /* Handle invalid color input. */ },
 };
 
-let color = Rgb::parse("#abc").unwrap();
-let color = Rgb::parse("rgb:12/34/56").unwrap();
+// ASCII byte strings are also accepted
+let color = Rgb::parse(b"#abc").unwrap();
+
+// Using `str::parse` / `FromStr::from_str` with XParseColor-style colors
+let color = "rgb:12/34/56".parse::<Rgb>().unwrap();
 ```
 
-[`X11ColorNames::new`] returns the table of X11 names, if you want to offer
+[`X11ColorNames::new()`] returns the table of X11 names, if you want to offer
 them to someone. The table is static memory that lives as long as the program.
-Entries are in rgb.txt order. [`X11ColorNames::len`] returns the number of entries.
+Entries are in rgb.txt order. [`X11ColorNames::len()`] returns the number of entries.
 
 ```rs
 // X11ColorNames implements IntoIterator, so you can directly use a for-loop
@@ -106,10 +118,10 @@ for name in X11ColorNames::new() {
 
 ## Palettes {#guide-colors-palettes}
 
-[`Palette::default`] gives you the same 256-color palette the
-terminal uses by default. [`Palette::parse_palette_entry`] parses one Ghostty
+[`Palette::default()`] gives you the same 256-color palette the
+terminal uses by default. [`Palette::parse_palette_entry()`] parses one Ghostty
 palette override in `INDEX=COLOR` form. The index can be decimal or use a `0x`,
-`0o` or `0b` prefix, and the color side accepts anything [`Rgb::parse`]
+`0o` or `0b` prefix, and the color side accepts anything [`Rgb::parse()`]
 does.
 
 ```rs
@@ -119,7 +131,7 @@ if let Some((index, rgb)) = Palette::parse_palette_entry("0x10=#282c34") {
 }
 ```
 
-[`Palette::generate`] derives the 216-color cube and the grayscale
+[`Palette::generate()`] derives the 216-color cube and the grayscale
 ramp from a base palette, a background and a foreground, so they match the
 theme. Set bits in a [`PaletteMask`] to keep specific indices from the
 base palette.
@@ -141,8 +153,8 @@ let new_palette = Palette::generate(
 );
 ```
 
-If your UI needs to make decisions from a color, [`Rgb::luminance`],
-[`Rgb::perceived_luminance`] and [`Rgb::contrast`] give you the
+If your UI needs to make decisions from a color, [`Rgb::luminance()`],
+[`Rgb::perceived_luminance()`] and [`Rgb::contrast()`] give you the
 luminance and contrast values.
 
 ## Light and dark reports {#guide-colors-scheme}
@@ -151,20 +163,21 @@ Programs want to know if your terminal is light or dark, so they can pick colors
 that fit. There are two ways they find out.
 
 A program can ask with `CSI ? 996 n`. Register a callback with
-[`Terminal::on_color_scheme`] and fill in the current scheme, or
+[`Terminal::on_color_scheme()`] and fill in the current scheme, or
 return `false` to ignore the query. See [Effects](effects.md).
 
-Or a program can set mode 2031 and expect you to tell it when the scheme
-changes. For this one, encode the report yourself with
-ghostty_color_scheme_report_encode() and write it to the pty. Only send it if
-[`Mode::COLOR_SCHEME_REPORT`] is set, which you read with
-ghostty_terminal_get() and `GHOSTTY_TERMINAL_DATA_MODE`. Dark schemes encode as
-`ESC [ ? 997 ; 1 n` and light schemes as `ESC [ ? 997 ; 2 n`, which are the same
-bytes as the terminal's reply to the query.
+Or a program can set mode 2031 and expect you to tell it when the scheme changes.
+For this one, encode the report yourself with [`ColorScheme::encode()`]
+and write it to the pty. Only send it if [`Mode::COLOR_SCHEME_REPORT`] is set,
+which you read with [`Terminal::mode()`]. Dark schemes encode as `ESC [ ? 997 ; 1 n`
+and light schemes as `ESC [ ? 997 ; 2 n`, which are the same bytes as the terminal's
+reply to the query.
 
 If your buffer is too small, the function returns [`Error::OutOfSpace`] and
 sets the output parameter to the size it needs.
 
-@snippet c-vt-color-scheme/src/main.c color-scheme-report-encode
+```rs
+{{#include ../../../example/rust-vt-color-scheme/src/main.rs:color-scheme-report-encode}}
+```
 
-Full program: @ref c-vt-color-scheme/src/main.c
+Full program: [rust-vt-color-scheme/src/main.rs](/example/rust-vt-color-scheme/src/main.rs)
