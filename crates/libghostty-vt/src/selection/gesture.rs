@@ -211,7 +211,7 @@ impl Event<'_> {
 
         // SAFETY: We trust that libghostty will give us a
         // selection object with correct lifetimes.
-        Ok(selection.map(|v| unsafe { Selection::from_raw(v) }))
+        Ok(selection.map(|v| unsafe { Selection::from_raw(terminal.inner.as_raw(), v) }))
     }
 }
 impl Drop for Event<'_> {

@@ -1364,7 +1364,7 @@ impl<'t> PlacementIteration<'t, '_> {
         // their pages. `terminal` is borrowed for `'t`, so it can't be
         // mutated (which would invalidate these untracked grid refs) while
         // the selection is alive, so the selection is bound by `'t`.
-        Ok(sel.map(|sel| unsafe { Selection::from_raw(sel) }))
+        Ok(sel.map(|sel| unsafe { Selection::from_raw(terminal.inner.as_raw(), sel) }))
     }
 
     /// Get all of the geometry of the current placement in one call.

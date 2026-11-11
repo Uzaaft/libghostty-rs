@@ -459,7 +459,8 @@ impl Snapshot<'_, '_, '_> {
         };
         // SAFETY: The selection points into terminal pages, which cannot
         // change while this snapshot borrows the terminal.
-        Ok(from_optional_result(result, raw)?.map(|raw| unsafe { Selection::from_raw(raw) }))
+        Ok(from_optional_result(result, raw)?
+            .map(|raw| unsafe { Selection::from_raw(self.search.terminal, raw) }))
     }
 
     fn read_matches<'s>(
@@ -496,6 +497,7 @@ impl Snapshot<'_, '_, '_> {
             // read. On success libghostty wrote `len <= cap` entries.
             let values = &storage.inner[..buffer.len];
             return Ok(Matches {
+                terminal: self.search.terminal,
                 inner: values.iter(),
             });
         }
@@ -574,6 +576,7 @@ impl MatchBuffer {
 /// ```
 #[derive(Debug)]
 pub struct Matches<'s> {
+    terminal: ffi::Terminal,
     inner: std::slice::Iter<'s, ffi::Selection>,
 }
 
@@ -586,7 +589,7 @@ impl<'s> Iterator for Matches<'s> {
         // snapshot is borrowed for `'s`.
         self.inner
             .next()
-            .map(|raw| unsafe { Selection::from_raw(*raw) })
+            .map(|raw| unsafe { Selection::from_raw(self.terminal, *raw) })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -599,7 +602,7 @@ impl DoubleEndedIterator for Matches<'_> {
         // SAFETY: Ditto
         self.inner
             .next_back()
-            .map(|raw| unsafe { Selection::from_raw(*raw) })
+            .map(|raw| unsafe { Selection::from_raw(self.terminal, *raw) })
     }
 }
 
