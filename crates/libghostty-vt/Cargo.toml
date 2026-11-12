@@ -14,7 +14,7 @@ kitty-graphics = ["libghostty-vt-sys/kitty-graphics"]
 png = ["dep:png"]
 log = ["dep:log"]
 link-dynamic = ["libghostty-vt-sys/link-dynamic"]
-pkg-config = ["libghostty-vt-sys/pkg-config"]
+vendored = ["libghostty-vt-sys/vendored"]
 tracing = ["dep:tracing"]
 
 [dependencies]

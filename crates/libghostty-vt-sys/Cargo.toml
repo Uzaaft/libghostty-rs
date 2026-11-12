@@ -13,9 +13,8 @@ build = "build.rs"
 doctest = false
 
 [features]
-default = ["vendored"]
-vendored = []
-pkg-config = ["dep:pkg-config"]
+default = []
+vendored = ["dep:ureq", "dep:sha2", "dep:flate2", "dep:tar"]
 link-dynamic = []
 bindgen-tool = ["dep:bindgen", "dep:libc", "dep:heck", "dep:syn", "dep:quote"]
 kitty-graphics = []
@@ -28,7 +27,11 @@ syn = {version = "2", features = ["full"], optional = true}
 quote = {version = "1", optional = true}
 
 [build-dependencies]
-pkg-config = { version = "0.3", optional = true }
+pkg-config = "0.3"
+ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
+sha2 = { version = "0.10", optional = true }
+flate2 = { version = "1", optional = true }
+tar = { version = "0.4", optional = true }
 
 [[bin]]
 name = "gen-bindings"
