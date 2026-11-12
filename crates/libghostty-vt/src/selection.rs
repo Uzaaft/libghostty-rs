@@ -95,7 +95,7 @@ impl<'t> Selection<'t> {
     /// Whether the endpoints are interpreted as a rectangular/block
     /// selection rather than a linear selection.
     #[must_use]
-    pub fn is_rectangle(&self) -> bool {
+    pub fn rectangle(&self) -> bool {
         self.inner.rectangle
     }
 
@@ -107,10 +107,10 @@ impl<'t> Selection<'t> {
     /// install it as the terminal-owned selection if desired.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn adjust(&mut self, terminal: &'t Terminal<'_, '_>, adjustment: Adjustment) -> Result<()> {
+    pub fn adjust(&mut self, adjustment: Adjustment) -> Result<()> {
         let result = unsafe {
             ffi::ghostty_terminal_selection_adjust(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw mut self.inner,
                 adjustment.into(),
             )
@@ -124,11 +124,11 @@ impl<'t> Selection<'t> {
     /// rectangular/block selections and linear selections spanning multiple rows.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn contains(&self, terminal: &'t Terminal<'_, '_>, point: Point) -> Result<bool> {
+    pub fn contains(&self, point: Point) -> Result<bool> {
         let mut contains = false;
         let result = unsafe {
             ffi::ghostty_terminal_selection_contains(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw const self.inner,
                 point.into(),
                 &raw mut contains,
@@ -145,11 +145,11 @@ impl<'t> Selection<'t> {
     /// state. This avoids requiring callers to compare raw [`GridRef`] internals.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn equals(&self, terminal: &'t Terminal<'_, '_>, other: &Self) -> Result<bool> {
+    pub fn equals(&self, other: &Self) -> Result<bool> {
         let mut equal = false;
         let result = unsafe {
             ffi::ghostty_terminal_selection_equal(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw const self.inner,
                 &raw const other.inner,
                 &raw mut equal,
@@ -162,12 +162,12 @@ impl<'t> Selection<'t> {
     /// Get the current endpoint ordering of a selection snapshot.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn order(&self, terminal: &'t Terminal<'_, '_>) -> Result<Order> {
+    pub fn order(&self) -> Result<Order> {
         let mut order = ffi::SelectionOrder::FORWARD;
 
         let result = unsafe {
             ffi::ghostty_terminal_selection_order(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw const self.inner,
                 &raw mut order,
             )
@@ -185,18 +185,18 @@ impl<'t> Selection<'t> {
     /// the terminal's current selection.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn to_ordered(&self, terminal: &'t Terminal<'_, '_>, desired: Order) -> Result<Self> {
+    pub fn to_ordered(&self, desired: Order) -> Result<Self> {
         let mut selection = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_terminal_selection_ordered(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw const self.inner,
                 desired.into(),
                 &raw mut selection,
             )
         };
         from_result(result)?;
-        Ok(unsafe { Self::from_raw(terminal.inner.as_raw(), selection) })
+        Ok(unsafe { Self::from_raw(self.terminal, selection) })
     }
 }
 
@@ -234,7 +234,15 @@ impl Terminal<'_, '_> {
         Ok(self)
     }
 
-    /// Derive a selection snapshot between two grid references.
+    /// Create a new selection between two endpoints.
+    ///
+    /// Both endpoints are inclusive. The endpoints preserve selection direction
+    /// and may be reversed; callers must not assume that start is the top-left
+    /// endpoint or that end is the bottom-right endpoint.
+    ///
+    /// When `rectangle` is false, the endpoints describe a linear selection. When
+    /// `rectangle` is true, the same endpoints are interpreted as opposite corners
+    /// of a rectangular/block selection.
     ///
     /// This is an alias of [`Selection::new`], albeit slightly simpler to write.
     ///

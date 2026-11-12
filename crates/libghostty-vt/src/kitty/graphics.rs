@@ -1311,8 +1311,8 @@ impl<'t> PlacementIteration<'t, '_> {
     ///
     /// Uses the placement's pin, the image dimensions, and the terminal's
     /// cell/pixel geometry to calculate the bounding rectangle. The rectangle
-    /// is returned as a [`Selection`] with
-    /// [`is_rectangle`](Selection::is_rectangle) set to `true`.
+    /// is returned as a [`Selection`] with [`rectangle`](Selection::rectangle)
+    /// set to `true`.
     ///
     /// Returns `None` if it is a virtual placement (unicode placeholder) or
     /// relative to one, if its pin was garbage collected, if it covers no
