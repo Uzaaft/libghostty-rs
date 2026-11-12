@@ -363,7 +363,7 @@ fn warn_unused_xcframework(lib_dir: &Path) {
 fn link_pkg_config(link_mode: LinkMode, target: &str) {
     let mut config = pkg_config::Config::new();
     let lib = match link_mode {
-        LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
+        LinkMode::Dynamic => config.statik(false).probe(link_mode.pkg_config_name()),
         LinkMode::Static => config
             .statik(true)
             .cargo_metadata(false)
@@ -377,8 +377,11 @@ fn link_pkg_config(link_mode: LinkMode, target: &str) {
         )
     });
 
-    if let LinkMode::Static = link_mode {
-        emit_static_pkg_config_metadata(&lib, target);
+    match link_mode {
+        // pkg-config emits an unqualified link directive. Specify the kind
+        // explicitly so rustc records Ghostty as a dynamic dependency.
+        LinkMode::Dynamic => println!("cargo:rustc-link-lib=dylib=ghostty-vt"),
+        LinkMode::Static => emit_static_pkg_config_metadata(&lib, target),
     }
     if let Some(include_dir) = lib.include_paths.first() {
         println!(
