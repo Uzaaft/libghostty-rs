@@ -72,16 +72,20 @@ jobs:
       # Nix SDK wrappers so zig detects the system SDKs).
       - name: Check iOS vendored build
         if: runner.os == 'macOS'
-        run: nix develop -c cargo check --locked -p libghostty-vt-sys --target aarch64-apple-ios
+        run: nix develop -c cargo check --locked -p libghostty-vt-sys --features vendored --target aarch64-apple-ios
+
+      - name: Test vendored source build
+        if: matrix.name == 'Linux x86_64'
+        run: nix develop -c cargo test --locked --workspace --all-targets --features libghostty-vt/vendored
 
       # The examples are their own workspace, so the flake checks above never
       # build them. `--locked` also fails if example/Cargo.lock is stale.
       # Use the shell's native Ghostty library instead of compiling it again.
-      # Wasm and iOS below deliberately keep exercising source builds.
+      # Wasm below deliberately keeps exercising source builds.
       - name: Build examples
         run: |
-          nix develop -c cargo build --locked --manifest-path example/Cargo.toml --workspace --features libghostty-vt/pkg-config
-          nix develop -c cargo test --locked --manifest-path example/Cargo.toml -p wasm_rs --features libghostty-vt/pkg-config
+          nix develop -c cargo build --locked --manifest-path example/Cargo.toml --workspace
+          nix develop -c cargo test --locked --manifest-path example/Cargo.toml -p wasm_rs
 
       # Link and execute Rust + Zig together. cargo check cannot catch ABI,
       # callback table, allocator, or unexpected host-import failures.
@@ -90,7 +94,7 @@ jobs:
         run: |
           nix develop -c bash -euc '
             for profile in dev release; do
-              cargo build --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm32-unknown-unknown --profile "$profile"
+              cargo build --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm32-unknown-unknown --features wasm_rs/vendored --profile "$profile"
               out="example/target/wasm32-unknown-unknown/${profile/dev/debug}"
               node example/wasm_rs/run.mjs "$out/examples/smoke.wasm" "$out/wasm_rs.wasm"
             done
@@ -101,7 +105,7 @@ jobs:
         run: |
           nix develop .#wasm64 -c bash -euc '
             for profile in dev release; do
-              cargo build -Zbuild-std=std,panic_abort --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm64-unknown-unknown --profile "$profile"
+              cargo build -Zbuild-std=std,panic_abort --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm64-unknown-unknown --features wasm_rs/vendored --profile "$profile"
               out="example/target/wasm64-unknown-unknown/${profile/dev/debug}"
               node example/wasm_rs/run.mjs "$out/examples/smoke.wasm" "$out/wasm_rs.wasm"
             done

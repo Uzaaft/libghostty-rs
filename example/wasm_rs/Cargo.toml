@@ -17,6 +17,9 @@ path = "tests/smoke.rs"
 crate-type = ["cdylib"]
 test = true
 
+[features]
+vendored = ["libghostty-vt/vendored"]
+
 [dependencies]
 libghostty-vt.workspace = true
 
