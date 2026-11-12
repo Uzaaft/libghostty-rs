@@ -33,9 +33,11 @@ input is written. If tracking is off and the VT parser and UTF-8 decoder are
 both at ground, encoding still works. If either one is unfinished, encoding
 returns [`Error::InvalidValue`].
 
-@snippet c-vt-snapshot/src/main.c snapshot-encode
+```rs
+{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-encode}}
+```
 
-Full program: @ref c-vt-snapshot/src/main.c
+Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
 
 [`Terminal::encode_snapshot()`] needs the terminal to hold still. Don't write to it or
 change it for the duration of the call, and don't call terminal functions on the
@@ -54,9 +56,11 @@ The bytes aren't copied. They have to stay valid and unchanged until FINISH is
 reached or the decoder is freed. Bytes after FINISH aren't consumed, and
 [`snapshot::Decoder::source_offset()`] tells you where they start.
 
-@snippet c-vt-snapshot/src/main.c snapshot-decode
+```rs
+{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-decode}}
+```
 
-Full program: @ref c-vt-snapshot/src/main.c
+Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
 
 ### Options
 
@@ -81,9 +85,11 @@ stays that way until you call [`Terminal::compress()`]. With the option on,
 the decode never holds more than one uncompressed history page at a time.
 The snapshot format doesn't change, so this works with any snapshot.
 
-@snippet c-vt-snapshot/src/main.c snapshot-compress-history
+```rs
+{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-compress-history}}
+```
 
-Full program: @ref c-vt-snapshot/src/main.c
+Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
 
 ### Errors
 
@@ -122,13 +128,17 @@ A successful read of zero bytes is permanent end-of-file, not temporary
 starvation. If your source is nonblocking, wait outside the decoder or block in
 your reader implementation.
 
-@snippet c-vt-snapshot/src/main.c snapshot-buffer-reader
+```rs
+{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-buffer-reader}}
+```
 
-Full program: @ref c-vt-snapshot/src/main.c
+Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
 
-@snippet c-vt-snapshot/src/main.c snapshot-incremental
+```rs
+{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-incremental}}
+```
 
-Full program: @ref c-vt-snapshot/src/main.c
+Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
 
 ### Between calls
 
