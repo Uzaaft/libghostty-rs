@@ -14,6 +14,7 @@ build.preludes = [
   "libghostty_vt::color::*",
   "libghostty_vt::fmt::Formatter",
   "libghostty_vt::grid_ref::*",
+  "libghostty_vt::kitty::graphics::{Graphics,PlacementIterator,PlacementIteration,Image}",
   "libghostty_vt::mode::Mode",
   "libghostty_vt::render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration}",
   "libghostty_vt::screen::{Cell,Row}",

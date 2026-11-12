@@ -22,10 +22,8 @@ with [`Terminal::set_kitty_image_storage_limit()`]. A limit of zero disables
 the protocol and deletes every stored image and placement. If Kitty graphics
 were disabled at build time, this option returns [`Error::Unsupported`].
 
-```c
-uint64_t storage_limit = 64 * 1024 * 1024;  // 64 MiB
-[`Terminal::set(t`]rminal, [`Terminal::OPT_KITTY_IMAGE_STORAGE_LIMIT,
-`]                     &storage_limit);
+```rs
+terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?; // 64 MiB
 ```
 
 The terminal also needs a cell size. Image sizes depend on the size of a cell in
@@ -47,7 +45,7 @@ one with [`Terminal::kitty_graphics()`]. The handle is borrowed, so see
 We don't ship a PNG decoder. You bring your own, so use whatever library you
 already have. Without one, PNG images are rejected.
 
-Install it with [`kitty::graphics::set_png_decoder`]. This is a process-global
+Install it with [`kitty::graphics::set_png_decoder()`]. This is a process-global
 setting, not a terminal one. Set it at startup, before you use anything that
 depends on it. This isn't thread-safe, so call it before any other thread uses
 the library, and never while one does. Passing `None` clears the decoder and
@@ -58,7 +56,7 @@ Pixels are 8-bit RGBA, row by row from the top-left, with no padding, so a compl
 image is `width * height * 4` bytes. Allocate them with [`Bytes::new_zeroed_with_alloc()`]
 and the allocator we pass you, and return it. We own the buffer after that.
 
-That allocator limits how much memory one image can use, so `Bytes::new_zeroed_with_alloc`
+That allocator limits how much memory one image can use, so `Bytes::new_zeroed_with_alloc()`
 can return `None` for a very large image. Treat that as a failure: free anything you
 allocated and return `None`, and the image is rejected. [`kitty::graphics::DecodePng`]
 has the rest of the contract.
@@ -66,9 +64,11 @@ has the rest of the contract.
 This example shows the shape of a decoder, but it doesn't actually decode
 anything. It hardcodes one red pixel.
 
-@snippet c-vt-kitty-graphics/src/main.c kitty-graphics-decode-png
+```rs
+{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-decode-png}}
+```
 
-Full program: @ref c-vt-kitty-graphics/src/main.c
+Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
 
 ## Drawing images {#guide-images-drawing}
 
@@ -149,9 +149,11 @@ read the image's size, pixel format and pixels with various getters on
 uncompressed, so you can upload them as they are. This example reads a list and
 prints what it would draw, including the pixels:
 
-@snippet c-vt-kitty-graphics/src/main.c kitty-graphics-draw
+```rs
+{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-draw}}
+```
 
-Full program: @ref c-vt-kitty-graphics/src/main.c
+Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
 
 The list holds every Kitty image on screen, however the program placed it.
 Earlier versions left some images out, so renderers had to draw them from the
@@ -168,8 +170,8 @@ Images shown with placeholder cells are split into one placement per row of
 cells, so each of those placements is always inside the captured rows.
 
 Every other placement is reported at its full size, even when only part of it
-can be seen. Its [`ImageIteration::viewport_col`] can be negative,
-and its [`ImageIteration::viewport_row`] can be above the first
+can be seen. Its [`ImageIteration::viewport_col()`] can be negative,
+and its [`ImageIteration::viewport_row()`] can be above the first
 overscan row. It can also extend past the right or bottom edge. So clip what you
 draw to the viewport, or to the captured rows if you draw overscan rows. Most
 graphics APIs can do this for you with a scissor or clip rectangle.
@@ -185,13 +187,13 @@ Most frames don't change any image. A program prints text or moves the cursor,
 and every image stays where it was. So a renderer can skip most of its image
 work. Two values tell you what to redo.
 
-[`Snapshot::image_placements_generation`] belongs to the render
+[`Snapshot::image_placements_generation()`] belongs to the render
 state's whole list. It tells you when to read the list again. After each update,
 compare it with the value from the last time you read the list. If they match,
 the list is the same as before, and you can keep drawing what you built last
 time:
 
-```c
+```rs
 // Kept by your renderer between frames. The flag makes sure the first
 // frame always reads the list.
 let mut last_generation = 0u64;
@@ -229,12 +231,12 @@ Only compare the value for equality, and only with the last value you read from
 the same render state. It wraps around, so a larger value doesn't mean a newer
 one. It's always 0 when Kitty graphics are disabled.
 
-#GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_GENERATION belongs to a single image. It
-tells you when to upload that image's pixels again. It changes when a program
-sends the image again and on every animation frame. The render state reports the
-same value for each entry as [`ImageIteration::image_generation`],
-so you can check your texture cache without touching the storage, and most
-frames don't touch the terminal at all.
+[`Image::generation()`] belongs to a single image. It tells you when to upload
+that image's pixels again. It changes when a program sends the image again and
+on every animation frame. The render state reports the same value for each
+entry as [`ImageIteration::image_generation()`], so you can check your texture
+cache without touching the storage, and most frames don't touch the terminal
+at all.
 
 Use the image generation as part of your texture cache key. Don't rely on the
 image's size or data length instead. A program can send new pixels with the same
@@ -242,16 +244,17 @@ size under the same ID.
 
 Here's a frame loop that reads the list only when it changed:
 
-@snippet c-vt-kitty-graphics/src/main.c kitty-graphics-frame
+```rs
+{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-frame}}
+```
 
-Full program: @ref c-vt-kitty-graphics/src/main.c
+Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
 
-The storage also has a generation of its own,
-#GHOSTTY_KITTY_GRAPHICS_DATA_GENERATION. It changes whenever a program sends,
-places or deletes an image, but not when images only move on screen. So it can't
-tell you when to read the render state's list again. It's useful for work that
-only depends on what the storage holds, such as freeing the textures of deleted
-images.
+The storage also has a generation of its own, [`Graphics::generation()`].
+It changes whenever a program sends, places or deletes an image, but not when
+images only move on screen. So it can't tell you when to read the render state's
+list again. It's useful for work that only depends on what the storage holds,
+such as freeing the textures of deleted images.
 
 The two storage generations are never reused, not even across the main and
 alternate screens, terminal resets, or different terminals. That makes either
@@ -261,7 +264,7 @@ one safe to use as a cache key on its own.
 
 You draw every placement the same way, so you can skip the next three sections
 unless you're curious how a list entry got there, or you're reading
-[`ImageIteration::kitty_kind`].
+[`ImageIteration::kitty_kind()`].
 
 A program can place an image at a cell on the screen. The image is attached to
 that cell, so it moves when the text moves: when new output scrolls the screen,
@@ -317,25 +320,22 @@ list when any part of it is in the captured rows, even if its parent isn't.
 
 Programs can send images with several frames and ask the terminal to play them,
 much like an animated GIF. The terminal stores every frame, but it has no timer
-of its own. You drive playback by calling
-ghostty_kitty_graphics_animation_tick().
+of its own. You drive playback by calling [`Terminal::kitty_graphics_animation_tick()`].
 
 Each call shows whichever frame is due at the time you pass in. When an image
-moves to a new frame, #GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_PIXELS returns the
-pixels of the new frame and #GHOSTTY_KITTY_GRAPHICS_IMAGE_DATA_GENERATION
-returns a new value. If you already cache textures by image generation, new
-frames appear without any extra work.
+moves to a new frame, [`Image::data()`] returns the pixels of the new frame and
+[`Image::generation()`] returns a new value. If you already cache textures by
+image generation, new frames appear without any extra work.
 
 The tick also tells you when the next frame is due. Use that time to schedule a
 single redraw instead of calling the tick in a loop:
 
 1. Call the tick each time you prepare a frame to draw, as long as the storage
    holds at least one image.
-2. If it returns `GHOSTTY_SUCCESS`, schedule one redraw at the returned time.
+2. If it returns `Ok(time)`, schedule one redraw at the returned time.
    Don't schedule it sooner than your shortest frame interval, for example 8 ms
    for a 120 Hz display.
-3. If it returns `GHOSTTY_NO_VALUE`, nothing is playing. Don't schedule
-   anything.
+3. If it returns `None`, nothing is playing. Don't schedule anything.
 
 You never need to watch for animations starting. A program starts or resumes
 playback by writing a command to the terminal, and that write already gives you
@@ -345,47 +345,49 @@ with no playing animations costs nothing extra.
 Here's a helper that follows these steps. A renderer calls it once per frame and
 uses the result to schedule the next redraw:
 
-@snippet c-vt-kitty-graphics/src/main.c kitty-graphics-animation-tick
+```rs
+{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-animation-tick}}
+```
 
-Full program: @ref c-vt-kitty-graphics/src/main.c
+Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
 
 This plays a two-frame animation with that helper. It uses a pretend clock so
 that it runs instantly:
 
-@snippet c-vt-kitty-graphics/src/main.c kitty-graphics-animation-play
+```rs
+{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-animation-play}}
+```
 
-Full program: @ref c-vt-kitty-graphics/src/main.c
+Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
 
 ## Inspecting the storage {#guide-images-inspecting}
 
-A renderer doesn't need this section. A GhosttyKittyGraphicsPlacementIterator
+A renderer doesn't need this section. A [`kitty::graphics::PlacementIterator`]
 lists every placement in the storage, including placements that are off screen
 and virtual placements. It's for tools such as debuggers or tests that need to
 see what the storage holds.
 
-1. Create an iterator with ghostty_kitty_graphics_placement_iterator_new().
-2. Fill it from the storage with ghostty_kitty_graphics_get() and
-   #GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR.
-3. Optionally limit it to one layer with
-   ghostty_kitty_graphics_placement_iterator_set().
-4. Move to each placement with ghostty_kitty_graphics_placement_next() and read
-   its values with ghostty_kitty_graphics_placement_get().
-5. Free the iterator with ghostty_kitty_graphics_placement_iterator_free().
+1. Create an iterator with [`PlacementIterator::new()`].
+2. Fill it from the storage with [`PlacementIterator::update`] and obtain a
+   [`PlacementIteration`].
+3. Optionally limit it to one layer with [`PlacementIteration::set_layer()`].
+4. Move to each placement with [`PlacementIteration::next()`] and read
+   its values with the various getters.
 
 These functions work out the geometry of the iterator's current placement from
 the storage:
 
-- ghostty_kitty_graphics_placement_pixel_size(): the size to draw the image at,
+- [`PlacementIteration::pixel_size()`]: the size to draw the image at,
   in pixels.
-- ghostty_kitty_graphics_placement_grid_size(): the number of columns and rows
+- [`PlacementIteration::grid_size()`]: the number of columns and rows
   of cells it covers.
-- ghostty_kitty_graphics_placement_viewport_pos(): the top-left cell, relative
+- [`PlacementIteration::viewport_pos()`]: the top-left cell, relative
   to the viewport.
-- ghostty_kitty_graphics_placement_source_rect(): the part of the image to draw,
+- [`PlacementIteration::source_rect()`]: the part of the image to draw,
   in image pixels.
-- ghostty_kitty_graphics_placement_rect(): the cells it covers, as a
+- [`PlacementIteration::rect()`]: the cells it covers, as a
   GhosttySelection.
-- ghostty_kitty_graphics_placement_render_info(): all of the above except the
+- [`PlacementIteration::render_info()`]: all of the above except the
   selection, in one call.
 
 They only know about placements at a cell and placements relative to one. They
@@ -400,12 +402,11 @@ Everything borrowed from the terminal is short-lived. [`kitty::Graphics`] and
 the terminal, such as [`Terminal::vt_write()`] or [`Terminal::reset()`].
 So get them again after each of those.
 
-ghostty_kitty_graphics_animation_tick() changes the storage too. It invalidates
-image handles and image data pointers, so look images up again afterward. The
-GhosttyKittyGraphics handle itself stays valid.
+[`Terminal::kitty_graphics_animation_tick()`] changes the storage too. It invalidates
+image handles and image data slices, so look images up again afterward.
 
-The placement iterator belongs to you and you must free it, but the values it
-returns are only valid until the terminal changes.
+The placement iterator belongs to you, but the values it returns are only valid
+until the terminal changes.
 
 ## Putting it together {#guide-images-example}
 
@@ -413,6 +414,8 @@ This creates a terminal, places one image at a cell and another with placeholder
 cells, lists both from the render state, and reads each image's pixels from the
 storage.
 
-@snippet c-vt-kitty-graphics/src/main.c kitty-graphics-main
+```rs
+{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-main}}
+```
 
-Full program: @ref c-vt-kitty-graphics/src/main.c
+Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
