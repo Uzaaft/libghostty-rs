@@ -498,6 +498,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_kitty_graphics"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_paste"
 version = "0.0.0"
 dependencies = [

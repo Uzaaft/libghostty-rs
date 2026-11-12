@@ -774,11 +774,7 @@ impl Terminal<'_, '_> {
     /// the same clock as `now_ms`, if an animation is playing. Returns `None`
     /// if nothing is playing or Kitty graphics are disabled at build time.
     //
-    // This lives on `Terminal` rather than `Graphics` on purpose: upstream
-    // takes the storage handle, but `Graphics` and the `Image`s and pixel
-    // slices it hands out all borrow the terminal immutably, and any number of
-    // them can exist at once. Taking `&mut self` here is what lets the borrow
-    // checker guarantee none of them survive the tick that invalidates them.
+    // FIXME: This API is unacceptable.
     pub fn kitty_graphics_animation_tick(&mut self, now_ms: u64) -> Result<Option<u64>> {
         // Not `Terminal::kitty_graphics`: we only need the raw handle, not a
         // `Graphics` wrapper. When Kitty graphics are disabled in the Zig
@@ -1382,7 +1378,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// The call succeeds even when the placement isn't in the viewport.
     /// Check `viewport_visible` before using `viewport_col` and
     /// `viewport_row`.
-    pub fn placement_render_info(
+    pub fn render_info(
         &self,
         image: &Image<'t>,
         terminal: &'t Terminal<'_, '_>,
