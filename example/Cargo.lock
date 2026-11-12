@@ -442,6 +442,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_compression"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_effects"
 version = "0.0.0"
 dependencies = [

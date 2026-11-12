@@ -1035,7 +1035,7 @@ impl<'alloc> Input<'alloc> {
                 // for a comfortable pace.  Delta is negative to scroll
                 // up (into history), positive to scroll down.
                 let scroll_delta: isize = (wheel_y * -2.5) as isize;
-                terminal.scroll_viewport(ScrollViewport::Delta(scroll_delta));
+                terminal.scroll_viewport(ScrollViewport::Delta(scroll_delta))?;
             }
         }
         Ok(())

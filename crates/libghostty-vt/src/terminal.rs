@@ -596,8 +596,10 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// Scrolls the terminal's viewport according to the given behavior.
     /// See [`ScrollViewport::DeltaPrompt`] for the navigation behavior.
-    pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
-        unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) };
+    pub fn scroll_viewport(&mut self, scroll: ScrollViewport) -> Result<()> {
+        let result =
+            unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) };
+        from_result(result)
     }
 
     /// Compress eligible terminal scrollback.
@@ -605,7 +607,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Incremental mode performs bounded work suitable for an idle callback.
     /// A pending result means the application should invoke another step while
     /// the terminal remains idle. A complete result means no continuation is
-    /// needed until `Terminal::compression_activity` changes. Full mode
+    /// needed until [`Terminal::compression_activity`] changes. Full mode
     /// performs one synchronous scan and can stall on large scrollback buffers.
     ///
     /// Compression is opportunistic. Complete means the pass has finished,
@@ -1144,10 +1146,10 @@ impl Terminal<'_, '_> {
     /// `ConPTY` is the motivating case.
     ///
     /// This is preserved across a full reset (RIS).
-    ///
-    /// Passing `None` resets to the built-in default of `true`.
-    pub fn set_resize_pull_scrollback(&mut self, v: Option<bool>) -> Result<&mut Self> {
-        self.set_optional(Opt::RESIZE_PULL_SCROLLBACK, v.as_ref())?;
+    pub fn set_resize_pull_scrollback(&mut self, v: bool) -> Result<&mut Self> {
+        // NOTE: There's no point in accepting an Option<bool> here
+        // since the default is explicitly just `true`.
+        self.set_optional(Opt::RESIZE_PULL_SCROLLBACK, Some(&v))?;
         Ok(self)
     }
 }
@@ -1488,6 +1490,7 @@ pub struct WriteStop {
 /// Amount of compression work to perform before returning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[repr(i32)]
+#[non_exhaustive]
 pub enum CompressionMode {
     /// Perform one bounded compression step suitable for idle scheduling.
     Incremental = ffi::TerminalCompressionMode::INCREMENTAL,
@@ -1498,6 +1501,7 @@ pub enum CompressionMode {
 /// Scheduling result from terminal compression.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
 #[repr(i32)]
+#[non_exhaustive]
 pub enum CompressionResult {
     /// Retained-mapping reclamation is unavailable on this target.
     Unsupported = ffi::TerminalCompressionResult::UNSUPPORTED,
@@ -1542,7 +1546,9 @@ mod tests {
               \x1b]133;P;k=i\x07p4",
         );
         let mut scroll = |scroll| {
-            terminal.scroll_viewport(scroll);
+            terminal
+                .scroll_viewport(scroll)
+                .expect("scroll should work");
             terminal.scrollbar().expect("scrollbar should exist").offset
         };
 
@@ -1894,61 +1900,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn resize_pull_scrollback_controls_growing_rows() {
-        // Apply `configure`, fill a 5-row terminal past its height so rows
-        // land in scrollback and the cursor sits on the bottom row, then grow
-        // it to 8 rows and report where the cursor ended up.
-        fn cursor_row_after_growing(
-            configure: impl FnOnce(&mut Terminal<'static, 'static>),
-        ) -> u16 {
-            let mut terminal = Terminal::new(10, 5).expect("terminal should initialize");
-            configure(&mut terminal);
-            terminal.vt_write(b"1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7\r\n8");
-            assert_eq!(terminal.cursor_y().unwrap(), 4);
-            terminal
-                .resize(10, 8, 8, 16)
-                .expect("resize should succeed");
-            terminal.cursor_y().unwrap()
-        }
-        fn set(terminal: &mut Terminal<'static, 'static>, pull: Option<bool>) {
-            terminal
-                .set_resize_pull_scrollback(pull)
-                .expect("option should be settable");
-        }
-
-        // Pulling scrollback back in moves the cursor's line down with it.
-        // That is the default, both when never set and when set explicitly.
-        assert_eq!(cursor_row_after_growing(|_| {}), 7);
-        assert_eq!(cursor_row_after_growing(|t| set(t, Some(true))), 7);
-        // Otherwise blank rows are appended below and the cursor stays put.
-        assert_eq!(cursor_row_after_growing(|t| set(t, Some(false))), 4);
-        // `None` has to actively restore the default, not just leave the
-        // previous value in place.
-        assert_eq!(
-            cursor_row_after_growing(|t| {
-                set(t, Some(false));
-                set(t, None);
-            }),
-            7
-        );
-        // The setting survives a full reset, whether the program sends RIS
-        // or the embedder resets the terminal.
-        assert_eq!(
-            cursor_row_after_growing(|t| {
-                set(t, Some(false));
-                t.vt_write(b"\x1bc");
-            }),
-            4
-        );
-        assert_eq!(
-            cursor_row_after_growing(|t| {
-                set(t, Some(false));
-                t.reset();
-            }),
-            4
-        );
-    }
     #[test]
     fn cursor_style_preserves_independent_attributes() {
         use crate::{

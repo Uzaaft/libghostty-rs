@@ -10,6 +10,7 @@ members = [
   "ghostling_rs",
   "rust-vt-colors",
   "rust-vt-color-scheme",
+  "rust-vt-compression",
   "rust-vt-effects",
   "rust-vt-encode-focus",
   "rust-vt-encode-key",

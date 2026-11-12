@@ -2128,7 +2128,9 @@ mod tests {
 
         // Scrolling the cursor out of the viewport leaves no position.
         terminal.vt_write(b"\r\n\r\n\r\n");
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Top)
+            .unwrap();
         let snapshot = state.update(&terminal).unwrap();
         let cursor = snapshot.cursor().unwrap();
         assert_eq!(cursor, cursor_from_getters(&snapshot));
@@ -2235,7 +2237,9 @@ mod tests {
         );
 
         // At the top, there is nothing above it.
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Top)
+            .unwrap();
         let snapshot = state.update(&terminal).unwrap();
         assert_eq!(sides(snapshot.overscan().unwrap()), (0, 1));
         assert_eq!(
@@ -2275,7 +2279,9 @@ mod tests {
         );
 
         // Scrolling up by one moves each row one position down, keeping its id.
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Delta(-1));
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Delta(-1))
+            .unwrap();
         let after = row_ids(&mut rows, &state.update(&terminal).unwrap());
         assert_eq!(after[1..], before[..2]);
         assert!(!before.contains(&after[0]));
