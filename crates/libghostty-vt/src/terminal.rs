@@ -1,21 +1,13 @@
 //! Types and functions around terminal state management.
 
-use std::{io::Write, mem::MaybeUninit, ptr::NonNull};
+use std::mem::MaybeUninit;
 
 use crate::{
-    alloc::{Allocator, Bytes, Object},
-    color::{Palette, RawPalette, Rgb},
+    alloc::{Allocator, Object},
     effect::VTable,
-    error::{
-        Error, Result, from_optional_result, from_optional_result_uninit,
-        from_optional_result_with_len, from_result,
-    },
+    error::{Error, Result, from_optional_result, from_optional_result_uninit, from_result},
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
-    grid_ref::{GridRef, TrackedGridRef},
-    key,
-    mode::Mode,
-    mouse,
-    point::{self, Point},
+    key, mouse,
     screen::Screen,
     style::Style,
 };
@@ -529,6 +521,30 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         self.get(Data::VT_GROUND)
     }
 
+    /// Get the terminal width in cells.
+    pub fn cols(&self) -> Result<u16> {
+        self.get(Data::COLS)
+    }
+
+    /// Get the terminal height in cells.
+    pub fn rows(&self) -> Result<u16> {
+        self.get(Data::ROWS)
+    }
+
+    /// Get the total width of the terminal in pixels.
+    ///
+    /// This is `cols * cell_width_px` as set by [`Terminal::resize`].
+    pub fn width_px(&self) -> Result<u32> {
+        self.get(Data::WIDTH_PX)
+    }
+
+    /// Get the total height of the terminal in pixels.
+    ///
+    /// This is `rows * cell_height_px` as set by [`Terminal::resize`].
+    pub fn height_px(&self) -> Result<u32> {
+        self.get(Data::HEIGHT_PX)
+    }
+
     /// Resize the terminal to the given dimensions.
     ///
     /// Changes the number of columns and rows in the terminal. The primary
@@ -582,153 +598,6 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// See [`ScrollViewport::DeltaPrompt`] for the navigation behavior.
     pub fn scroll_viewport(&mut self, scroll: ScrollViewport) {
         unsafe { ffi::ghostty_terminal_scroll_viewport(self.inner.as_raw(), scroll.into()) };
-    }
-
-    /// Resolve a point in the terminal grid to a grid reference.
-    ///
-    /// Resolves the given point (which can be in active, viewport, screen,
-    /// or history coordinates) to a grid reference for that location. Use
-    /// [`GridRef::cell`] and [`GridRef::row`] to extract the cell and row.
-    ///
-    /// Lookups in the active region and viewport are fast. Lookups in the
-    /// screen and history may require traversing the full scrollback page
-    /// list to resolve the y coordinate, so they can be expensive for large
-    /// scrollback buffers.
-    ///
-    /// This function isn't meant to be used as the core of render loop. It
-    /// isn't built to sustain the framerates needed for rendering large
-    /// screens. Use the [render state API](crate::render::RenderState) for
-    /// that. This API is instead meant for less strictly performance-sensitive
-    /// use cases.
-    pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
-        let mut grid_ref = ffi::GridRef::default();
-        let result = unsafe {
-            ffi::ghostty_terminal_grid_ref(self.inner.as_raw(), point.into(), &raw mut grid_ref)
-        };
-        from_result(result)?;
-        Ok(unsafe { GridRef::from_raw(grid_ref) })
-    }
-
-    /// Create an owned tracked grid reference for a terminal point.
-    ///
-    /// This is the tracked variant of [`Terminal::grid_ref`]. The returned handle
-    /// follows the referenced cell as the terminal's page list is modified:
-    /// scrolling, pruning, resize/reflow, and other page-list operations update
-    /// the tracked reference automatically.
-    ///
-    /// The reference is attached to the terminal screen/page-list that is
-    /// active at creation time.
-    ///
-    /// If the point is outside the requested coordinate space, this returns
-    /// `Err(Error::InvalidValue)`.
-    ///
-    /// If the tracked grid reference outlives this terminal, the handle remains
-    /// valid, but it will always return `false` or `Ok(None)`.
-    pub fn track_grid_ref(&self, point: Point) -> Result<TrackedGridRef> {
-        let mut raw: ffi::TrackedGridRef = std::ptr::null_mut();
-        let result = unsafe {
-            ffi::ghostty_terminal_grid_ref_track(self.inner.as_raw(), point.into(), &raw mut raw)
-        };
-        from_result(result)?;
-
-        let inner = NonNull::new(raw).ok_or(Error::InvalidValue)?;
-        Ok(TrackedGridRef::new(inner, self.inner.ptr))
-    }
-
-    /// Convert a grid reference back to a point in the given coordinate system.
-    ///
-    /// This is the inverse of [`Terminal::grid_ref`]: given a grid reference, it
-    /// returns the x/y coordinates in the requested coordinate system (active,
-    /// viewport, screen, or history).
-    ///
-    /// The grid reference must have been obtained from the same terminal instance.
-    /// Like all grid references, it is only valid until the next mutating
-    /// terminal call.
-    ///
-    /// Not every grid reference is representable in every coordinate system.
-    /// For example, a cell in scrollback history cannot be expressed in active
-    /// coordinates, and a cell that has scrolled off the visible area cannot
-    /// be expressed in viewport coordinates. In these cases, the function
-    /// returns `Ok(None)`.
-    pub fn point_from_grid_ref(
-        &self,
-        grid_ref: GridRef<'_>,
-        space: point::Space,
-    ) -> Result<Option<point::Coordinate>> {
-        let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
-        let result = unsafe {
-            ffi::ghostty_terminal_point_from_grid_ref(
-                self.inner.as_raw(),
-                std::ptr::from_ref(&grid_ref.inner),
-                space.into_raw(),
-                point.as_mut_ptr(),
-            )
-        };
-
-        from_optional_result_uninit(result, point).map(|value| value.map(Into::into))
-    }
-
-    /// Get the current value of a terminal mode.
-    pub fn mode(&self, mode: Mode) -> Result<bool> {
-        let mut mode = ffi::TerminalModeConfig {
-            mode: mode.into(),
-            value: false,
-        };
-
-        let result = unsafe {
-            ffi::ghostty_terminal_get(
-                self.inner.as_raw(),
-                Data::MODE,
-                (&raw mut mode).cast::<std::ffi::c_void>(),
-            )
-        };
-        from_result(result)?;
-        Ok(mode.value)
-    }
-
-    /// Set the current value of a terminal mode.
-    ///
-    /// This does not change the value restored by a full terminal reset (RIS).
-    pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
-        let mode = ffi::TerminalModeConfig {
-            mode: mode.into(),
-            value,
-        };
-
-        let result = unsafe {
-            ffi::ghostty_terminal_set(
-                self.inner.as_raw(),
-                Opt::MODE,
-                (&raw const mode).cast::<std::ffi::c_void>(),
-            )
-        };
-        from_result(result)?;
-        Ok(self)
-    }
-
-    /// Set the reset default for a terminal mode.
-    ///
-    /// This unconditionally updates both the current value and the value
-    /// restored by a full terminal reset (RIS).
-    ///
-    /// Some recognized modes represent transitions or mirror additional
-    /// terminal state and cannot safely be configured as reset defaults.
-    /// Those modes return [`Error::InvalidValue`].
-    pub fn set_default_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
-        let mode = ffi::TerminalModeConfig {
-            mode: mode.into(),
-            value,
-        };
-
-        let result = unsafe {
-            ffi::ghostty_terminal_set(
-                self.inner.as_raw(),
-                Opt::MODE_DEFAULT,
-                (&raw const mode).cast::<std::ffi::c_void>(),
-            )
-        };
-        from_result(result)?;
-        Ok(self)
     }
 
     /// Compress eligible terminal scrollback.
@@ -799,142 +668,6 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         from_result(result)?;
         Ok(usage)
     }
-
-    /// The configured maximum retained VT continuation size in bytes.
-    ///
-    /// A value of zero means continuation tracking is disabled. This reports
-    /// the configured limit even when a current unfinished continuation is
-    /// temporarily unavailable.
-    pub fn continuation_max_bytes(&self) -> Result<usize> {
-        self.get(Data::CONTINUATION_MAX_BYTES)
-    }
-
-    /// Set the maximum number of replay-safe VT continuation bytes retained.
-    ///
-    /// Continuation bytes reconstruct an escape sequence or UTF-8 codepoint
-    /// which was unfinished at the end of the most recent [`Terminal::vt_write`]
-    /// call. They are used automatically by terminal snapshots and may also be
-    /// exported directly with the continuation APIs.
-    ///
-    /// Tracking is disabled by default. A nonzero value enables tracking and
-    /// sets its byte limit. Passing zero disables tracking. Lowering the limit
-    /// below an already-retained continuation, or enabling tracking while the
-    /// parser is already unfinished, makes the current continuation unavailable
-    /// because earlier bytes cannot be reconstructed. Tracking recovers
-    /// automatically after a later write reaches the ground state or contains
-    /// a fresh replay start.
-    pub fn set_continuation_max_bytes(&mut self, v: usize) -> Result<&mut Self> {
-        self.set(Opt::CONTINUATION_MAX_BYTES, &v)?;
-        Ok(self)
-    }
-
-    /// Write the terminal's replay-safe VT continuation to a callback writer.
-    ///
-    /// The continuation is the exact byte suffix needed to reconstruct
-    /// unfinished VT parser or UTF-8 decoder state in an equivalent terminal.
-    /// It is empty when the stream is at ground. The callback is invoked
-    /// synchronously and may be called more than once. It must not call
-    /// terminal APIs with the same terminal handle.
-    ///
-    /// Continuation tracking must have been enabled by calling
-    /// [`Terminal::set_continuation_max_bytes`] with a nonzero value before
-    /// the input that produced the continuation was written.    
-    ///
-    /// # Errors
-    ///
-    /// This function returns [`Error::IoError`] if the callback rejects a
-    /// write, [`Error::LimitExceeded`] if output accounting overflows, or
-    /// [`Error::InvalidValue`] if an argument is invalid, tracking is disabled,
-    /// or the current continuation is unavailable.
-    pub fn continuation_write<W: Write>(&mut self, writer: &mut W) -> Result<()> {
-        let writer = crate::io::to_writer(writer);
-        let result =
-            unsafe { ffi::ghostty_terminal_continuation_write(self.inner.as_raw(), writer) };
-        from_result(result)
-    }
-
-    /// Return an allocated copy of the terminal's replay-safe VT continuation.
-    ///
-    /// The returned bytes are allocated with allocator, or the default allocator
-    /// when allocator is `None`. An empty continuation is a successful result
-    /// with empty [`Bytes`]; libghostty does not allocate for it.
-    /// Continuation tracking must have been enabled by calling
-    /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
-    /// input that produced the continuation was written.
-    ///
-    /// The caller must serialize this operation with all other access to the same
-    /// terminal.
-    ///
-    /// # Errors
-    ///
-    /// This function returns [`Error::OutOfMemory`] on allocation failure, or
-    /// [`Error::InvalidValue`] if an argument is invalid, tracking is disabled,
-    /// or the current continuation is unavailable.
-    pub fn continuation_alloc<'a, 'ctx: 'a>(
-        &self,
-        alloc: Option<&'a Allocator<'ctx>>,
-    ) -> Result<Option<Bytes<'a>>> {
-        let mut out = std::ptr::null_mut();
-        let mut out_len = 0usize;
-        let alloc = alloc.map_or(std::ptr::null(), super::alloc::Allocator::to_raw);
-
-        let result = unsafe {
-            ffi::ghostty_terminal_continuation_alloc(
-                self.inner.as_raw(),
-                alloc,
-                &raw mut out,
-                &raw mut out_len,
-            )
-        };
-
-        let out = from_optional_result(result, out)?;
-        // SAFETY: On success, libghostty hands over `out_len` bytes allocated
-        // with `alloc`, or NULL for empty output.
-        Ok(out.map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
-    }
-
-    /// Copy the terminal's replay-safe VT continuation into a caller buffer.
-    ///
-    /// Pass an empty `buf` to query the required size. A size query returns
-    /// [`Error::OutOfSpace`] with the required size, including zero when the
-    /// stream is at ground. If a non-empty buffer is too small, the function
-    /// has the same result and reports the full required size.
-    ///
-    /// Continuation tracking must have been enabled by calling
-    /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
-    /// input that produced the continuation was written.
-    ///
-    /// The caller must serialize this operation with all other access to the same
-    /// terminal.
-    ///
-    /// # Errors
-    ///
-    /// This function returns [`Error::OutOfSpace`] for a size query or
-    /// insufficient buffer, or [`Error::InvalidValue`] if an argument is invalid,
-    /// tracking is disabled, or the current continuation is unavailable.
-    pub fn continuation_buf(&self, buf: &mut [u8]) -> Result<Option<usize>> {
-        let mut written = 0usize;
-        // The C API uses a NULL pointer to distinguish an explicit size query
-        // from a zero-capacity destination. Rust empty slices have a non-NULL
-        // dangling pointer, so translate that representation at this boundary.
-        let buf_ptr = if buf.is_empty() {
-            std::ptr::null_mut()
-        } else {
-            buf.as_mut_ptr()
-        };
-
-        let result = unsafe {
-            ffi::ghostty_terminal_continuation_buf(
-                self.inner.as_raw(),
-                buf_ptr,
-                buf.len(),
-                &raw mut written,
-            )
-        };
-
-        from_optional_result_with_len(result, written)
-    }
-
     pub(crate) fn get<T>(&self, tag: ffi::TerminalData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
@@ -980,125 +713,6 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 
         let result = unsafe { ffi::ghostty_terminal_set(self.inner.as_raw(), tag, ptr.cast()) };
         from_result(result)
-    }
-
-    /// Get the terminal width in cells.
-    pub fn cols(&self) -> Result<u16> {
-        self.get(Data::COLS)
-    }
-    /// Get the terminal height in cells.
-    pub fn rows(&self) -> Result<u16> {
-        self.get(Data::ROWS)
-    }
-    /// Get the total width of the terminal in pixels.
-    ///
-    /// This is `cols * cell_width_px` as set by [`Terminal::resize`].
-    pub fn width_px(&self) -> Result<u32> {
-        self.get(Data::WIDTH_PX)
-    }
-    /// Get the total height of the terminal in pixels.
-    ///
-    /// This is `rows * cell_height_px` as set by [`Terminal::resize`].
-    pub fn height_px(&self) -> Result<u32> {
-        self.get(Data::HEIGHT_PX)
-    }
-
-    /// The configured maximum scrollback allocation in bytes.
-    ///
-    /// This always reports the primary screen's configured value, including
-    /// while an alternate screen is active.
-    ///
-    /// Returns `None` when the configured byte limit is unlimited.
-    pub fn scrollback_max_bytes(&self) -> Result<Option<usize>> {
-        self.get_optional(Data::SCROLLBACK_MAX_BYTES)
-    }
-
-    /// Set the maximum scrollback allocation in bytes.
-    ///
-    /// This is an estimate. Internally, libghostty only prunes bytes up
-    /// to a "page"-granularity. A page is the minimum allocated unit of
-    /// grid space within Ghostty. A page at the time of writing these docs
-    /// is about 400KB, so the byte limit will be within this delta.
-    ///
-    /// This works alongside the line limit configuration. If both are set,
-    /// the first-reached limit is used first. Both limits are dependent
-    /// on external state (byte limit can be reached with less lines if
-    /// more styles are used for example, line limit can be reached with
-    /// a narrower terminal viewport). So, they are useful together.
-    ///
-    /// Lowering the limit immediately removes eligible complete historical
-    /// pages. A value of zero disables scrollback and erases retained history.
-    /// `None` restores the default of 10,000 bytes, rounded up to a page.
-    /// Pass `Some(usize::MAX)` for no byte limit.
-    pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<&mut Self> {
-        self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())?;
-        Ok(self)
-    }
-
-    /// The configured maximum number of physical scrollback lines.
-    ///
-    /// This always reports the primary screen's configured value, including
-    /// while an alternate screen is active.
-    ///
-    /// Returns `None` when the configured line limit is unlimited.
-    pub fn scrollback_max_lines(&self) -> Result<Option<usize>> {
-        self.get_optional(Data::SCROLLBACK_MAX_LINES)
-    }
-
-    /// Set the maximum number of physical lines retained in scrollback.
-    ///
-    /// This is an estimate. Internally, libghostty only prunes lines up
-    /// to a "page"-granularity. A page is the minimum allocated unit of
-    /// grid space within Ghostty. As a result, the actual available scrollback
-    /// lines will almost always be higher than configured. The magnitude
-    /// of the difference depends on the number of used styles, graphemes, etc.
-    /// since the row-count in a page is dynamic based on that. In general,
-    /// it ranges from dozens to a hundred or so lines.
-    ///
-    /// This works alongside the byte limit configuration. If both are set,
-    /// the first-reached limit is used first. Both limits are dependent
-    /// on external state (byte limit can be reached with less lines if
-    /// more styles are used for example, line limit can be reached with
-    /// a narrower terminal viewport). So, they are useful together.
-    ///
-    /// Lowering the limit immediately removes eligible complete historical
-    /// pages. A `None` value pointer removes the line limit.
-    pub fn set_scrollback_max_lines(&mut self, v: Option<usize>) -> Result<&mut Self> {
-        self.set_optional(Opt::SCROLLBACK_MAX_LINES, v.as_ref())?;
-        Ok(self)
-    }
-
-    /// Get the cursor column position (0-indexed).
-    pub fn cursor_x(&self) -> Result<u16> {
-        self.get(Data::CURSOR_X)
-    }
-    /// Get the cursor row position within the active area (0-indexed).
-    pub fn cursor_y(&self) -> Result<u16> {
-        self.get(Data::CURSOR_Y)
-    }
-    /// Whether the cursor is currently at a semantic shell prompt or input
-    /// area.
-    ///
-    /// This depends on semantic prompt markers such as OSC 133. Returns false
-    /// when semantic prompt information is unavailable or the alternate
-    /// screen is active.
-    pub fn is_cursor_at_prompt(&self) -> Result<bool> {
-        self.get(Data::CURSOR_AT_PROMPT)
-    }
-    /// Get whether the cursor has a pending wrap (next print will soft-wrap).
-    pub fn is_cursor_pending_wrap(&self) -> Result<bool> {
-        self.get(Data::CURSOR_PENDING_WRAP)
-    }
-    /// Get whether the cursor is visible (DEC mode 25).
-    pub fn is_cursor_visible(&self) -> Result<bool> {
-        self.get(Data::CURSOR_VISIBLE)
-    }
-    /// Get the current SGR style of the cursor.
-    ///
-    /// This is the style that will be applied to newly printed characters.
-    pub fn cursor_style(&self) -> Result<Style> {
-        self.get::<ffi::Style>(Data::CURSOR_SGR_STYLE)
-            .and_then(std::convert::TryInto::try_into)
     }
     /// The mouse pointer shape requested by the application through OSC 22.
     ///
@@ -1290,121 +904,6 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         self.set(Opt::PWD, &raw)?;
         Ok(self)
     }
-    /// The total number of rows in the active screen including scrollback.
-    pub fn total_rows(&self) -> Result<usize> {
-        self.get(Data::TOTAL_ROWS)
-    }
-    ///  The number of scrollback rows (total rows minus viewport rows).
-    pub fn scrollback_rows(&self) -> Result<usize> {
-        self.get(Data::SCROLLBACK_ROWS)
-    }
-
-    /// The effective foreground color (override or default).
-    pub fn fg_color(&self) -> Result<Option<Rgb>> {
-        self.get_optional::<ffi::ColorRgb>(Data::COLOR_FOREGROUND)
-            .map(|v| v.map(Into::into))
-    }
-    /// The default foreground color (ignoring any OSC override).
-    pub fn default_fg_color(&self) -> Result<Option<Rgb>> {
-        self.get_optional::<ffi::ColorRgb>(Data::COLOR_FOREGROUND_DEFAULT)
-            .map(|v| v.map(Into::into))
-    }
-    /// Set the default foreground color.
-    pub fn set_default_fg_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
-        self.set_optional(Opt::COLOR_FOREGROUND, v.map(ffi::ColorRgb::from).as_ref())?;
-        Ok(self)
-    }
-
-    /// The effective background color (override or default).
-    pub fn bg_color(&self) -> Result<Option<Rgb>> {
-        self.get_optional::<ffi::ColorRgb>(Data::COLOR_BACKGROUND)
-            .map(|v| v.map(Into::into))
-    }
-    /// The default background color (ignoring any OSC override).
-    pub fn default_bg_color(&self) -> Result<Option<Rgb>> {
-        self.get_optional::<ffi::ColorRgb>(Data::COLOR_BACKGROUND_DEFAULT)
-            .map(|v| v.map(Into::into))
-    }
-    /// Set the default background color.
-    pub fn set_default_bg_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
-        self.set_optional(Opt::COLOR_BACKGROUND, v.map(ffi::ColorRgb::from).as_ref())?;
-        Ok(self)
-    }
-
-    /// The effective cursor color (override or default).
-    pub fn cursor_color(&self) -> Result<Option<Rgb>> {
-        self.get_optional::<ffi::ColorRgb>(Data::COLOR_CURSOR)
-            .map(|v| v.map(Into::into))
-    }
-    /// The default cursor color (ignoring any OSC override).
-    pub fn default_cursor_color(&self) -> Result<Option<Rgb>> {
-        self.get_optional::<ffi::ColorRgb>(Data::COLOR_CURSOR_DEFAULT)
-            .map(|v| v.map(Into::into))
-    }
-    /// Set the default cursor color.
-    pub fn set_default_cursor_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
-        self.set_optional(Opt::COLOR_CURSOR, v.map(ffi::ColorRgb::from).as_ref())?;
-        Ok(self)
-    }
-
-    /// Set the default cursor style used by DECSCUSR reset (CSI 0 q).
-    ///
-    /// Passing `None` resets to libghostty's built-in block cursor default.
-    pub fn set_default_cursor_style(&mut self, v: Option<CursorStyle>) -> Result<&mut Self> {
-        self.set_optional(Opt::DEFAULT_CURSOR_STYLE, v.as_ref())?;
-        Ok(self)
-    }
-
-    /// Set whether the default cursor blinks when reset by DECSCUSR (CSI 0 q).
-    ///
-    /// Passing `None` resets to libghostty's built-in non-blinking default.
-    pub fn set_default_cursor_blink(&mut self, v: Option<bool>) -> Result<&mut Self> {
-        self.set_optional(Opt::DEFAULT_CURSOR_BLINK, v.as_ref())?;
-        Ok(self)
-    }
-
-    /// Set whether a resize may pull rows out of scrollback back into the
-    /// active area.
-    ///
-    /// When true, growing rows reveals scrollback if the cursor is on the
-    /// bottom row, and a column reflow that needs fewer rows reveals
-    /// scrollback as well. When false, growing rows always appends blank rows
-    /// at the bottom and a column reflow keeps the top of the active area on
-    /// the same content, so a line that is fully in scrollback stays there. A
-    /// soft-wrapped line with at least one row still in the active area may
-    /// still unwrap back into view.
-    ///
-    /// Set this to false when the pty keeps its own screen buffer without
-    /// scrollback, since it cannot pull rows back and will otherwise disagree
-    /// with the terminal about the screen contents after a resize. Windows
-    /// `ConPTY` is the motivating case.
-    ///
-    /// This is preserved across a full reset (RIS).
-    ///
-    /// Passing `None` resets to the built-in default of `true`.
-    pub fn set_resize_pull_scrollback(&mut self, v: Option<bool>) -> Result<&mut Self> {
-        self.set_optional(Opt::RESIZE_PULL_SCROLLBACK, v.as_ref())?;
-        Ok(self)
-    }
-
-    /// The current 256-color palette.
-    pub fn color_palette(&self) -> Result<Palette> {
-        self.get::<RawPalette>(Data::COLOR_PALETTE)
-            .map(Palette::from)
-    }
-    /// The default 256-color palette (ignoring any OSC overrides).
-    pub fn default_color_palette(&self) -> Result<Palette> {
-        self.get::<RawPalette>(Data::COLOR_PALETTE_DEFAULT)
-            .map(Palette::from)
-    }
-    /// Set the default 256-color palette.
-    pub fn set_default_color_palette(&mut self, v: Option<Palette>) -> Result<&mut Self> {
-        self.set_optional::<RawPalette>(
-            Opt::COLOR_PALETTE,
-            v.map(std::convert::Into::into).as_ref(),
-        )?;
-        Ok(self)
-    }
 
     /// Set the maximum bytes the APC handler will buffer for all protocols.
     ///
@@ -1550,6 +1049,161 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         Ok(self)
     }
 }
+
+/// Methods related to history and scrollback.
+impl Terminal<'_, '_> {
+    /// The total number of rows in the active screen including scrollback.
+    pub fn total_rows(&self) -> Result<usize> {
+        self.get(Data::TOTAL_ROWS)
+    }
+
+    /// The number of scrollback rows (total rows minus viewport rows).
+    pub fn scrollback_rows(&self) -> Result<usize> {
+        self.get(Data::SCROLLBACK_ROWS)
+    }
+
+    /// The configured maximum scrollback allocation in bytes.
+    ///
+    /// This always reports the primary screen's configured value, including
+    /// while an alternate screen is active.
+    ///
+    /// Returns `None` when the configured byte limit is unlimited.
+    pub fn scrollback_max_bytes(&self) -> Result<Option<usize>> {
+        self.get_optional(Data::SCROLLBACK_MAX_BYTES)
+    }
+
+    /// Set the maximum scrollback allocation in bytes.
+    ///
+    /// This is an estimate. Internally, libghostty only prunes bytes up
+    /// to a "page"-granularity. A page is the minimum allocated unit of
+    /// grid space within Ghostty. A page at the time of writing these docs
+    /// is about 400KB, so the byte limit will be within this delta.
+    ///
+    /// This works alongside the line limit configuration. If both are set,
+    /// the first-reached limit is used first. Both limits are dependent
+    /// on external state (byte limit can be reached with less lines if
+    /// more styles are used for example, line limit can be reached with
+    /// a narrower terminal viewport). So, they are useful together.
+    ///
+    /// Lowering the limit immediately removes eligible complete historical
+    /// pages. A value of zero disables scrollback and erases retained history.
+    /// `None` restores the default of 10,000 bytes, rounded up to a page.
+    /// Pass `Some(usize::MAX)` for no byte limit.
+    pub fn set_scrollback_max_bytes(&mut self, v: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(Opt::SCROLLBACK_MAX_BYTES, v.as_ref())?;
+        Ok(self)
+    }
+
+    /// The configured maximum number of physical scrollback lines.
+    ///
+    /// This always reports the primary screen's configured value, including
+    /// while an alternate screen is active.
+    ///
+    /// Returns `None` when the configured line limit is unlimited.
+    pub fn scrollback_max_lines(&self) -> Result<Option<usize>> {
+        self.get_optional(Data::SCROLLBACK_MAX_LINES)
+    }
+
+    /// Set the maximum number of physical lines retained in scrollback.
+    ///
+    /// This is an estimate. Internally, libghostty only prunes lines up
+    /// to a "page"-granularity. A page is the minimum allocated unit of
+    /// grid space within Ghostty. As a result, the actual available scrollback
+    /// lines will almost always be higher than configured. The magnitude
+    /// of the difference depends on the number of used styles, graphemes, etc.
+    /// since the row-count in a page is dynamic based on that. In general,
+    /// it ranges from dozens to a hundred or so lines.
+    ///
+    /// This works alongside the byte limit configuration. If both are set,
+    /// the first-reached limit is used first. Both limits are dependent
+    /// on external state (byte limit can be reached with less lines if
+    /// more styles are used for example, line limit can be reached with
+    /// a narrower terminal viewport). So, they are useful together.
+    ///
+    /// Lowering the limit immediately removes eligible complete historical
+    /// pages. A `None` value pointer removes the line limit.
+    pub fn set_scrollback_max_lines(&mut self, v: Option<usize>) -> Result<&mut Self> {
+        self.set_optional(Opt::SCROLLBACK_MAX_LINES, v.as_ref())?;
+        Ok(self)
+    }
+
+    /// Set whether a resize may pull rows out of scrollback back into the
+    /// active area.
+    ///
+    /// When true, growing rows reveals scrollback if the cursor is on the
+    /// bottom row, and a column reflow that needs fewer rows reveals
+    /// scrollback as well. When false, growing rows always appends blank rows
+    /// at the bottom and a column reflow keeps the top of the active area on
+    /// the same content, so a line that is fully in scrollback stays there. A
+    /// soft-wrapped line with at least one row still in the active area may
+    /// still unwrap back into view.
+    ///
+    /// Set this to false when the pty keeps its own screen buffer without
+    /// scrollback, since it cannot pull rows back and will otherwise disagree
+    /// with the terminal about the screen contents after a resize. Windows
+    /// `ConPTY` is the motivating case.
+    ///
+    /// This is preserved across a full reset (RIS).
+    ///
+    /// Passing `None` resets to the built-in default of `true`.
+    pub fn set_resize_pull_scrollback(&mut self, v: Option<bool>) -> Result<&mut Self> {
+        self.set_optional(Opt::RESIZE_PULL_SCROLLBACK, v.as_ref())?;
+        Ok(self)
+    }
+}
+
+/// Methods related to the cursor.
+impl Terminal<'_, '_> {
+    /// Get the cursor column position (0-indexed).
+    pub fn cursor_x(&self) -> Result<u16> {
+        self.get(Data::CURSOR_X)
+    }
+    /// Get the cursor row position within the active area (0-indexed).
+    pub fn cursor_y(&self) -> Result<u16> {
+        self.get(Data::CURSOR_Y)
+    }
+    /// Whether the cursor is currently at a semantic shell prompt or input
+    /// area.
+    ///
+    /// This depends on semantic prompt markers such as OSC 133. Returns false
+    /// when semantic prompt information is unavailable or the alternate
+    /// screen is active.
+    pub fn is_cursor_at_prompt(&self) -> Result<bool> {
+        self.get(Data::CURSOR_AT_PROMPT)
+    }
+    /// Get whether the cursor has a pending wrap (next print will soft-wrap).
+    pub fn is_cursor_pending_wrap(&self) -> Result<bool> {
+        self.get(Data::CURSOR_PENDING_WRAP)
+    }
+    /// Get whether the cursor is visible (DEC mode 25).
+    pub fn is_cursor_visible(&self) -> Result<bool> {
+        self.get(Data::CURSOR_VISIBLE)
+    }
+    /// Get the current SGR style of the cursor.
+    ///
+    /// This is the style that will be applied to newly printed characters.
+    pub fn cursor_style(&self) -> Result<Style> {
+        self.get::<ffi::Style>(Data::CURSOR_SGR_STYLE)
+            .and_then(std::convert::TryInto::try_into)
+    }
+
+    /// Set the default cursor style used by DECSCUSR reset (CSI 0 q).
+    ///
+    /// Passing `None` resets to libghostty's built-in block cursor default.
+    pub fn set_default_cursor_style(&mut self, v: Option<CursorStyle>) -> Result<&mut Self> {
+        self.set_optional(Opt::DEFAULT_CURSOR_STYLE, v.as_ref())?;
+        Ok(self)
+    }
+
+    /// Set whether the default cursor blinks when reset by DECSCUSR (CSI 0 q).
+    ///
+    /// Passing `None` resets to libghostty's built-in non-blinking default.
+    pub fn set_default_cursor_blink(&mut self, v: Option<bool>) -> Result<&mut Self> {
+        self.set_optional(Opt::DEFAULT_CURSOR_BLINK, v.as_ref())?;
+        Ok(self)
+    }
+}
+
 impl Drop for Terminal<'_, '_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_terminal_free(self.inner.as_raw()) }
