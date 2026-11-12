@@ -75,18 +75,18 @@ impl Terminal<'_, '_> {
 
     /// The current 256-color palette.
     pub fn color_palette(&self) -> Result<Palette> {
-        self.get::<RawPalette>(Data::COLOR_PALETTE)
+        self.get::<RawPalette>(ffi::TerminalData::COLOR_PALETTE)
             .map(Palette::from)
     }
     /// The default 256-color palette (ignoring any OSC overrides).
     pub fn default_color_palette(&self) -> Result<Palette> {
-        self.get::<RawPalette>(Data::COLOR_PALETTE_DEFAULT)
+        self.get::<RawPalette>(ffi::TerminalData::COLOR_PALETTE_DEFAULT)
             .map(Palette::from)
     }
     /// Set the default 256-color palette.
     pub fn set_default_color_palette(&mut self, v: Option<Palette>) -> Result<&mut Self> {
         self.set_optional::<RawPalette>(
-            Opt::COLOR_PALETTE,
+            ffi::TerminalOption::COLOR_PALETTE,
             v.map(std::convert::Into::into).as_ref(),
         )?;
         Ok(self)

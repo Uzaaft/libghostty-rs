@@ -247,6 +247,7 @@ impl Terminal<'_, '_> {
     /// This is an alias of [`Selection::new`], albeit slightly simpler to write.
     ///
     /// The returned selection is not installed as the terminal's current selection.
+    #[must_use]
     pub fn select<'t>(
         &'t self,
         start: GridRef<'t>,
@@ -259,7 +260,6 @@ impl Terminal<'_, '_> {
     /// Derive a selection snapshot covering all selectable terminal content.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    #[must_use]
     pub fn select_all(&self) -> Result<Option<Selection<'_>>> {
         let mut value = ffi::Selection::default();
         let result =
@@ -275,7 +275,6 @@ impl Terminal<'_, '_> {
     /// Start deriving a selection snapshot covering all selectable terminal content.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    #[must_use]
     pub fn select_line<'t>(&'t self, grid_ref: GridRef<'t>) -> SelectLine<'t> {
         SelectLine::new(self, grid_ref)
     }
@@ -283,7 +282,6 @@ impl Terminal<'_, '_> {
     /// Derive a command-output selection snapshot from a terminal grid reference.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    #[must_use]
     pub fn select_output<'t>(&'t self, grid_ref: GridRef<'t>) -> Result<Option<Selection<'t>>> {
         let mut value = ffi::Selection::default();
 
@@ -305,7 +303,6 @@ impl Terminal<'_, '_> {
     /// Start deriving a word selection snapshot from a terminal grid reference.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    #[must_use]
     pub fn select_word<'t>(&'t self, grid_ref: GridRef<'t>) -> SelectWord<'t> {
         SelectWord::new(self, grid_ref)
     }
@@ -366,7 +363,6 @@ impl Terminal<'_, '_> {
     /// );
     /// # Ok(())}
     /// ```
-    #[must_use]
     pub fn select_word_between<'t>(
         &'t self,
         start: GridRef<'t>,
@@ -381,7 +377,8 @@ impl Terminal<'_, '_> {
 ///
 /// If [`with_whitespace`](Self::with_whitespace) is not called,
 /// Ghostty's default line-trim whitespace codepoints are used.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+#[must_use]
 pub struct SelectLine<'t> {
     terminal: ffi::Terminal,
     inner: ffi::TerminalSelectLineOptions,
@@ -390,7 +387,6 @@ pub struct SelectLine<'t> {
 impl<'t> SelectLine<'t> {
     /// Create a new set of options for [deriving a line selection](Terminal::select_line),
     /// from the given grid reference.
-    #[must_use]
     pub fn new(terminal: &'t Terminal<'_, '_>, grid_ref: GridRef<'t>) -> Self {
         Self {
             terminal: terminal.inner.as_raw(),
@@ -406,7 +402,6 @@ impl<'t> SelectLine<'t> {
     }
 
     /// Specify the codepoints to trim from the start and end of the line.
-    #[must_use]
     pub fn with_whitespace(mut self, value: &[char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
@@ -417,7 +412,6 @@ impl<'t> SelectLine<'t> {
 
     /// Specify whether semantic prompt state changes should bound the line
     /// selection.
-    #[must_use]
     pub fn with_semantic_prompt_boundary(mut self, value: bool) -> Self {
         self.inner.semantic_prompt_boundary = value;
         self
@@ -426,7 +420,6 @@ impl<'t> SelectLine<'t> {
     /// Finish selecting a line.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    #[must_use]
     pub fn finish(self) -> Result<Option<Selection<'t>>> {
         let mut value = ffi::Selection::default();
 
@@ -447,7 +440,8 @@ impl<'t> SelectLine<'t> {
 ///
 /// If [`with_boundary_codepoints`](Self::with_boundary_codepoints)
 /// is not called, Ghostty's default word-boundary codepoints are used.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+#[must_use]
 pub struct SelectWord<'t> {
     terminal: ffi::Terminal,
     inner: ffi::TerminalSelectWordOptions,
@@ -466,7 +460,6 @@ impl<'t> SelectWord<'t> {
     }
 
     /// Specify the word-boundary codepoints.
-    #[must_use]
     pub fn with_boundary_codepoints(mut self, value: &[char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
@@ -478,7 +471,6 @@ impl<'t> SelectWord<'t> {
     /// Finish selecting a word.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    #[must_use]
     pub fn finish(self) -> Result<Option<Selection<'t>>> {
         let mut value = ffi::Selection::default();
 
@@ -500,6 +492,7 @@ impl<'t> SelectWord<'t> {
 /// If [`with_boundary_codepoints`](Self::with_boundary_codepoints)
 /// is not called, Ghostty's default word-boundary codepoints are used.
 #[derive(Debug)]
+#[must_use]
 pub struct SelectWordBetween<'t> {
     terminal: ffi::Terminal,
     inner: ffi::TerminalSelectWordBetweenOptions,
@@ -519,7 +512,6 @@ impl<'t> SelectWordBetween<'t> {
     }
 
     /// Specify the word-boundary codepoints.
-    #[must_use]
     pub fn with_boundary_codepoints(mut self, value: &[char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
@@ -531,7 +523,6 @@ impl<'t> SelectWordBetween<'t> {
     /// Finish selecting a word between two points.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    #[must_use]
     pub fn finish(self) -> Result<Option<Selection<'t>>> {
         let mut value = ffi::Selection::default();
 

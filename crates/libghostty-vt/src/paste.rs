@@ -113,8 +113,7 @@ use crate::{
     ffi,
 };
 
-// Ref'd in docs only
-#[expect(unused)]
+#[expect(unused, reason = "only referenced in docs")]
 use crate::mode::Mode;
 
 /// Check if paste data is safe to paste into the terminal.
