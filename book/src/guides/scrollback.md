@@ -14,19 +14,17 @@ programs never need compression.
 
 ## Limits {#guide-scrollback-limits}
 
-Scrollback has two limits, and both are set with ghostty_terminal_set(). If you
-set both, the first one reached is used.
+Scrollback has two limits, and both are set with their corresponding setter.
+If you set both, the first one reached is used.
 
-| Option                                     | Default      | `SIZE_MAX` | `NULL`               |
+| Option                                     | Default      | `usize::MAX` | `None`               |
 | ------------------------------------------ | ------------ | ---------- | -------------------- |
-| #GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES | 10,000 bytes | No limit   | Restores the default |
-| #GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_LINES | No limit     | No limit   | No limit             |
+| [`Terminal::set_scrollback_max_bytes()`] | 10,000 bytes | No limit   | Restores the default |
+| [`Terminal::set_scrollback_max_lines()`] | No limit     | No limit   | No limit             |
 
-```c
+```rs
 // Keep up to 10 MB of history.
-size_t max_bytes = 10 * 1024 * 1024;
-ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES,
-                     &max_bytes);
+terminal.set_scrollback_max_bytes(Some(10 * 1024 * 1024))?;
 ```
 
 They're useful together, because each one depends on things you don't control.
@@ -43,30 +41,26 @@ or so.
 Lowering a limit removes eligible complete pages right away. A byte limit of
 zero disables scrollback and erases the history you have.
 
-Read the limits back with `GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_BYTES` and
-`GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_LINES`. They return `GHOSTTY_NO_VALUE`
-when the limit is unlimited, and they always report the primary screen's value,
-even while the alternate screen is active.
+Read the limits back with [`Terminal::scrollback_max_bytes()`] and
+[`Terminal::scrollback_max_lines()`]. They return `None` when the limit is
+unlimited, and they always report the primary screen's value, even while the
+alternate screen is active.
 
 ## Scrolling the viewport {#guide-scrollback-viewport}
 
 The viewport is the part of the terminal you're showing. Move it with
-ghostty_terminal_scroll_viewport(), which takes a tagged union:
+[`Terminal::scroll_viewport()`], which takes a tagged union:
 
-| Tag                                            | Value field    | What it does                                         |
-| ---------------------------------------------- | -------------- | ---------------------------------------------------- |
-| #GHOSTTY_TERMINAL_SCROLL_VIEWPORT_TOP          |                | Scroll to the top of the scrollback                  |
-| #GHOSTTY_TERMINAL_SCROLL_VIEWPORT_BOTTOM       |                | Scroll to the bottom (the active area)               |
-| #GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA        | `delta`        | Scroll by a number of rows, negative for up          |
-| #GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW          | `row`          | Scroll so that this row is the first one visible     |
-| #GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA_PROMPT | `delta_prompt` | Scroll by a number of prompts, negative for backward |
+| Tag                             | What it does                                         |
+|---------------------------------|------------------------------------------------------|
+| [`ScrollViewport::Top`]         | Scroll to the top of the scrollback                  |
+| [`ScrollViewport::Bottom`]      | Scroll to the bottom (the active area)               |
+| [`ScrollViewport::Delta`]       | Scroll by a number of rows, negative for up          |
+| [`ScrollViewport::Row`]         | Scroll so that this row is the first one visible     |
+| [`ScrollViewport::DeltaPrompt`] | Scroll by a number of prompts, negative for backward |
 
-```c
-GhosttyTerminalScrollViewport behavior = {
-  .tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_DELTA,
-  .value = { .delta = -5 },
-};
-ghostty_terminal_scroll_viewport(terminal, behavior); // up 5 rows
+```rs
+terminal.scroll_viewport(ScrollViewport::Delta(-5))?; // up 5 rows
 ```
 
 Row 0 is the top of the scrollback. The row is clamped so the viewport never
@@ -76,12 +70,12 @@ alternate screen, the viewport stays on the active area.
 Scrolling by prompts needs semantic prompt markers from the shell. Without a
 matching prompt it does nothing.
 
-`GHOSTTY_TERMINAL_DATA_VIEWPORT_ACTIVE` tells you if the viewport is following
+[`Terminal::viewport_active()`] tells you if the viewport is following
 the active area, or if someone has scrolled up into history.
 
 ## The scrollbar {#guide-scrollback-scrollbar}
 
-Read `GHOSTTY_TERMINAL_DATA_SCROLLBAR` to get a GhosttyTerminalScrollbar, which
+Read [`Terminal::scrollbar()`] to get a [`terminal::Scrollbar`], which
 has the three numbers you need to draw one: `total` rows in the scrollable area,
 the `offset` of the viewport into them, and the `len` of the visible area.
 
@@ -92,24 +86,20 @@ date as the terminal changes and cache the offset. The one exception is the
 first read after the viewport moves somewhere that isn't an absolute row, which
 can cost O(pages).
 
-The `offset` is the same row space as `GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW`, so
+The `offset` is the same row space as [`ScrollViewport::Row`], so
 when someone drags your scrollbar you can scroll straight to the position you
 drew.
 
-```c
-GhosttyTerminalScrollbar bar;
-ghostty_terminal_get(terminal, GHOSTTY_TERMINAL_DATA_SCROLLBAR, &bar);
+```rs
+let bar = terminal.scrollbar()?;
 
 // Someone dragged the scrollbar halfway down.
-GhosttyTerminalScrollViewport behavior = {
-  .tag = GHOSTTY_TERMINAL_SCROLL_VIEWPORT_ROW,
-  .value = { .row = (size_t)((bar.total - bar.len) / 2) },
-};
-ghostty_terminal_scroll_viewport(terminal, behavior);
+let row = (bar.total - bar.len) / 2;
+terminal.scroll_viewport(ScrollViewport::Row(row as usize));
 ```
 
-If you only want counts, `GHOSTTY_TERMINAL_DATA_TOTAL_ROWS` is the rows in the
-active screen including scrollback, and `GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS`
+If you only want counts, [`Terminal::total_rows()`] is the rows in the
+active screen including scrollback, and [`Terminal::scrollback_rows()`]
 is the rows in scrollback.
 
 ## Resizing {#guide-scrollback-resize}
@@ -121,30 +111,25 @@ and a column reflow that needs fewer rows reveals it too.
 Most programs want this and can skip this section. But if your pty keeps its own
 screen buffer without scrollback, it can't pull rows back, and it will disagree
 with the terminal about the screen after a resize. Windows ConPTY is the case
-that needs this. Set `GHOSTTY_TERMINAL_OPT_RESIZE_PULL_SCROLLBACK` to false:
+that needs this. Call [`Terminal::set_resize_pull_scrollback()`] with false:
 
-```c
-bool pull_scrollback = false;
-ghostty_terminal_set(terminal, GHOSTTY_TERMINAL_OPT_RESIZE_PULL_SCROLLBACK,
-                     &pull_scrollback);
+```rs
+terminal.set_resize_pull_scrollback(false)?;
 ```
 
 Now growing the rows always appends blank rows at the bottom, and a column
 reflow keeps the top of the active area on the same content. A line that's fully
 in scrollback stays there, but a soft-wrapped line with at least one row still
 in the active area can still unwrap back into view. The setting survives a full
-reset (RIS), and passing `NULL` restores the default of true.
+reset (RIS).
 
 ## Memory use {#guide-scrollback-memory}
 
-Read `GHOSTTY_TERMINAL_DATA_MEMORY_USAGE` to see how much memory a terminal
+Read [`Terminal::memory_usage()`] to see how much memory a terminal
 holds. This is for applications that host many terminals and have to stay inside
 a budget, for example by compressing or closing whichever ones hold the most.
-
-GhosttyTerminalMemoryUsage is a sized struct, so initialize it with
-GHOSTTY_INIT_SIZED(). If `size` is too small, the read returns
-[`Error::InvalidValue`] and leaves the struct alone. The read never decompresses
-scrollback, but it does look at every page, so don't do it after every write.
+The read never decompresses scrollback, but it does look at every page,
+so don't do it after every write.
 
 Budget against the resident bytes. That's the physical memory the pages use
 right now. Virtual bytes are the address space reserved for pages.
@@ -165,9 +150,11 @@ On macOS, the system takes back memory freed by compression lazily, when
 something else needs it. Until then, the memory the system reports for your
 process (its RSS) can be higher than the resident figures here.
 
-@snippet c-vt-compression/src/main.c memory-usage
+```rs
+{{#include ../../../example/rust-vt-compression/src/main.rs:memory-usage}}
+```
 
-Full program: @ref c-vt-compression/src/main.c
+Full program: [rust-vt-compression/src/main.rs](/example/rust-vt-compression/src/main.rs)
 
 ## Compression {#guide-scrollback-compression}
 
@@ -180,40 +167,44 @@ nothing is compressed until you ask. The shape is an idle timer: restart it when
 the terminal changes, and when it fires, compress a step at a time until there's
 nothing left to do.
 
-ghostty_terminal_compression_activity() returns an opaque token. Only compare it
+[`Terminal::compression_activity()`] returns an opaque token. Only compare it
 for equality, because it can wrap, and a change in either direction means the
 same thing. It changes only when compression-relevant state changes, so restart
 your idle timer when it does.
 
-@snippet c-vt-compression/src/main.c compression-activity
+```rs
+{{#include ../../../example/rust-vt-compression/src/main.rs:compression-activity}}
+```
 
-Full program: @ref c-vt-compression/src/main.c
+Full program: [rust-vt-compression/src/main.rs](/example/rust-vt-compression/src/main.rs)
 
-When the timer fires, call ghostty_terminal_compress() with
-`GHOSTTY_TERMINAL_COMPRESSION_MODE_INCREMENTAL`, which does a bounded amount of
+When the timer fires, call [`Terminal::compress`] with
+[`CompressionMode::Incremental`], which does a bounded amount of
 work. There are three results:
 
-- `GHOSTTY_TERMINAL_COMPRESSION_RESULT_PENDING` means there's more to do.
+- [`CompressionResult::Pending`] means there's more to do.
   Schedule another step while the terminal stays idle.
-- `GHOSTTY_TERMINAL_COMPRESSION_RESULT_COMPLETE` means you're done until the
+- [`CompressionResult::Complete`] means you're done until the
   activity token changes.
-- `GHOSTTY_TERMINAL_COMPRESSION_RESULT_UNSUPPORTED` means this platform can't
+- [`CompressionResult::Unsupported`] means this platform can't
   free memory this way. The `compression_supported` field of
-  GhosttyTerminalMemoryUsage tells you the same thing, and to lower memory there
+  [`MemoryUsage`] tells you the same thing, and to lower memory there
   you have to do something else, such as closing a terminal.
 
-@snippet c-vt-compression/src/main.c compression-idle-step
+```rs
+{{#include ../../../example/rust-vt-compression/src/main.rs:compression-idle-step}}
+```
 
-Full program: @ref c-vt-compression/src/main.c
+Full program: [rust-vt-compression/src/main.rs](/example/rust-vt-compression/src/main.rs)
 
 Complete means the pass finished, not that every page was compressed.
 Compression is opportunistic. A page can be unprofitable to compress, or hit an
 allocation or reclamation failure.
 
-`GHOSTTY_TERMINAL_COMPRESSION_MODE_FULL` does one synchronous scan of every
+[`CompressionMode::Full`] does one synchronous scan of every
 eligible page instead. It can stall on large scrollback.
 
-ghostty_terminal_compress() isn't thread-safe with anything else on the same
+[`Terminal::compress`] isn't thread-safe with anything else on the same
 terminal, so serialize it with your writes, rendering, searches and other
 terminal access.
 
