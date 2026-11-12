@@ -51,15 +51,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Building
 
-Requires [Zig](https://ziglang.org/) 0.17.x on PATH, or selected through `ZIG`.
+By default, both crates use an installed libghostty-vt. The build automatically
+probes `libghostty-vt-static` through `pkg-config`. It does not download anything
+or require Zig or Git. If discovery fails, install the library or choose one
+of the alternatives below. The checked-in bindings must match the installed
+C API; arbitrary library revisions are not guaranteed to work.
+
+For an installation without pkg-config, set both `GHOSTTY_LIB_DIR` and
+`GHOSTTY_INCLUDE_DIR` to the library and header directories. These override
+pkg-config discovery and support split installations such as Nix outputs.
+The header directory must contain `ghostty/vt.h`. When cross-compiling, supply
+a library for the target, not the host.
+
+Enable `vendored` to compile the pinned sources into a static library with Zig:
+
+```toml
+libghostty-vt = { version = "0.2.1", features = ["vendored"] }
+```
+
+This feature takes precedence over installed libraries. It requires
+[Zig](https://ziglang.org/) 0.17.x on PATH, or selected through `ZIG`.
 Set `ZIG` to an executable path or command name, without arguments, to override
-the default `zig` executable. By default, the ghostty source is fetched
-automatically at build time from the pinned commit in `build.rs`.
-Set `GHOSTTY_SOURCE_DIR` to make the build use a local Ghostty
-checkout instead. Package managers that need network-free builds can also set
-`GHOSTTY_ZIG_SYSTEM_DIR` to a pre-fetched Zig package directory; this is passed
-to `zig build --system` so Zig does not download package dependencies during
-the Cargo build script.
+the default `zig` executable. The build downloads the official source tarball
+through `ureq` with Rustls and verifies its pinned SHA-256 checksum. Verified
+archives and extracted sources are cached under Cargo's `OUT_DIR`. Network or
+checksum failures stop the build. No build path requires Git, and no prebuilt
+libraries are downloaded.
+
+With `vendored` enabled, set `GHOSTTY_SOURCE_DIR` to use local Ghostty sources
+instead of downloading them. Package managers that need network-free builds
+can also set `GHOSTTY_ZIG_SYSTEM_DIR` to a pre-fetched Zig package directory.
+This is passed to `zig build --system` so Zig does not download dependencies.
+The HTTP, checksum, and archive dependencies are enabled only by `vendored`.
 
 Vendored builds derive Zig's optimize mode from Cargo's profile: dev builds use
 `Debug`, size-optimized builds use `ReleaseSmall`, and other release builds use
@@ -71,36 +94,30 @@ run on older processors. For a binary that will run on the build machine, set
 `LIBGHOSTTY_VT_SYS_CPU=native`; a named Zig CPU model such as `x86_64_v3` can be
 used when all deployment machines support that target.
 
-The `pkg-config` path is opt-in. If you enable `libghostty-vt/pkg-config`
-(or `libghostty-vt-sys/pkg-config` for direct FFI use),
-the build will prefer an installed `libghostty-vt` discovered through
-`pkg-config` when `GHOSTTY_SOURCE_DIR` is unset. libghostty-vt is pre-1.0, so
-the checked-in bindings are expected to move with the pinned Ghostty source and
-do not guarantee compatibility with arbitrary installed C API revisions. An
-explicit `GHOSTTY_SOURCE_DIR` always wins.
+Native Nix builds and the default dev shell provide upstream's pinned
+`libghostty-vt` package through `buildInputs`. Cargo discovers it automatically
+through pkg-config, with no extra Cargo feature. Nix can substitute the library
+from Ghostty's binary cache when available. Wasm and the explicit iOS vendored
+check build from source instead.
 
-Native Nix builds use `pkg-config`: Linux consumes upstream's pinned Nix
-package (substituted from Ghostty's binary cache when available), and macOS
-static builds use the matching release XCFramework with a pinned SHA-256.
-The default dev shell provides the same library for opt-in Cargo builds.
-The macOS dynamic-link check still builds upstream's Nix package because the
-XCFramework contains no shared library. Windows, Wasm, and the iOS vendored
-check continue to build from source.
-
-Downstream Nix source builds can prefetch the pinned Ghostty source and its
-Zig package dependencies, then set `GHOSTTY_SOURCE_DIR` and
+Downstream Nix source builds can enable `vendored`, prefetch the pinned Ghostty
+source and its Zig dependencies, then set `GHOSTTY_SOURCE_DIR` and
 `GHOSTTY_ZIG_SYSTEM_DIR` rather than allowing network access in the sandbox.
 
 By default, `libghostty-vt` and `libghostty-vt-sys` link `libghostty-vt.a`.
 This statically links the Ghostty VT archive, but the final binary may still
 depend on platform runtime libraries. To link the shared library instead,
-enable `libghostty-vt/link-dynamic`.
+enable `libghostty-vt/link-dynamic`. It probes the `libghostty-vt` pkg-config
+module instead. `vendored` and `link-dynamic` are mutually exclusive.
+On Windows, put the shared library DLL next to the executable or on PATH.
+An explicitly supplied static archive must match the target's linker; the
+upstream GNU release archive does not support MSVC's `link.exe`.
 
 ```sh
 nix develop
 cargo check
 cargo test -p libghostty-vt-sys
-cargo build --manifest-path example/Cargo.toml --workspace --features libghostty-vt/pkg-config
+cargo build --manifest-path example/Cargo.toml --workspace
 ```
 
 ### Regenerating bindings
@@ -166,10 +183,10 @@ demo to the Rust API. Its ABI and allocator smoke tests are separate from
 the demo. Run both with Node.js (provided by the dev shells):
 
 ```sh
-nix develop -c cargo build --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm32-unknown-unknown --release
+nix develop -c cargo build --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm32-unknown-unknown --features wasm_rs/vendored --release
 nix develop -c node example/wasm_rs/run.mjs example/target/wasm32-unknown-unknown/release/examples/smoke.wasm example/target/wasm32-unknown-unknown/release/wasm_rs.wasm
 
-nix develop .#wasm64 -c cargo build -Zbuild-std=std,panic_abort --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm64-unknown-unknown --release
+nix develop .#wasm64 -c cargo build -Zbuild-std=std,panic_abort --locked --manifest-path example/Cargo.toml -p wasm_rs --lib --example smoke --target wasm64-unknown-unknown --features wasm_rs/vendored --release
 nix develop .#wasm64 -c node example/wasm_rs/run.mjs example/target/wasm64-unknown-unknown/release/examples/smoke.wasm example/target/wasm64-unknown-unknown/release/wasm_rs.wasm
 ```
 
@@ -197,7 +214,5 @@ cargo run
 
 With `link-dynamic`, `cargo run` finds the shared library by itself. To run a
 built example directly instead, set `LD_LIBRARY_PATH` on Linux or
-`DYLD_LIBRARY_PATH` on macOS to the directory containing the generated
-`libghostty-vt` shared library. The examples have their own target directory,
-so with the default vendored build it is under `example/target/`, at
-`<profile>/build/libghostty-vt-sys-*/out/ghostty-install/lib`.
+`DYLD_LIBRARY_PATH` on macOS to the directory containing the installed
+`libghostty-vt` shared library.

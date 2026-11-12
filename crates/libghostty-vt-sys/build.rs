@@ -1,11 +1,19 @@
 use std::env;
+#[cfg(feature = "vendored")]
+use std::io::Read;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "vendored")]
 use std::process::Command;
 
-/// Pinned ghostty commit. Update this to pull a newer version.
-const GHOSTTY_REPO: &str = "https://github.com/ghostty-org/ghostty.git";
-// vt-1.0.1, pinned by commit so tag changes cannot alter the source.
+#[cfg(feature = "vendored")]
+use sha2::{Digest, Sha256};
+
+// Keep the release version and checksums in sync with the bindings and Nix pin.
+// The commit records which source revision this release corresponds to.
+#[cfg(feature = "vendored")]
 const GHOSTTY_COMMIT: &str = "108cacb17ed8990840cd14abfce43d8ed8503ca1";
+#[cfg(feature = "vendored")]
+const GHOSTTY_VERSION: &str = "1.0.1";
 
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
@@ -59,7 +67,7 @@ impl LinkMode {
         }
     }
 
-    #[cfg(feature = "pkg-config")]
+    #[cfg(not(feature = "vendored"))]
     fn pkg_config_name(self) -> &'static str {
         match self {
             Self::Dynamic => "libghostty-vt",
@@ -97,6 +105,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_CPU");
     println!("cargo:rerun-if-env-changed=LIBGHOSTTY_VT_SYS_OPTIMIZE");
     println!("cargo:rerun-if-env-changed=GHOSTTY_SOURCE_DIR");
+    println!("cargo:rerun-if-env-changed=GHOSTTY_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=GHOSTTY_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=GHOSTTY_ZIG_SYSTEM_DIR");
     println!("cargo:rerun-if-env-changed=ZIG");
     println!("cargo:rerun-if-env-changed=TARGET");
@@ -105,27 +115,39 @@ fn main() {
     println!("cargo:rerun-if-env-changed=OPT_LEVEL");
     println!("cargo:rerun-if-changed=build.rs");
 
-    // An explicit source override should stay authoritative even when the
-    // pkg-config feature is enabled, so local Ghostty checkouts remain easy to
-    // test against.
-    if env::var_os("GHOSTTY_SOURCE_DIR").is_some() {
+    #[cfg(feature = "vendored")]
+    {
+        assert!(
+            matches!(link_mode, LinkMode::Static),
+            "vendored and link-dynamic are mutually exclusive; vendored builds a static library"
+        );
         build_vendored(link_mode, &target);
-        return;
     }
 
-    // When the pkg-config feature is enabled, prefer an installed library over
-    // fetching Ghostty. libghostty is pre-1.0, so this crate intentionally does
-    // not promise compatibility with every installed C API revision.
-    #[cfg(feature = "pkg-config")]
-    if try_pkg_config(link_mode, &target) {
-        return;
+    #[cfg(not(feature = "vendored"))]
+    {
+        // Explicit paths support installations without pkg-config, including
+        // Windows and split library/header outputs from package managers.
+        let lib_dir = env::var_os("GHOSTTY_LIB_DIR").map(PathBuf::from);
+        let include_dir = env::var_os("GHOSTTY_INCLUDE_DIR").map(PathBuf::from);
+        match (lib_dir, include_dir) {
+            (Some(lib_dir), Some(include_dir)) => {
+                link_install(link_mode, &target, &lib_dir, &include_dir);
+                if target.contains("windows") && matches!(link_mode, LinkMode::Static) {
+                    println!("cargo:rustc-link-lib=ntdll");
+                }
+            }
+            (None, None) => link_pkg_config(link_mode, &target),
+            _ => panic!(
+                "set both GHOSTTY_LIB_DIR and GHOSTTY_INCLUDE_DIR to use an installed library"
+            ),
+        }
     }
-
-    build_vendored(link_mode, &target);
 }
 
 /// Build libghostty-vt from source via zig. The zig build itself generates
 /// shared and static artifacts plus pkg-config files in `share/pkgconfig/`.
+#[cfg(feature = "vendored")]
 fn build_vendored(link_mode: LinkMode, target: &str) {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let host = env::var("HOST").expect("HOST must be set");
@@ -141,7 +163,7 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
             );
             p
         }
-        Err(_) => fetch_ghostty(&out_dir),
+        Err(_) => fetch_ghostty(),
     };
 
     // Build libghostty-vt via zig.
@@ -153,14 +175,6 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
     } else {
         install_prefix.join("include")
     };
-    // Tell the gen-bindings tool, a binary of this crate, which headers
-    // belong to this exact build. Cargo keeps one build output per feature
-    // set and profile, and ones from before a pin bump still hold the old
-    // headers, so scanning the target directory can find stale ones.
-    println!(
-        "cargo:rustc-env=LIBGHOSTTY_VT_SYS_INCLUDE_DIR={}",
-        include_dir.display()
-    );
     let zig_cache_dir = out_dir.join("zig-cache");
     let zig_global_cache_dir = out_dir.join("zig-global-cache");
 
@@ -270,31 +284,32 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
     }
 
     let lib_dir = install_prefix.join("lib");
-    let search_dirs = library_search_dirs(target, &install_prefix);
     if ios_platform.is_none() {
         warn_unused_xcframework(&lib_dir);
     }
+    link_install(link_mode, target, &lib_dir, &include_dir);
+}
 
-    let has_requested_library = search_dirs.iter().any(|dir| {
-        std::fs::read_dir(dir)
-            .unwrap_or_else(|error| panic!("failed to read {}: {error}", dir.display()))
-            .any(|entry| {
-                let entry = entry.unwrap_or_else(|error| {
-                    panic!("failed to read entry from {}: {error}", dir.display())
-                });
-                let file_name = entry.file_name();
-                let Some(file_name) = file_name.to_str() else {
-                    return false;
-                };
+/// Validate and link either a source build or an explicitly supplied library.
+fn link_install(link_mode: LinkMode, target: &str, lib_dir: &Path, include_dir: &Path) {
+    let has_requested_library = std::fs::read_dir(lib_dir)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", lib_dir.display()))
+        .any(|entry| {
+            let entry = entry.unwrap_or_else(|error| {
+                panic!("failed to read entry from {}: {error}", lib_dir.display())
+            });
+            let file_name = entry.file_name();
+            let Some(file_name) = file_name.to_str() else {
+                return false;
+            };
 
-                link_mode.matches_library(target, file_name)
-            })
-    });
+            link_mode.matches_library(target, file_name)
+        });
     assert!(
         has_requested_library,
-        "expected libghostty-vt {} in one of {:?}",
+        "expected libghostty-vt {} in {}",
         link_mode.artifact_kind(),
-        search_dirs
+        lib_dir.display()
     );
     assert!(
         include_dir.join("ghostty").join("vt.h").exists(),
@@ -302,14 +317,18 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
         include_dir.join("ghostty").join("vt.h").display()
     );
 
-    for dir in &search_dirs {
-        println!("cargo:rustc-link-search=native={}", dir.display());
-    }
+    println!("cargo:rustc-link-search=native={}", lib_dir.display());
     match link_mode {
         LinkMode::Dynamic => println!("cargo:rustc-link-lib=dylib=ghostty-vt"),
         LinkMode::Static => emit_static_link_lib(target),
     }
-    emit_include_metadata(&[include_dir]);
+    // The generator must use headers from this install, not stale outputs
+    // left behind by a previous release or a different feature set.
+    println!(
+        "cargo:rustc-env=LIBGHOSTTY_VT_SYS_INCLUDE_DIR={}",
+        include_dir.display()
+    );
+    emit_include_metadata(&[include_dir.to_owned()]);
 }
 
 /// Emit the link directive for the static archive.
@@ -329,6 +348,7 @@ fn emit_static_link_lib(target: &str) {
     }
 }
 
+#[cfg(feature = "vendored")]
 fn warn_unused_xcframework(lib_dir: &Path) {
     let xcframework = lib_dir.join("ghostty-vt.xcframework");
     if xcframework.exists() {
@@ -339,8 +359,8 @@ fn warn_unused_xcframework(lib_dir: &Path) {
     }
 }
 
-#[cfg(feature = "pkg-config")]
-fn try_pkg_config(link_mode: LinkMode, target: &str) -> bool {
+#[cfg(not(feature = "vendored"))]
+fn link_pkg_config(link_mode: LinkMode, target: &str) {
     let mut config = pkg_config::Config::new();
     let lib = match link_mode {
         LinkMode::Dynamic => config.probe(link_mode.pkg_config_name()),
@@ -349,19 +369,27 @@ fn try_pkg_config(link_mode: LinkMode, target: &str) -> bool {
             .cargo_metadata(false)
             .probe(link_mode.pkg_config_name()),
     };
-    let lib = match lib {
-        Ok(lib) => lib,
-        Err(_) => return false,
-    };
+    let lib = lib.unwrap_or_else(|error| {
+        panic!(
+            "could not find an installed libghostty-vt: {error}\n\
+             Install the library and pkg-config, set GHOSTTY_LIB_DIR and GHOSTTY_INCLUDE_DIR, \
+             or enable vendored to build from source with Zig"
+        )
+    });
 
     if let LinkMode::Static = link_mode {
         emit_static_pkg_config_metadata(&lib, target);
     }
+    if let Some(include_dir) = lib.include_paths.first() {
+        println!(
+            "cargo:rustc-env=LIBGHOSTTY_VT_SYS_INCLUDE_DIR={}",
+            include_dir.display()
+        );
+    }
     emit_include_metadata(&lib.include_paths);
-    true
 }
 
-#[cfg(feature = "pkg-config")]
+#[cfg(not(feature = "vendored"))]
 fn emit_static_pkg_config_metadata(lib: &pkg_config::Library, target: &str) {
     for path in &lib.link_paths {
         println!("cargo:rustc-link-search=native={}", path.display());
@@ -410,6 +438,7 @@ fn emit_include_metadata(include_paths: &[PathBuf]) {
 /// Defaults to `ReleaseFast` for optimized builds. If `DEBUG` is `true` (as cargo sets for the
 /// `dev` profile), `Debug` mode is used. Otherwise, if `OPT_LEVEL` is `s` or `z`, `ReleaseSmall`
 /// is used.
+#[cfg(feature = "vendored")]
 fn zig_optimize_mode() -> &'static str {
     if let Ok(override_mode) = env::var("LIBGHOSTTY_VT_SYS_OPTIMIZE") {
         return match override_mode.as_str() {
@@ -433,53 +462,77 @@ fn zig_optimize_mode() -> &'static str {
     }
 }
 
-/// Clone ghostty at the pinned commit into OUT_DIR/ghostty-src.
-/// Reuses an existing clone if the commit matches.
-fn fetch_ghostty(out_dir: &Path) -> PathBuf {
-    let src_dir = out_dir.join("ghostty-src");
-    let stamp = src_dir.join(".ghostty-commit");
-
-    // Skip fetch if we already have the right commit.
-    if stamp.exists()
-        && let Ok(existing) = std::fs::read_to_string(&stamp)
-        && existing.trim() == GHOSTTY_COMMIT
-    {
-        return src_dir;
-    }
-
-    // Clean and clone fresh.
-    if src_dir.exists() {
-        std::fs::remove_dir_all(&src_dir)
-            .unwrap_or_else(|e| panic!("failed to remove {}: {e}", src_dir.display()));
-    }
-
-    eprintln!("Fetching ghostty {GHOSTTY_COMMIT} ...");
-
-    let mut clone = Command::new("git");
-    // Cargo's nested OUT_DIR plus Ghostty's fuzz corpus names can exceed
-    // Windows MAX_PATH. Scope long-path support to this fetched repository.
-    clone
-        .arg("clone")
-        .arg("--config")
-        .arg("core.longpaths=true")
-        .arg("--filter=blob:none")
-        .arg("--no-checkout")
-        .arg(GHOSTTY_REPO)
-        .arg(&src_dir);
-    run(clone, "git clone ghostty");
-
-    let mut checkout = Command::new("git");
-    checkout
-        .arg("checkout")
-        .arg(GHOSTTY_COMMIT)
-        .current_dir(&src_dir);
-    run(checkout, "git checkout ghostty commit");
-
-    std::fs::write(&stamp, GHOSTTY_COMMIT).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
-
-    src_dir
+/// Use the release's source distribution, not GitHub's generated tag archive:
+/// only the former includes LIB_VERSION and the packaged library sources.
+#[cfg(feature = "vendored")]
+fn fetch_ghostty() -> PathBuf {
+    eprintln!("Using Ghostty {GHOSTTY_VERSION} (source revision {GHOSTTY_COMMIT})");
+    fetch_release(
+        &format!("libghostty-vt-{GHOSTTY_VERSION}.tar.gz"),
+        "333dfce97641ef9b536bb9e08907ad86abaaada50e8f7417b70d9284adef37aa",
+    )
+    .join(format!("libghostty-vt-{GHOSTTY_VERSION}"))
 }
 
+/// Cache a verified, completely extracted release under Cargo's OUT_DIR.
+/// A failed download or extraction never writes the completion stamp, and
+/// network failures never silently switch to a different library or source.
+#[cfg(feature = "vendored")]
+fn fetch_release(name: &str, checksum: &str) -> PathBuf {
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set"));
+    let unpacked = out_dir.join(checksum);
+    let stamp = unpacked.join(".complete");
+    if stamp.is_file() {
+        return unpacked;
+    }
+    let archive = out_dir.join(name);
+    let partial = out_dir.join(format!("{name}.part"));
+    if !archive.exists() {
+        let url =
+            format!("https://release.files.ghostty.org/libghostty-vt/{GHOSTTY_VERSION}/{name}");
+        eprintln!("Downloading {url}");
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(120)))
+            .build()
+            .into();
+        let mut response = agent.get(&url).call().expect("download Ghostty release");
+        let mut file = std::fs::File::create(&partial).expect("create release download");
+        std::io::copy(&mut response.body_mut().as_reader(), &mut file)
+            .expect("read release download");
+        drop(file);
+    }
+    let downloaded = if archive.exists() { &archive } else { &partial };
+    let mut file = std::fs::File::open(downloaded).expect("open release download");
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 65536];
+    loop {
+        let count = file.read(&mut buffer).expect("hash release download");
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    drop(file);
+    let actual = format!("{:x}", hash.finalize());
+    if actual != checksum {
+        std::fs::remove_file(downloaded).expect("remove invalid release download");
+        panic!("SHA-256 mismatch for {name}: expected {checksum}, got {actual}");
+    }
+    if downloaded == &partial {
+        std::fs::rename(&partial, &archive).expect("cache verified release download");
+    }
+    if unpacked.exists() {
+        std::fs::remove_dir_all(&unpacked).expect("remove incomplete release extraction");
+    }
+    let file = std::fs::File::open(&archive).expect("open verified release archive");
+    tar::Archive::new(flate2::read::GzDecoder::new(file))
+        .unpack(&unpacked)
+        .expect("extract release tarball");
+    std::fs::write(stamp, checksum).expect("mark release extraction complete");
+    unpacked
+}
+
+#[cfg(feature = "vendored")]
 fn run(mut command: Command, context: &str) {
     let status = command
         .status()
@@ -487,21 +540,11 @@ fn run(mut command: Command, context: &str) {
     assert!(status.success(), "{context} failed with status {status}");
 }
 
-/// Returns directories to search for the built library artifact.
-/// On Windows, Zig may place the DLL in `bin/` and the import lib in `lib/`,
-/// so both are included.
-fn library_search_dirs(target: &str, install_prefix: &Path) -> Vec<PathBuf> {
-    let mut dirs = vec![install_prefix.join("lib")];
-    if target.contains("windows") {
-        dirs.push(install_prefix.join("bin"));
-    }
-    dirs
-}
-
 /// The platform directory inside `ghostty-vt.xcframework` for an iOS Rust
 /// target, or `None` for targets that build directly via `-Dtarget`. Ghostty
 /// emits an arm64-only simulator library (what the simulator runs on Apple
 /// silicon), so x86_64-apple-ios is not supported here.
+#[cfg(feature = "vendored")]
 fn ios_xcframework_platform(target: &str) -> Option<&'static str> {
     match target {
         "aarch64-apple-ios" => Some("ios-arm64"),
@@ -513,6 +556,7 @@ fn ios_xcframework_platform(target: &str) -> Option<&'static str> {
 /// Copy an xcframework platform's static lib + headers into the flat
 /// `<prefix>/lib/libghostty-vt.a` and `<prefix>/include` layout the link
 /// emission expects, replacing the host-native artifacts the emit installed.
+#[cfg(feature = "vendored")]
 fn extract_xcframework_lib(install_prefix: &Path, platform: &str) {
     let platform_dir = install_prefix
         .join("lib")
@@ -554,6 +598,7 @@ fn extract_xcframework_lib(install_prefix: &Path, platform: &str) {
 }
 
 /// Recursively copy a directory tree (merging into `dst` if it exists).
+#[cfg(feature = "vendored")]
 fn copy_dir_all(src: &Path, dst: &Path) {
     std::fs::create_dir_all(dst)
         .unwrap_or_else(|error| panic!("failed to create {}: {error}", dst.display()));
@@ -576,6 +621,7 @@ fn copy_dir_all(src: &Path, dst: &Path) {
     }
 }
 
+#[cfg(feature = "vendored")]
 fn zig_target(target: &str) -> String {
     let value = match target {
         "x86_64-unknown-linux-gnu" => "x86_64-linux-gnu",

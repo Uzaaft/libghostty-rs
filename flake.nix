@@ -89,40 +89,7 @@
             (previousAttrs.patches or [])
             ++ ["${ghostty}/nix/patches/zig-0.17-ios-process-replace.patch"];
         });
-        ghosttySourceLib = ghostty.packages.${system}.libghostty-vt;
-        # The release contains a universal macOS archive, but no dylib. Keep
-        # the upstream derivation for dynamic-link coverage and use the signed
-        # release's checksum for ordinary static builds. Tie it to the source
-        # pin so a later bindings bump cannot silently use an older archive.
-        ghosttyLib =
-          if pkgs.stdenv.isDarwin
-          then
-            assert ghostty.rev == "108cacb17ed8990840cd14abfce43d8ed8503ca1";
-              pkgs.runCommand "libghostty-vt-1.0.1-macos" {
-                src = pkgs.fetchurl {
-                  url = "https://release.files.ghostty.org/libghostty-vt/1.0.1/ghostty-vt-1.0.1.xcframework.zip";
-                  sha256 = "sha256-wPljEnf3JhVMj1IZVNF83EGqxGJvwN+M+SWhnuWOgps=";
-                };
-                nativeBuildInputs = [pkgs.unzip];
-              } ''
-                unzip -q "$src"
-                slice=ghostty-vt.xcframework/macos-arm64_x86_64
-                mkdir -p "$out/lib/pkgconfig"
-                cp "$slice/libghostty-vt.a" "$out/lib/"
-                cp -R "$slice/Headers" "$out/include"
-                cat > "$out/lib/pkgconfig/libghostty-vt-static.pc" <<EOF
-                prefix=$out
-                libdir=\''${prefix}/lib
-                includedir=\''${prefix}/include
-
-                Name: libghostty-vt-static
-                Description: Ghostty VT library (static)
-                Version: 1.0.1
-                Libs: -L\''${libdir} -lghostty-vt
-                Cflags: -I\''${includedir}
-                EOF
-              ''
-          else ghosttySourceLib;
+        ghosttyLib = ghostty.packages.${system}.libghostty-vt;
 
         miriCommand = pkgs.writeShellApplication {
           name = "libghostty-miri";
@@ -165,7 +132,7 @@
             # doc-checked or tested in CI. Setting it in the shared arguments
             # also builds the dependency artifacts with it, so the checks
             # below don't each rebuild png and its dependencies.
-            cargoExtraArgs = "--locked --features libghostty-vt-sys/pkg-config --features libghostty-vt/png";
+            cargoExtraArgs = "--locked --features libghostty-vt/png";
 
             nativeBuildInputs = [
               pkgs.pkg-config
@@ -233,14 +200,12 @@
           );
 
           # Regenerate the bindings from the pinned Ghostty headers and fail if
-          # they differ from the checked-in ones. GHOSTTY_INCLUDE_DIR is used
-          # instead of GHOSTTY_SOURCE_DIR so that the build script keeps linking
-          # the prebuilt library rather than building Ghostty from source.
+          # they differ from the checked-in ones. Use the pinned source headers
+          # with the installed library, without compiling Ghostty again.
           #
-          # The headers come from the flake input, but users build against
-          # the commit pinned in build.rs. Nothing else ties the two together,
-          # so check that they agree first; otherwise bumping only one of them
-          # would leave this check green while comparing the wrong headers.
+          # Cargo downloads releases, while Nix uses a source revision. Check
+          # both the revision and its header version so a bindings bump cannot
+          # leave Cargo downloading an older release with matching old hashes.
           bindings-fresh = craneCheckLib.mkCargoDerivation (
             commonArgs
             // {
@@ -250,6 +215,7 @@
               cargoArtifacts = null;
               pnameSuffix = "-bindings";
               GHOSTTY_INCLUDE_DIR = "${ghostty}/include";
+              GHOSTTY_LIB_DIR = "${pkgs.lib.getDev ghosttyLib}/lib";
               LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
               buildPhaseCargoCommand = ''
                 if ! grep -qF 'const GHOSTTY_COMMIT: &str = "${ghostty.rev}";' \
@@ -259,9 +225,18 @@
                   echo "Bump both to the same commit." >&2
                   exit 1
                 fi
+                release_version=$(sed -n 's/^#define GHOSTTY_VT_VERSION "\([^"]*\)"$/\1/p' \
+                  ${ghostty}/include/ghostty/vt/version.h)
+                if [ -z "$release_version" ] || ! grep -qFx \
+                  "const GHOSTTY_VERSION: &str = \"$release_version\";" \
+                  crates/libghostty-vt-sys/build.rs; then
+                  echo "error: GHOSTTY_VERSION in build.rs must match the pinned Ghostty headers ($release_version)." >&2
+                  echo "Update the release version and download checksums together." >&2
+                  exit 1
+                fi
                 # Not commonArgs.cargoExtraArgs: it also enables libghostty-vt
                 # features, which cargo rejects with only the -sys crate selected.
-                cargo run --locked --features libghostty-vt-sys/pkg-config -p libghostty-vt-sys \
+                cargo run --locked -p libghostty-vt-sys \
                   --features libghostty-vt-sys/bindgen-tool --bin gen-bindings
                 cargo fmt -p libghostty-vt-sys
                 for file in bindings.rs layouts.rs; do
@@ -313,13 +288,6 @@
             commonArgs
             // {
               inherit cargoArtifacts;
-              # The Apple release has no shared library. Build upstream's
-              # dylib only for this check, not for every static consumer.
-              buildInputs = map (input:
-                if input == ghosttyLib
-                then ghosttySourceLib
-                else input)
-              commonArgs.buildInputs;
               cargoExtraArgs = "${commonArgs.cargoExtraArgs} --features libghostty-vt-sys/link-dynamic";
               cargoTestExtraArgs = "--workspace --all-targets";
             }
@@ -331,8 +299,8 @@
         };
 
         devShells.default = craneLib.devShell {
-          # Native Cargo examples opt into pkg-config; cross-target and
-          # explicit source builds still use Zig from this shell.
+          # Native Cargo builds discover this library automatically through
+          # pkg-config; vendored cross-target builds use Zig from this shell.
           buildInputs = [ghosttyLib];
           packages = [
             devToolchain
