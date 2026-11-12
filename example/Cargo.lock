@@ -540,6 +540,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_snapshot"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_stream"
 version = "0.0.0"
 dependencies = [

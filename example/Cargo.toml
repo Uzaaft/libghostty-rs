@@ -24,6 +24,7 @@ members = [
   "rust-vt-search",
   "rust-vt-selection",
   "rust-vt-selection-gesture",
+  "rust-vt-snapshot",
   "rust-vt-stream",
   "wasm_rs",
 ]
