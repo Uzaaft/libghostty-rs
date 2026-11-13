@@ -9,6 +9,11 @@
 //! [libghostty guides](https://lib.ghostty.org/vt/guides.html).
 //! They remain useful even though some details will be different in Rust.
 //!
+//! # Rust version
+//!
+//! The minimum supported Rust version is 1.96. Enabling `allocator_api`
+//! requires Rust 1.100 or newer and adapts standard library allocators.
+//!
 //! # Sections
 //!
 //! libghostty-vt can be broadly broken down into these sections, whose modules
@@ -100,6 +105,11 @@
     mitigated situations, and it is not feasible to document them all"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
+
+// Cargo's rust-version cannot express a higher minimum for an optional feature.
+#[cfg(feature = "allocator_api")]
+#[rustversion::before(1.100)]
+compile_error!("The `allocator_api` feature requires Rust 1.100 or newer.");
 
 pub use libghostty_vt_sys as ffi;
 

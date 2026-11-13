@@ -8,7 +8,7 @@ use std::{
 };
 
 #[cfg(feature = "allocator_api")]
-use allocator_api2::alloc;
+use std::alloc;
 
 use crate::{
     error::{Error, Result},
@@ -650,12 +650,14 @@ mod tests {
     #[cfg(all(feature = "allocator_api", not(miri)))]
     #[test]
     fn allocator_api_allocators_keep_their_state() {
-        use std::{alloc::Layout, cell::Cell, ptr::NonNull};
-
-        use allocator_api2::alloc::{AllocError, Global};
+        use std::{
+            alloc::{AllocError, Global, Layout},
+            cell::Cell,
+            ptr::NonNull,
+        };
 
         struct Counting(Cell<usize>);
-        unsafe impl allocator_api2::alloc::Allocator for Counting {
+        unsafe impl std::alloc::Allocator for Counting {
             fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
                 self.0.set(self.0.get() + 1);
                 Global.allocate(layout)
