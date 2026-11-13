@@ -1,0 +1,60 @@
+name: Book
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  book:
+    name: Build and deploy
+    runs-on: namespace-profile-linux-x86-sm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Namespace cache
+        uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1.4.3
+        with:
+          cache: |
+            nix
+            rust
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - name: Use Ghostty binary cache
+        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with:
+          name: ghostty
+          skipPush: true
+
+      # The preprocessors are not in nixpkgs. Pin them so a new release cannot
+      # change the rendered book or break the build without a commit here.
+      - name: Install mdBook and preprocessors
+        uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: mdbook@0.5.4,mdbook-rustdoc-links@3.0.2,mdbook-permalinks@3.0.2
+
+      # mdbook-rustdoc-links runs `cargo doc` on libghostty-vt to resolve the
+      # book's API links, so the build needs the dev shell's Zig and Rust.
+      - name: Build book
+        run: nix develop -c mdbook build
+
+      # Vercel's own build image cannot compile the crate, so CI uploads the
+      # rendered HTML and Vercel only serves it. Fork PRs get no secrets, and
+      # the book is only published from master.
+      - name: Deploy to Vercel
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_fr91hydVu6mJHBtqaSqVUVzm
+          VERCEL_PROJECT_ID: prj_JYvFcqdBKIJpIoKvF6Y9AmrN3j23
+        run: nix develop -c npx --yes vercel@65.17.0 deploy book --prod --yes --token "$VERCEL_TOKEN"
