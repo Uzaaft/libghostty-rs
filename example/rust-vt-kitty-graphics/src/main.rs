@@ -60,11 +60,11 @@ impl graphics::DecodePng for StubPngDecoder {
 /// `now_ms` comes from a clock you choose, such as milliseconds since
 /// your app started. Always use the same clock with the same starting
 /// point.
-fn tick_animations(terminal: &mut Terminal<'_, '_>, now_ms: u64) -> Option<u64> {
+fn tick_animations(graphics: &mut Graphics<'_>, now_ms: u64) -> Option<u64> {
     /// The shortest time between two redraws. About 8 ms suits a 120 Hz display.
     pub const MIN_FRAME_INTERVAL_MS: u64 = 8;
 
-    let Ok(Some(next_ms)) = terminal.kitty_graphics_animation_tick(now_ms) else {
+    let Ok(Some(next_ms)) = graphics.tick_animation(now_ms) else {
         return None;
     };
 
@@ -110,16 +110,14 @@ fn run_animation(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
     terminal.vt_write(b"\x1b_Ga=a,i=2,s=3,q=2\x1b\\");
 
     // Draw three frames, following each delay.
+    let mut graphics = terminal.kitty_graphics()?;
     let mut now_ms = 0u64;
     for _ in 0..3 {
-        let delay_ms = tick_animations(terminal, now_ms).expect("tick should succeed");
+        let delay_ms = tick_animations(&mut graphics, now_ms).expect("tick should succeed");
 
         // The tick invalidates image handles, so print_image() looks the
         // image up again. The generation changes whenever the frame does.
         print!("  t={now_ms} ms: ");
-        let graphics = terminal
-            .kitty_graphics()?
-            .expect("graphics should be enabled");
         print_image(&graphics, 2);
         println!(", next redraw in {delay_ms} ms");
 
@@ -130,7 +128,8 @@ fn run_animation(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
     terminal.vt_write(b"\x1b_Ga=a,i=2,s=1,q=2\x1b\\");
 
     // Writing to the terminal invalidates the storage handle. Get it again.
-    if tick_animations(terminal, now_ms).is_none() {
+    let mut graphics = terminal.kitty_graphics()?;
+    if tick_animations(&mut graphics, now_ms).is_none() {
         println!("  t={now_ms} ms: stopped, no redraw needed");
     }
 
@@ -158,9 +157,7 @@ fn draw_images<'alloc>(
     let mut image_it = images.update(snapshot)?;
 
     // The storage is only needed to read pixels.
-    let graphics = terminal
-        .kitty_graphics()?
-        .expect("graphics should be enabled");
+    let graphics = terminal.kitty_graphics()?;
 
     let mut count = 0usize;
     while let Some(image) = image_it.next() {
@@ -327,9 +324,7 @@ fn main() -> Result<(), Error> {
     // sends, places or deletes an image, but not when images only move on
     // screen. That is why the frames below use the render state's
     // placements generation to know when to read the list again.
-    let graphics = terminal
-        .kitty_graphics()?
-        .expect("graphics should be enabled");
+    let graphics = terminal.kitty_graphics()?;
     let storage_generation = graphics.generation()?;
     println!("\nStorage generation: {storage_generation}");
 
