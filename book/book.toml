@@ -22,7 +22,7 @@ build.preludes = [
   "libghostty_vt::selection::Selection",
   "libghostty_vt::selection::gesture::{self,*}",
   "libghostty_vt::style::Style",
-  "libghostty_vt::terminal::{CompressionMode,CompressionResult,MemoryUsage,ScrollViewport}",
+  "libghostty_vt::terminal::{Boundary,CompressionMode,CompressionResult,MemoryUsage,ScrollViewport,StringEnd,WriteStop}",
 ]
 
 [preprocessor.permalinks]
