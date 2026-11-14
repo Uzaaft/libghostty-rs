@@ -444,50 +444,6 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     pub fn history_rows_alternate(&self) -> Result<Option<u64>> {
         self.get_optional(Data::HISTORY_ROWS_ALTERNATE)
     }
-
-    /// Number of Kitty graphics images restored for the primary screen at
-    /// READY.
-    ///
-    /// These images can be placed and queried right away, but their pixels
-    /// arrive later through [`IncrementalDecoder::next`]. Until then,
-    /// `kitty::graphics::Image::data` returns `Ok(None)` for them.
-    /// This value becomes available after READY validates, and is zero in a
-    /// library built without Kitty graphics.
-    pub fn kitty_images_primary(&self) -> Result<u32> {
-        self.get(Data::KITTY_IMAGES_PRIMARY)
-    }
-
-    /// Number of Kitty graphics images restored for the alternate screen at
-    /// READY.
-    ///
-    /// Returns `Ok(None)` when the snapshot does not declare an alternate
-    /// screen. See [`Self::kitty_images_primary`].
-    pub fn kitty_images_alternate(&self) -> Result<Option<u32>> {
-        self.get_optional(Data::KITTY_IMAGES_ALTERNATE)
-    }
-
-    /// Bytes of Kitty graphics pixels for the primary screen that were still
-    /// to come at READY.
-    ///
-    /// Use it to size a progress indicator while the pixels arrive, adding
-    /// up [`ProgressKind::Image::bytes`] for the primary screen after each
-    /// call to [`IncrementalDecoder::next`]. Pixels that are dropped report
-    /// zero bytes, so the sum can end up below this total. Pixels may arrive
-    /// between history pages, so they are only known to be done once
-    /// [`IncrementalDecoder::next`] returns `Ok(None)`. This value becomes
-    /// available after READY validates.
-    pub fn kitty_pending_bytes_primary(&self) -> Result<u64> {
-        self.get(Data::KITTY_PENDING_BYTES_PRIMARY)
-    }
-
-    /// Bytes of Kitty graphics pixels for the alternate screen that were
-    /// still to come at READY.
-    ///
-    /// Returns `Ok(None)` when the snapshot does not declare an alternate
-    /// screen. See [`Self::kitty_pending_bytes_primary`].
-    pub fn kitty_pending_bytes_alternate(&self) -> Result<Option<u64>> {
-        self.get_optional(Data::KITTY_PENDING_BYTES_ALTERNATE)
-    }
 }
 
 impl Drop for Decoder<'_, '_> {
@@ -634,6 +590,49 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
                 decoder: &self.decoder,
             },
         )
+    }
+
+    /// Number of Kitty graphics images restored for the primary screen at
+    /// READY.
+    ///
+    /// These images can be placed and queried right away, but their pixels
+    /// arrive later through [`Self::next`]. Until then,
+    /// `kitty::graphics::Image::data` returns `Ok(None)` for them.
+    /// This value is zero in a library built without Kitty graphics.
+    pub fn kitty_images_primary(&self) -> Result<u32> {
+        self.decoder.get(Data::KITTY_IMAGES_PRIMARY)
+    }
+
+    /// Number of Kitty graphics images restored for the alternate screen at
+    /// READY.
+    ///
+    /// Returns `Ok(None)` when the snapshot does not declare an alternate
+    /// screen. See [`Self::kitty_images_primary`].
+    pub fn kitty_images_alternate(&self) -> Result<Option<u32>> {
+        self.decoder.get_optional(Data::KITTY_IMAGES_ALTERNATE)
+    }
+
+    /// Bytes of Kitty graphics pixels for the primary screen that were still
+    /// to come at READY.
+    ///
+    /// Use it to size a progress indicator while the pixels arrive, adding
+    /// up [`ProgressKind::Image::bytes`] for the primary screen after each
+    /// call to [`Self::next`]. Pixels that are dropped report zero bytes, so
+    /// the sum can end up below this total. Pixels may arrive between history
+    /// pages, so they are only known to be done once [`Self::next`] returns
+    /// `Ok(None)`.
+    pub fn kitty_pending_bytes_primary(&self) -> Result<u64> {
+        self.decoder.get(Data::KITTY_PENDING_BYTES_PRIMARY)
+    }
+
+    /// Bytes of Kitty graphics pixels for the alternate screen that were
+    /// still to come at READY.
+    ///
+    /// Returns `Ok(None)` when the snapshot does not declare an alternate
+    /// screen. See [`Self::kitty_pending_bytes_primary`].
+    pub fn kitty_pending_bytes_alternate(&self) -> Result<Option<u64>> {
+        self.decoder
+            .get_optional(Data::KITTY_PENDING_BYTES_ALTERNATE)
     }
 
     /// Get a reference to the underlying decoder.
@@ -842,18 +841,7 @@ mod tests {
             let mut bytes = Vec::new();
             terminal.encode_snapshot(&mut bytes).unwrap();
 
-            let decoder = Decoder::new_buf(&bytes).unwrap();
-            assert!(matches!(
-                decoder.kitty_images_primary(),
-                Err(Error::InvalidValue)
-            ));
-            assert_eq!(decoder.kitty_images_alternate().unwrap(), None);
-            assert!(matches!(
-                decoder.kitty_pending_bytes_primary(),
-                Err(Error::InvalidValue)
-            ));
-            assert_eq!(decoder.kitty_pending_bytes_alternate().unwrap(), None);
-            let mut incremental = decoder.ready().unwrap();
+            let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
             // The Cargo feature gates Rust APIs, not the linked library's
             // capabilities (e.g. when using pkg-config).
             let kitty_graphics = crate::build_info::supports_kitty_graphics().unwrap();
@@ -866,20 +854,19 @@ mod tests {
                 if finished {
                     while incremental.next().unwrap().is_some() {}
                 }
-                let decoder = incremental.decoder();
-                assert_eq!(decoder.kitty_images_primary().unwrap(), primary_images);
+                assert_eq!(incremental.kitty_images_primary().unwrap(), primary_images);
                 assert_eq!(
-                    decoder.kitty_images_alternate().unwrap(),
+                    incremental.kitty_images_alternate().unwrap(),
                     alternate.then_some(alternate_images)
                 );
                 // These are totals captured at READY, not a remaining-byte
                 // counter: FINISH must not reduce them to zero.
                 assert_eq!(
-                    decoder.kitty_pending_bytes_primary().unwrap(),
+                    incremental.kitty_pending_bytes_primary().unwrap(),
                     primary_bytes
                 );
                 assert_eq!(
-                    decoder.kitty_pending_bytes_alternate().unwrap(),
+                    incremental.kitty_pending_bytes_alternate().unwrap(),
                     alternate.then_some(alternate_bytes)
                 );
             }
