@@ -756,7 +756,7 @@ mod tests {
             assert_eq!(search.scroll().unwrap(), scroll);
             search.set_needle(&mut terminal, b"hit").unwrap();
             search.run(&mut terminal).unwrap();
-            assert!(search.select_next(&mut terminal).unwrap());
+            assert!(search.select_next(&mut terminal).unwrap().is_some());
             terminal.scrollbar().unwrap().offset
         };
 

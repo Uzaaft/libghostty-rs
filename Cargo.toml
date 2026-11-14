@@ -10,5 +10,4 @@ rust-version = "1.96"
 version = "0.2.1"
 
 [workspace.dependencies]
-libghostty-vt = { path = "crates/libghostty-vt", version = "0.2.1" }
 libghostty-vt-sys = { path = "crates/libghostty-vt-sys", version = "0.2.1" }

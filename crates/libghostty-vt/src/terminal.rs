@@ -1524,6 +1524,8 @@ pub struct CompressionActivity(u64);
 mod tests {
     use super::*;
     use crate::RenderState;
+    use crate::grid_ref::TrackedGridRef;
+    use crate::point::{self, Point};
     use crate::render::CursorVisualStyle;
     use std::cell::RefCell;
 
@@ -2004,7 +2006,7 @@ mod tests {
             .unwrap()
             .codepoint()
             .unwrap();
-        assert_eq!(codepoint, 0xe9);
+        assert_eq!(codepoint, '\u{e9}');
     }
 
     #[test]
@@ -2028,7 +2030,7 @@ mod tests {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
 
-    fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> u32 {
+    fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> char {
         let snapshot = tracked
             .snapshot(terminal)
             .expect("tracked snapshot should not fail")
@@ -2052,10 +2054,7 @@ mod tests {
         terminal.vt_write(b"\r\ndelta");
 
         assert!(tracked.has_value());
-        assert_eq!(
-            codepoint_at_tracked_ref(&terminal, &tracked),
-            u32::from('a')
-        );
+        assert_eq!(codepoint_at_tracked_ref(&terminal, &tracked), 'a');
         assert_eq!(
             tracked
                 .point(point::Space::Screen)
@@ -2100,10 +2099,7 @@ mod tests {
             .expect("tracked grid ref should set to a new point");
 
         assert!(tracked.has_value());
-        assert_eq!(
-            codepoint_at_tracked_ref(&terminal, &tracked),
-            u32::from('e')
-        );
+        assert_eq!(codepoint_at_tracked_ref(&terminal, &tracked), 'e');
     }
 
     #[test]
@@ -2158,7 +2154,7 @@ mod tests {
 
         assert_eq!(
             terminal
-                .point_from_grid_ref(&grid_ref, point::Space::Active)
+                .point_from_grid_ref(grid_ref, point::Space::Active)
                 .expect("grid ref point conversion should not fail")
                 .expect("grid ref should be representable in active space"),
             original

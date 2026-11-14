@@ -424,7 +424,7 @@ mod tests {
                     .selection()
                     .unwrap()
                     .unwrap()
-                    .equals(&terminal, &selection)
+                    .equals(&selection)
                     .unwrap()
             );
         }

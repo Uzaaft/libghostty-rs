@@ -2317,12 +2317,13 @@ mod tests {
         let second_row = iteration.next().unwrap().cells_raw().unwrap();
         let first_row: Vec<_> = first_row.collect();
         assert_eq!(first_row, expected);
-        let codepoints =
-            |cells: &[Cell]| -> Vec<u32> { cells.iter().map(|c| c.codepoint().unwrap()).collect() };
-        assert_eq!(codepoints(&first_row), [0x61, 0x62, 0, 0]);
+        let codepoints = |cells: &[Cell]| -> Vec<char> {
+            cells.iter().map(|c| c.codepoint().unwrap()).collect()
+        };
+        assert_eq!(codepoints(&first_row), ['a', 'b', '\0', '\0']);
         assert_eq!(
             codepoints(&second_row.collect::<Vec<_>>()),
-            [0x63, 0x64, 0, 0]
+            ['c', 'd', '\0', '\0']
         );
     }
 
@@ -2393,16 +2394,7 @@ mod tests {
                 .iter()
                 .map(|c| c.codepoint().unwrap())
                 .collect::<Vec<_>>(),
-            [
-                u32::from('a'),
-                u32::from('B'),
-                u32::from('c'),
-                u32::from('界'),
-                0,
-                u32::from('e'),
-                u32::from('P'),
-                0
-            ]
+            ['a', 'B', 'c', '界', '\0', 'e', 'P', '\0']
         );
         assert!(cells[1].has_styling().unwrap());
         assert!(!cells[1].has_hyperlink().unwrap());
@@ -2566,18 +2558,13 @@ mod tests {
 
         // A 1x1 RGB image displayed at the cursor, but no cell size yet.
         terminal.vt_write(b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;////\x1b\\");
+
         // The image was stored, so an empty list is due to the cell size.
         // Only the check needs the `kitty` wrappers; libghostty stores the
         // image either way.
         #[cfg(feature = "kitty-graphics")]
-        assert!(
-            terminal
-                .kitty_graphics()
-                .unwrap()
-                .expect("kitty graphics enabled")
-                .image(1)
-                .is_some()
-        );
+        assert!(terminal.kitty_graphics().unwrap().image(1).is_some());
+
         let snapshot = state.update(&terminal).unwrap();
         let generation = snapshot.image_placements_generation().unwrap();
         {
@@ -2656,12 +2643,8 @@ mod tests {
         // only the `kitty` wrappers can read.
         #[cfg(feature = "kitty-graphics")]
         {
-            let image = terminal
-                .kitty_graphics()
-                .unwrap()
-                .expect("kitty graphics enabled")
-                .image(7)
-                .unwrap();
+            let graphics = terminal.kitty_graphics().unwrap();
+            let image = graphics.image(7).unwrap();
             assert_eq!(found[0].1, image.generation().unwrap());
         }
 
