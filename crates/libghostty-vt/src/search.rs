@@ -165,7 +165,7 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// The search starts idle with no needle: it reports [`Status::Complete`]
     /// and finds nothing. Set a needle with [`Self::set_needle`] to start
     /// searching.
-    pub fn new(terminal: &mut Terminal<'term, '_>) -> Result<Self> {
+    pub fn new(terminal: &Terminal<'term, '_>) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_inner(terminal, std::ptr::null()) }
     }
@@ -176,14 +176,14 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// regarding custom memory management and lifetimes.
     pub fn new_with_alloc<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
-        terminal: &mut Terminal<'term, '_>,
+        terminal: &Terminal<'term, '_>,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(terminal, alloc.to_raw()) }
     }
 
     unsafe fn new_inner(
-        terminal: &mut Terminal<'term, '_>,
+        terminal: &Terminal<'term, '_>,
         alloc: *const ffi::Allocator,
     ) -> Result<Self> {
         let mut raw = std::ptr::null_mut();
@@ -265,10 +265,15 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// use, even after it reports complete.
     ///
     /// Each call does a bounded amount of work.
-    pub fn feed(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<()> {
+    pub fn feed<'s>(
+        &'s mut self,
+        terminal: &mut Terminal<'_, '_>,
+    ) -> Result<Snapshot<'s, 'alloc, 'term>> {
         self.check_terminal(terminal)?;
         // SAFETY: The exclusive terminal borrow serializes reading it.
-        from_result(unsafe { ffi::ghostty_search_feed(self.inner.as_raw()) })
+        from_result(unsafe { ffi::ghostty_search_feed(self.inner.as_raw()) })?;
+
+        Ok(Snapshot { search: self })
     }
 
     /// Make a bounded amount of search progress, returning the new status.
@@ -332,24 +337,6 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
         self.get(ffi::SearchData::TOTAL_MATCHES)
     }
 
-    /// Index of the selected match, or `None` when nothing is selected.
-    ///
-    /// This indexes the newest to oldest ordering of [`Snapshot::matches`],
-    /// where 0 is the newest match, so a "k of n" find bar renders
-    /// `index + 1` of [`Self::total_matches`].
-    pub fn selected_index(&self) -> Result<Option<usize>> {
-        let mut index = 0usize;
-        // SAFETY: Reading only touches search-owned memory.
-        let result = unsafe {
-            ffi::ghostty_search_get(
-                self.inner.as_raw(),
-                ffi::SearchData::SELECTED_INDEX,
-                (&raw mut index).cast(),
-            )
-        };
-        from_optional_result(result, index)
-    }
-
     /// Current scroll policy.
     pub fn scroll(&self) -> Result<Scroll> {
         self.get::<ffi::SearchScroll::Type>(ffi::SearchData::SELECT_SCROLL)?
@@ -372,17 +359,6 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
         Ok(self)
     }
 
-    fn select(
-        &mut self,
-        terminal: &mut Terminal<'_, '_>,
-        select: unsafe extern "C" fn(ffi::Search) -> ffi::Result::Type,
-    ) -> Result<bool> {
-        self.check_terminal(terminal)?;
-        // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
-        let result = unsafe { select(self.inner.as_raw()) };
-        Ok(from_optional_result(result, ())?.is_some())
-    }
-
     /// Select the next match, moving toward older content: from the bottom
     /// of the screen upward into history, the direction a search from the
     /// prompt usually wants. Wraps around past the oldest match.
@@ -391,30 +367,29 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// time relative to feeds. The viewport scrolls to the newly selected
     /// match according to [`Self::set_scroll`]. Returns `false` when there
     /// are no matches.
-    pub fn select_next(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<bool> {
-        self.select(terminal, ffi::ghostty_search_select_next)
+    pub fn select_next<'s>(
+        &'s mut self,
+        terminal: &mut Terminal<'_, '_>,
+    ) -> Result<Option<Snapshot<'s, 'alloc, 'term>>> {
+        self.check_terminal(terminal)?;
+        // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
+        let result = unsafe { ffi::ghostty_search_select_next(self.inner.as_raw()) };
+
+        from_optional_result(result, Snapshot { search: self })
     }
 
     /// Select the previous match, moving toward newer content, wrapping
     /// around past the newest match. Otherwise identical to
     /// [`Self::select_next`].
-    pub fn select_prev(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<bool> {
-        self.select(terminal, ffi::ghostty_search_select_prev)
-    }
-
-    /// Feed the search, then borrow its matches together with the terminal.
-    ///
-    /// The snapshot keeps the terminal borrowed, so the terminal cannot be
-    /// modified while any match read from it is still in use.
-    pub fn snapshot<'s, 'ta: 'cb, 'cb>(
+    pub fn select_prev<'s, 'ta: 'cb, 'cb>(
         &'s mut self,
-        terminal: &'s mut Terminal<'ta, 'cb>,
-    ) -> Result<Snapshot<'s, 'alloc, 'term, 'ta, 'cb>> {
-        self.feed(terminal)?;
-        Ok(Snapshot {
-            search: self,
-            terminal,
-        })
+        terminal: &mut Terminal<'_, '_>,
+    ) -> Result<Option<Snapshot<'s, 'alloc, 'term>>> {
+        self.check_terminal(terminal)?;
+        // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
+        let result = unsafe { ffi::ghostty_search_select_prev(self.inner.as_raw()) };
+
+        from_optional_result(result, Snapshot { search: self })
     }
 }
 
@@ -446,18 +421,29 @@ impl Drop for Search<'_, '_> {
 
 /// Matches of a [`Search`], borrowed together with their terminal.
 ///
-/// Created by [`Search::snapshot`].
+/// Created by [`Search::feed`].
 #[derive(Debug)]
-pub struct Snapshot<'s, 'alloc: 'term, 'term, 'ta: 'cb, 'cb> {
+pub struct Snapshot<'s, 'alloc: 'term, 'term> {
     search: &'s Search<'alloc, 'term>,
-    terminal: &'s Terminal<'ta, 'cb>,
 }
 
-impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
-    /// The terminal that produced these matches.
-    #[must_use]
-    pub fn terminal(&self) -> &Terminal<'ta, 'cb> {
-        self.terminal
+impl Snapshot<'_, '_, '_> {
+    /// Index of the selected match, or `None` when nothing is selected.
+    ///
+    /// This indexes the newest to oldest ordering of [`Snapshot::matches`],
+    /// where 0 is the newest match, so a "k of n" find bar renders
+    /// `index + 1` of [`Search::total_matches`].
+    pub fn selected_index(&self) -> Result<Option<usize>> {
+        let mut index = 0usize;
+        // SAFETY: Reading only touches search-owned memory.
+        let result = unsafe {
+            ffi::ghostty_search_get(
+                self.search.inner.as_raw(),
+                ffi::SearchData::SELECTED_INDEX,
+                (&raw mut index).cast(),
+            )
+        };
+        from_optional_result(result, index)
     }
 
     /// The selected match, or `None` when nothing is selected.
@@ -473,7 +459,8 @@ impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
         };
         // SAFETY: The selection points into terminal pages, which cannot
         // change while this snapshot borrows the terminal.
-        Ok(from_optional_result(result, raw)?.map(|raw| unsafe { Selection::from_raw(raw) }))
+        Ok(from_optional_result(result, raw)?
+            .map(|raw| unsafe { Selection::from_raw(self.search.terminal, raw) }))
     }
 
     fn read_matches<'s>(
@@ -510,6 +497,7 @@ impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
             // read. On success libghostty wrote `len <= cap` entries.
             let values = &storage.inner[..buffer.len];
             return Ok(Matches {
+                terminal: self.search.terminal,
                 inner: values.iter(),
             });
         }
@@ -588,6 +576,7 @@ impl MatchBuffer {
 /// ```
 #[derive(Debug)]
 pub struct Matches<'s> {
+    terminal: ffi::Terminal,
     inner: std::slice::Iter<'s, ffi::Selection>,
 }
 
@@ -600,7 +589,7 @@ impl<'s> Iterator for Matches<'s> {
         // snapshot is borrowed for `'s`.
         self.inner
             .next()
-            .map(|raw| unsafe { Selection::from_raw(*raw) })
+            .map(|raw| unsafe { Selection::from_raw(self.terminal, *raw) })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -613,7 +602,7 @@ impl DoubleEndedIterator for Matches<'_> {
         // SAFETY: Ditto
         self.inner
             .next_back()
-            .map(|raw| unsafe { Selection::from_raw(*raw) })
+            .map(|raw| unsafe { Selection::from_raw(self.terminal, *raw) })
     }
 }
 

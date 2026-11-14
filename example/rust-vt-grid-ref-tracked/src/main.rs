@@ -1,30 +1,27 @@
-use std::{error::Error, io};
-
 use libghostty_vt::{
+    error::Error,
     grid_ref::TrackedGridRef,
     point::{Coordinate, Point, Space},
     Terminal,
 };
 
-type Result<T> = std::result::Result<T, Box<dyn Error>>;
-
-fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> Result<char> {
+// ANCHOR: grid-ref-tracked
+fn codepoint_at_tracked_ref(
+    terminal: &Terminal<'_, '_>,
+    tracked: &TrackedGridRef,
+) -> Result<char, Error> {
     let snapshot = tracked
         .snapshot(terminal)?
-        .ok_or_else(|| io::Error::other("tracked grid reference has no value"))?;
+        .expect("tracked grid ref should be active");
+
     let cell = snapshot.cell()?;
+    assert!(cell.has_text()?);
 
-    assert!(cell.has_text()?, "tracked cell should contain text");
-
-    let codepoint = cell.codepoint()?;
-    let character = char::from_u32(codepoint)
-        .ok_or_else(|| io::Error::other("cell codepoint is not a Unicode scalar value"))?;
-
-    Ok(character)
+    cell.codepoint()
 }
 
-fn main() -> Result<()> {
-    let mut terminal = Terminal::new(8, 3).unwrap();
+fn main() -> Result<(), Error> {
+    let mut terminal = Terminal::new(8, 3)?;
 
     terminal.vt_write(b"alpha\r\nbravo\r\ncharlie");
 
@@ -35,7 +32,7 @@ fn main() -> Result<()> {
     // The tracked ref still follows the same cell.
     terminal.vt_write(b"\r\ndelta");
 
-    assert!(tracked.has_value(), "tracked ref should survive scrolling");
+    assert!(tracked.has_value());
     println!(
         "tracked codepoint after scroll: {}",
         codepoint_at_tracked_ref(&terminal, &tracked)?
@@ -43,30 +40,21 @@ fn main() -> Result<()> {
 
     let screen = tracked
         .point(Space::Screen)?
-        .ok_or_else(|| io::Error::other("tracked grid reference has no screen point"))?;
+        .expect("tracked point should be on screen");
     println!("tracked screen point: {},{}", screen.x, screen.y);
 
     // Resetting the terminal discards the old grid contents. The tracked
     // handle remains valid, but no longer has a meaningful location.
     terminal.reset();
-    assert!(
-        !tracked.has_value(),
-        "tracked ref should lose its value after reset"
-    );
-    assert!(
-        tracked.snapshot(&terminal)?.is_none(),
-        "snapshot should report no value after reset"
-    );
+    assert!(!tracked.has_value());
+    assert!(tracked.snapshot(&terminal)?.is_none());
 
     // The same handle can be moved to a new point after it loses its value.
     terminal.vt_write(b"echo");
 
     let echo = Point::Active(Coordinate { x: 0, y: 0 });
     tracked.set(&mut terminal, echo)?;
-    assert!(
-        tracked.has_value(),
-        "tracked ref should have a value after set"
-    );
+    assert!(tracked.has_value());
     println!(
         "tracked codepoint after reset/set: {}",
         codepoint_at_tracked_ref(&terminal, &tracked)?
@@ -74,3 +62,4 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+// ANCHOR_END: grid-ref-tracked

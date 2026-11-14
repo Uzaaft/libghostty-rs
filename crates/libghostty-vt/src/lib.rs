@@ -47,7 +47,7 @@
 //!
 //! - [Render State](crate::render) - Find out what changed since the last frame
 //!   and read the rows and cells to draw
-//! - [Kitty Graphics](crate::kitty::graphics) - 	Read the images that programs
+//! - [Kitty Graphics](crate::kitty::graphics) - Read the images that programs
 //!   send with the Kitty graphics protocol
 //!
 //! ## Input
@@ -79,10 +79,10 @@
 //!
 //! Types and settings shared by every API.
 //!
-//! - [Error Handling](crate::error)
+//! - [Error Handling](crate::error) - All the possible errors libghostty-vt returns.
 //! - [Build Info](crate::build_info) - Find out how this copy of the library
 //!   was built and which features it has
-//! - [Allocators](crate::alloc) - 	Run the library on your own memory allocator
+//! - [Allocators](crate::alloc) - Run the library on your own memory allocator
 //! - [System Interface](crate::sys) - Plug in your own system functions, such
 //!   as a PNG decoder
 #![doc(
@@ -94,16 +94,12 @@
 #![warn(missing_copy_implementations)]
 #![warn(clippy::allow_attributes)]
 #![warn(clippy::allow_attributes_without_reason)]
-#![expect(
-    clippy::needless_pass_by_value,
-    reason = "handles such as grid refs and option structs are small, and taken
-    by value the same way the C API takes them"
-)]
 #![allow(
     clippy::missing_errors_doc,
     reason = "underlying C API may return any error outside of expected and
     mitigated situations, and it is not feasible to document them all"
 )]
+#![allow(clippy::doc_markdown, reason = "false positives")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 // Cargo's rust-version cannot express a higher minimum for an optional feature.

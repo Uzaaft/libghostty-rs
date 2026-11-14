@@ -8,7 +8,7 @@
 //! outlive the formatter. Each format call reflects the terminal at the
 //! time of that call.
 // FIXME: Transclude examples, link to guide
-use std::{marker::PhantomData, mem::MaybeUninit};
+use std::mem::MaybeUninit;
 
 use crate::{
     alloc::{Allocator, Bytes, Object},
@@ -22,7 +22,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Formatter<'t, 'alloc: 'cb, 'cb: 't> {
     inner: Object<'alloc, ffi::FormatterImpl>,
-    _terminal: PhantomData<&'t Terminal<'alloc, 'cb>>,
+    terminal: &'t Terminal<'alloc, 'cb>,
 }
 
 bitflags::bitflags! {
@@ -90,79 +90,6 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         unsafe { Self::new_inner(alloc.to_raw(), terminal) }
     }
 
-    /// Create a formatter restricted to the terminal's current active selection.
-    ///
-    /// Returns `Ok(None)` when there is no active selection, rather than
-    /// creating a formatter for the whole screen. The formatter copies the
-    /// selection at creation; later selection changes do not change its range.
-    /// All other options have the same defaults as [`Self::new`]. For clipboard
-    /// text, use plain output with unwrap and trim both true.
-    ///
-    /// ```
-    /// use libghostty_vt::{Terminal, fmt::{Format, Formatter}};
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let terminal = Terminal::new(80, 24)?;
-    /// if let Some(mut formatter) = Formatter::new_selection(&terminal)? {
-    ///     formatter.set_format(Format::Plain)?.set_unwrap(true)?.set_trim(true)?;
-    ///     let selected = formatter.format_alloc(None)?;
-    ///     // Copy only `selected` to the clipboard.
-    /// }
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// The terminal cannot change screens or invalidate the selection while
-    /// the formatter is in use:
-    ///
-    /// ```compile_fail,E0502
-    /// use libghostty_vt::{Terminal, fmt::Formatter};
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut terminal = Terminal::new(10, 3)?;
-    /// let mut formatter = Formatter::new_selection(&terminal)?.unwrap();
-    /// terminal.vt_write(b"\x1b[?1049h");
-    /// formatter.format_alloc(None)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn new_selection(terminal: &'t Terminal<'alloc, 'cb>) -> Result<Option<Self>> {
-        // SAFETY: A NULL allocator is always valid.
-        unsafe { Self::new_selection_inner(std::ptr::null(), terminal) }
-    }
-
-    /// Create a formatter restricted to the terminal's current active selection.
-    ///
-    /// Like [`Self::new_selection`], returns `Ok(None)` when there is no active
-    /// selection. See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_selection_with_alloc<'ctx: 'alloc>(
-        alloc: &'alloc Allocator<'ctx>,
-        terminal: &'t Terminal<'alloc, 'cb>,
-    ) -> Result<Option<Self>> {
-        // SAFETY: Borrow checking should forbid invalid allocators.
-        unsafe { Self::new_selection_inner(alloc.to_raw(), terminal) }
-    }
-
-    /// # Safety
-    ///
-    /// `alloc` must be NULL or point to an allocator valid for `'alloc`.
-    unsafe fn new_selection_inner(
-        alloc: *const ffi::Allocator,
-        terminal: &'t Terminal<'alloc, 'cb>,
-    ) -> Result<Option<Self>> {
-        let Some(selection) = terminal.selection()? else {
-            return Ok(None);
-        };
-        // SAFETY: Upheld by caller.
-        let mut formatter = unsafe { Self::new_inner(alloc, terminal) }?;
-        // SAFETY: The snapshot comes from this very terminal's active screen.
-        // The formatter's shared terminal borrow prevents writes, resize, reset,
-        // and screen switches for its lifetime. Shared selection/gesture,
-        // tracked-ref, and render-state operations do not invalidate grid refs.
-        // Upstream copies the selection, not the pointer to this local value.
-        unsafe { formatter.set_selection(Some(&selection)) }?;
-        Ok(Some(formatter))
-    }
-
     /// # Safety
     ///
     /// `alloc` must be NULL or point to an allocator valid for `'alloc`.
@@ -178,8 +105,8 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         from_result(result)?;
 
         Ok(Self {
+            terminal,
             inner: Object::new(raw)?,
-            _terminal: PhantomData,
         })
     }
 
@@ -243,7 +170,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     pub fn selection(&self) -> Result<Option<Selection<'t>>> {
         self.get_optional::<ffi::Selection>(Opt::SELECTION)
             // SAFETY: set_selection requires snapshots from the borrowed terminal.
-            .map(|v| v.map(|raw| unsafe { Selection::from_raw(raw) }))
+            .map(|v| v.map(|raw| unsafe { Selection::from_raw(self.terminal.inner.as_raw(), raw) }))
     }
 
     /// Format only the content inside a selection.
@@ -252,32 +179,16 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// be a valid snapshot for this formatter's terminal. Pass `None` to clear
     /// it and format the whole screen again.
     ///
-    /// To format the terminal's active selection safely, use
-    /// [`Self::new_selection`]. For clipboard text, use plain output with
-    /// unwrap and trim both true.
-    ///
-    /// # Safety
-    ///
-    /// Both endpoints must be valid snapshots from this formatter's terminal
-    /// and its currently active screen. The lifetime prevents stale snapshots,
-    /// but does not prove they came from the same terminal or screen. Upstream
-    /// does not check this. Passing `None` is always safe.
-    ///
-    /// A selection from another terminal cannot be installed by safe code:
-    ///
-    /// ```compile_fail,E0133
-    /// use libghostty_vt::{Terminal, fmt::Formatter};
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let terminal = Terminal::new(10, 3)?;
-    /// let other = Terminal::new(10, 3)?;
-    /// let selection = other.select_all()?;
-    /// let mut formatter = Formatter::new(&terminal)?;
-    /// formatter.set_selection(selection.as_ref())?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub unsafe fn set_selection(&mut self, value: Option<&Selection<'t>>) -> Result<&mut Self> {
-        self.set_optional(Opt::SELECTION, value.map(|v| &v.inner))
+    /// For clipboard text, use plain output with unwrap and trim both true.
+    pub fn set_selection(&mut self, value: Option<Selection<'t>>) -> Result<&mut Self> {
+        if let Some(sel) = value.as_ref() {
+            // Block any attempts at setting a selection from the wrong terminal.
+            if sel.terminal != self.terminal.inner.as_raw() {
+                return Err(Error::InvalidValue);
+            }
+        }
+
+        self.set_optional(Opt::SELECTION, value.as_ref().map(|v| &v.inner))
     }
 
     /// Terminal state to add to VT output.
@@ -506,9 +417,8 @@ mod tests {
             let end = terminal
                 .grid_ref(Point::Active(Coordinate { x: 4, y: 0 }))
                 .unwrap();
-            let selection = Selection::new(start, end, false);
-            // SAFETY: Both endpoints come from the formatter's active screen.
-            unsafe { formatter.set_selection(Some(&selection)) }.unwrap();
+            let selection = terminal.select(start, end, false);
+            formatter.set_selection(Some(selection)).unwrap();
             assert!(
                 formatter
                     .selection()
@@ -519,8 +429,8 @@ mod tests {
             );
         }
         assert_eq!(format_buf(&mut formatter), b"hello");
-        // SAFETY: Clearing a selection has no preconditions.
-        unsafe { formatter.set_selection(None) }
+        formatter
+            .set_selection(None)
             .unwrap()
             .set_unwrap(true)
             .unwrap();
@@ -539,14 +449,17 @@ mod tests {
                 .grid_ref(Point::Active(Coordinate { x, y: 0 }))
                 .unwrap()
         };
-        let selection = Selection::new(at(5), at(10), false);
-        terminal.set_selection(Some(&selection)).unwrap();
+        let selection = Selection::new(&terminal, at(5), at(10), false);
+        terminal.set_selection(Some(selection)).unwrap();
 
-        let mut formatter = Formatter::new_selection(&terminal).unwrap().unwrap();
-        let mut allocated = Formatter::new_selection_with_alloc(&Allocator::GLOBAL, &terminal)
-            .unwrap()
-            .unwrap();
+        let mut formatter = Formatter::new(&terminal).unwrap();
+        let mut allocated = Formatter::new_with_alloc(&Allocator::GLOBAL, &terminal).unwrap();
+
+        allocated.set_selection(Some(selection)).unwrap();
+
         formatter
+            .set_selection(Some(selection))
+            .unwrap()
             .set_format(Format::Plain)
             .unwrap()
             .set_unwrap(true)
@@ -562,25 +475,6 @@ mod tests {
         assert_eq!(
             &*allocated.format_alloc(Some(&Allocator::GLOBAL)).unwrap(),
             b"chosen"
-        );
-    }
-
-    #[test]
-    fn current_selection_absence_does_not_format_the_whole_screen() {
-        let mut terminal = Terminal::new(20, 3).unwrap();
-        terminal.vt_write(b"not clipboard text");
-        assert!(Formatter::new_selection(&terminal).unwrap().is_none());
-        assert!(
-            Formatter::new_selection_with_alloc(&Allocator::GLOBAL, &terminal)
-                .unwrap()
-                .is_none()
-        );
-        assert_eq!(
-            &*Formatter::new(&terminal)
-                .unwrap()
-                .format_alloc(None)
-                .unwrap(),
-            b"not clipboard text"
         );
     }
 
@@ -666,16 +560,16 @@ mod tests {
                 .unwrap()
         };
         // Rows 0 to 3: two with text, then two blank ones.
-        let selection = Selection::new(at(0, 0), at(9, 3), false);
+        let selection = Selection::new(&terminal, at(0, 0), at(9, 3), false);
         let format = |format, trim| {
             let mut formatter = Formatter::new(&terminal).unwrap();
             formatter
                 .set_format(format)
                 .unwrap()
                 .set_trim(trim)
+                .unwrap()
+                .set_selection(Some(selection))
                 .unwrap();
-            // SAFETY: Both endpoints come from the formatter's active screen.
-            unsafe { formatter.set_selection(Some(&selection)) }.unwrap();
             formatter.format_alloc(None).unwrap().to_vec()
         };
         // The default extras emit the whole 256-color palette as

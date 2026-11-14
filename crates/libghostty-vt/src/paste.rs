@@ -113,8 +113,7 @@ use crate::{
     ffi,
 };
 
-// Ref'd in docs only
-#[expect(unused)]
+#[expect(unused, reason = "only referenced in docs")]
 use crate::mode::Mode;
 
 /// Check if paste data is safe to paste into the terminal.
@@ -247,7 +246,7 @@ impl Default for Options {
     }
 }
 
-/// Pasting.
+/// Methods related to [pasting](crate::paste).
 impl Terminal<'_, '_> {
     /// Paste into the terminal according to its current state: a Kitty
     /// clipboard protocol paste event if [`Mode::PASTE_EVENTS`] is enabled and

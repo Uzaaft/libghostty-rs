@@ -106,6 +106,7 @@ pub fn optimize_mode() -> Result<OptimizeMode> {
 /// # Ok(())
 /// # }
 /// ```
+#[must_use]
 pub fn version_string() -> &'static CStr {
     // SAFETY: libghostty promises to return a NUL-terminated string
     // that is always valid.

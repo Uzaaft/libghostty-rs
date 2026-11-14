@@ -18,6 +18,93 @@ use crate::{
     terminal::Terminal,
 };
 
+/// Methods related to [grid references](crate::grid_ref).
+impl Terminal<'_, '_> {
+    /// Resolve a point in the terminal grid to a grid reference.
+    ///
+    /// Resolves the given point (which can be in active, viewport, screen,
+    /// or history coordinates) to a grid reference for that location. Use
+    /// [`GridRef::cell`] and [`GridRef::row`] to extract the cell and row.
+    ///
+    /// Lookups in the active region and viewport are fast. Lookups in the
+    /// screen and history may require traversing the full scrollback page
+    /// list to resolve the y coordinate, so they can be expensive for large
+    /// scrollback buffers.
+    ///
+    /// This function isn't meant to be used as the core of render loop. It
+    /// isn't built to sustain the framerates needed for rendering large
+    /// screens. Use the [render state API](crate::render::RenderState) for
+    /// that. This API is instead meant for less strictly performance-sensitive
+    /// use cases.
+    pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
+        let mut grid_ref = ffi::GridRef::default();
+        let result = unsafe {
+            ffi::ghostty_terminal_grid_ref(self.inner.as_raw(), point.into(), &raw mut grid_ref)
+        };
+        from_result(result)?;
+        Ok(unsafe { GridRef::from_raw(grid_ref) })
+    }
+
+    /// Create an owned tracked grid reference for a terminal point.
+    ///
+    /// This is the tracked variant of [`Terminal::grid_ref`]. The returned handle
+    /// follows the referenced cell as the terminal's page list is modified:
+    /// scrolling, pruning, resize/reflow, and other page-list operations update
+    /// the tracked reference automatically.
+    ///
+    /// The reference is attached to the terminal screen/page-list that is
+    /// active at creation time.
+    ///
+    /// If the point is outside the requested coordinate space, this returns
+    /// `Err(Error::InvalidValue)`.
+    ///
+    /// If the tracked grid reference outlives this terminal, the handle remains
+    /// valid, but it will always return `false` or `Ok(None)`.
+    pub fn track_grid_ref(&self, point: Point) -> Result<TrackedGridRef> {
+        let mut raw: ffi::TrackedGridRef = std::ptr::null_mut();
+        let result = unsafe {
+            ffi::ghostty_terminal_grid_ref_track(self.inner.as_raw(), point.into(), &raw mut raw)
+        };
+        from_result(result)?;
+
+        let inner = NonNull::new(raw).ok_or(Error::InvalidValue)?;
+        Ok(TrackedGridRef::new(inner, self.inner.ptr))
+    }
+
+    /// Convert a grid reference back to a point in the given coordinate system.
+    ///
+    /// This is the inverse of [`Terminal::grid_ref`]: given a grid reference, it
+    /// returns the x/y coordinates in the requested coordinate system (active,
+    /// viewport, screen, or history).
+    ///
+    /// The grid reference must have been obtained from the same terminal instance.
+    /// Like all grid references, it is only valid until the next mutating
+    /// terminal call.
+    ///
+    /// Not every grid reference is representable in every coordinate system.
+    /// For example, a cell in scrollback history cannot be expressed in active
+    /// coordinates, and a cell that has scrolled off the visible area cannot
+    /// be expressed in viewport coordinates. In these cases, the function
+    /// returns `Ok(None)`.
+    pub fn point_from_grid_ref(
+        &self,
+        grid_ref: GridRef<'_>,
+        space: point::Space,
+    ) -> Result<Option<point::Coordinate>> {
+        let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_terminal_point_from_grid_ref(
+                self.inner.as_raw(),
+                std::ptr::from_ref(&grid_ref.inner),
+                space.into_raw(),
+                point.as_mut_ptr(),
+            )
+        };
+
+        from_optional_result_uninit(result, point).map(|value| value.map(Into::into))
+    }
+}
+
 /// Resolved reference to a terminal cell position.
 ///
 /// A grid reference is a resolved reference to a specific cell position in
@@ -34,7 +121,7 @@ use crate::{
 /// This API is not meant to be used as the core of render loop.
 /// It isn't built to sustain the framerates needed for rendering large screens.
 /// Use the render state API for that.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GridRef<'t> {
     pub(crate) inner: ffi::GridRef,
     pub(crate) _phan: PhantomData<&'t ffi::Terminal>,

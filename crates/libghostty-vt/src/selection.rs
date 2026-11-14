@@ -28,9 +28,10 @@ pub mod gesture;
 /// may have occurred since the refs were produced or reconstructed from
 /// tracked refs. Passing refs from another terminal, another screen, or stale
 /// refs violates this precondition.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct Selection<'t> {
     pub(crate) inner: ffi::Selection,
+    pub(crate) terminal: ffi::Terminal,
     _phan: PhantomData<&'t ffi::Terminal>,
 }
 impl<'t> Selection<'t> {
@@ -44,22 +45,32 @@ impl<'t> Selection<'t> {
     /// `rectangle` is true, the same endpoints are interpreted as opposite corners
     /// of a rectangular/block selection.
     #[must_use]
-    pub fn new(start: GridRef<'t>, end: GridRef<'t>, rectangle: bool) -> Self {
+    pub fn new(
+        terminal: &'t Terminal<'_, '_>,
+        start: GridRef<'t>,
+        end: GridRef<'t>,
+        rectangle: bool,
+    ) -> Self {
         // SAFETY: provided by the type system
         unsafe {
-            Self::from_raw(ffi::Selection {
-                start: start.inner,
-                end: end.inner,
-                rectangle,
-            })
+            Self::from_raw(
+                terminal.inner.as_raw(),
+                ffi::Selection {
+                    start: start.inner,
+                    end: end.inner,
+                    rectangle,
+                },
+            )
         }
     }
 
     /// # Safety
     ///
-    /// Caller must guarantee that the selection is bound by the lifetime `'t`.
-    pub(crate) unsafe fn from_raw(value: ffi::Selection) -> Self {
+    /// Caller must guarantee that the selection is bound by the lifetime `'t`,
+    /// corresponding to the given terminal.
+    pub(crate) unsafe fn from_raw(terminal: ffi::Terminal, value: ffi::Selection) -> Self {
         Self {
+            terminal,
             inner: value,
             _phan: PhantomData,
         }
@@ -84,7 +95,7 @@ impl<'t> Selection<'t> {
     /// Whether the endpoints are interpreted as a rectangular/block
     /// selection rather than a linear selection.
     #[must_use]
-    pub fn is_rectangle(&self) -> bool {
+    pub fn rectangle(&self) -> bool {
         self.inner.rectangle
     }
 
@@ -96,10 +107,10 @@ impl<'t> Selection<'t> {
     /// install it as the terminal-owned selection if desired.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn adjust(&mut self, terminal: &'t Terminal<'_, '_>, adjustment: Adjustment) -> Result<()> {
+    pub fn adjust(&mut self, adjustment: Adjustment) -> Result<()> {
         let result = unsafe {
             ffi::ghostty_terminal_selection_adjust(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw mut self.inner,
                 adjustment.into(),
             )
@@ -113,11 +124,11 @@ impl<'t> Selection<'t> {
     /// rectangular/block selections and linear selections spanning multiple rows.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn contains(&self, terminal: &'t Terminal<'_, '_>, point: Point) -> Result<bool> {
+    pub fn contains(&self, point: Point) -> Result<bool> {
         let mut contains = false;
         let result = unsafe {
             ffi::ghostty_terminal_selection_contains(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw const self.inner,
                 point.into(),
                 &raw mut contains,
@@ -134,11 +145,11 @@ impl<'t> Selection<'t> {
     /// state. This avoids requiring callers to compare raw [`GridRef`] internals.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn equals(&self, terminal: &'t Terminal<'_, '_>, other: &Self) -> Result<bool> {
+    pub fn equals(&self, other: &Self) -> Result<bool> {
         let mut equal = false;
         let result = unsafe {
             ffi::ghostty_terminal_selection_equal(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw const self.inner,
                 &raw const other.inner,
                 &raw mut equal,
@@ -151,12 +162,12 @@ impl<'t> Selection<'t> {
     /// Get the current endpoint ordering of a selection snapshot.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn order(&self, terminal: &'t Terminal<'_, '_>) -> Result<Order> {
+    pub fn order(&self) -> Result<Order> {
         let mut order = ffi::SelectionOrder::FORWARD;
 
         let result = unsafe {
             ffi::ghostty_terminal_selection_order(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw const self.inner,
                 &raw mut order,
             )
@@ -174,18 +185,18 @@ impl<'t> Selection<'t> {
     /// the terminal's current selection.
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
-    pub fn to_ordered(&self, terminal: &'t Terminal<'_, '_>, desired: Order) -> Result<Self> {
+    pub fn to_ordered(&self, desired: Order) -> Result<Self> {
         let mut selection = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_terminal_selection_ordered(
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw const self.inner,
                 desired.into(),
                 &raw mut selection,
             )
         };
         from_result(result)?;
-        Ok(unsafe { Self::from_raw(selection) })
+        Ok(unsafe { Self::from_raw(self.terminal, selection) })
     }
 }
 
@@ -203,7 +214,7 @@ impl Terminal<'_, '_> {
     /// Returns `Ok(None)` when there is no active selection.
     pub fn selection(&self) -> Result<Option<Selection<'_>>> {
         self.get_optional::<ffi::Selection>(ffi::TerminalData::SELECTION)
-            .map(|v| v.map(|raw| unsafe { Selection::from_raw(raw) }))
+            .map(|v| v.map(|raw| unsafe { Selection::from_raw(self.inner.as_raw(), raw) }))
     }
 
     /// Set the active screen selection.
@@ -215,9 +226,35 @@ impl Terminal<'_, '_> {
     ///
     /// This function does not take `&mut self` since it does not invalidate
     /// any state that relies on the terminal.
-    pub fn set_selection(&self, selection: Option<&Selection<'_>>) -> Result<&Self> {
-        self.set_optional(ffi::TerminalOption::SELECTION, selection.map(|v| &v.inner))?;
+    pub fn set_selection(&self, selection: Option<Selection<'_>>) -> Result<&Self> {
+        self.set_optional(
+            ffi::TerminalOption::SELECTION,
+            selection.as_ref().map(|v| &v.inner),
+        )?;
         Ok(self)
+    }
+
+    /// Create a new selection between two endpoints.
+    ///
+    /// Both endpoints are inclusive. The endpoints preserve selection direction
+    /// and may be reversed; callers must not assume that start is the top-left
+    /// endpoint or that end is the bottom-right endpoint.
+    ///
+    /// When `rectangle` is false, the endpoints describe a linear selection. When
+    /// `rectangle` is true, the same endpoints are interpreted as opposite corners
+    /// of a rectangular/block selection.
+    ///
+    /// This is an alias of [`Selection::new`], albeit slightly simpler to write.
+    ///
+    /// The returned selection is not installed as the terminal's current selection.
+    #[must_use]
+    pub fn select<'t>(
+        &'t self,
+        start: GridRef<'t>,
+        end: GridRef<'t>,
+        rectangle: bool,
+    ) -> Selection<'t> {
+        Selection::new(self, start, end, rectangle)
     }
 
     /// Derive a selection snapshot covering all selectable terminal content.
@@ -231,33 +268,21 @@ impl Terminal<'_, '_> {
         let sel = from_optional_result(result, value)?;
         Ok(sel.map(|v| unsafe {
             // SAFETY: Selection should be initialized and valid on success
-            Selection::from_raw(v)
+            Selection::from_raw(self.inner.as_raw(), v)
         }))
     }
-    /// Derive a selection snapshot covering all selectable terminal content.
+
+    /// Start deriving a selection snapshot covering all selectable terminal content.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    pub fn select_line(&self, options: SelectLineOptions) -> Result<Option<Selection<'_>>> {
-        let mut value = ffi::Selection::default();
-
-        let result = unsafe {
-            ffi::ghostty_terminal_select_line(
-                self.inner.as_raw(),
-                &raw const options.inner,
-                &raw mut value,
-            )
-        };
-
-        let sel = from_optional_result(result, value)?;
-        Ok(sel.map(|v| unsafe {
-            // SAFETY: Selection should be initialized and valid on success
-            Selection::from_raw(v)
-        }))
+    pub fn select_line<'t>(&'t self, grid_ref: GridRef<'t>) -> SelectLine<'t> {
+        SelectLine::new(self, grid_ref)
     }
+
     /// Derive a command-output selection snapshot from a terminal grid reference.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    pub fn select_output(&self, grid_ref: GridRef<'_>) -> Result<Option<Selection<'_>>> {
+    pub fn select_output<'t>(&'t self, grid_ref: GridRef<'t>) -> Result<Option<Selection<'t>>> {
         let mut value = ffi::Selection::default();
 
         let result = unsafe {
@@ -271,31 +296,18 @@ impl Terminal<'_, '_> {
         let sel = from_optional_result(result, value)?;
         Ok(sel.map(|v| unsafe {
             // SAFETY: Selection should be initialized and valid on success
-            Selection::from_raw(v)
+            Selection::from_raw(self.inner.as_raw(), v)
         }))
     }
-    /// Derive a word selection snapshot from a terminal grid reference.
+
+    /// Start deriving a word selection snapshot from a terminal grid reference.
     ///
     /// The returned selection is not installed as the terminal's current selection.
-    pub fn select_word(&self, options: SelectWordOptions) -> Result<Option<Selection<'_>>> {
-        let mut value = ffi::Selection::default();
-
-        let result = unsafe {
-            ffi::ghostty_terminal_select_word(
-                self.inner.as_raw(),
-                &raw const options.inner,
-                &raw mut value,
-            )
-        };
-
-        let sel = from_optional_result(result, value)?;
-        Ok(sel.map(|v| unsafe {
-            // SAFETY: Selection should be initialized and valid on success
-            Selection::from_raw(v)
-        }))
+    pub fn select_word<'t>(&'t self, grid_ref: GridRef<'t>) -> SelectWord<'t> {
+        SelectWord::new(self, grid_ref)
     }
 
-    /// Derive the nearest word selection snapshot between two
+    /// Start deriving the nearest word selection snapshot between two
     /// terminal grid refs.
     ///
     /// Starting at `options.start`, this searches toward `options.end`
@@ -320,7 +332,7 @@ impl Terminal<'_, '_> {
     ///     Terminal,
     ///     point::{Point, Coordinate},
     ///     grid_ref::GridRef,
-    ///     selection::{Selection, SelectWordBetweenOptions},
+    ///     selection::{Selection, SelectWordBetween},
     /// };
     /// # fn main() -> libghostty_vt::error::Result<()> {
     /// # let terminal = Terminal::new(80, 24).unwrap();
@@ -337,11 +349,11 @@ impl Terminal<'_, '_> {
     /// let drag_ref = ref_at(&terminal, 6, 0)?;  // the "status" in "git status"
     ///
     /// let start_word = terminal.select_word_between(
-    ///     SelectWordBetweenOptions::new(click_ref.clone(), drag_ref.clone())
+    ///     SelectWordBetween::new(click_ref.clone(), drag_ref.clone())
     /// )?;
     ///
     /// let end_word = terminal.select_word_between(
-    ///     SelectWordBetweenOptions::new(drag_ref, click_ref)
+    ///     SelectWordBetween::new(drag_ref, click_ref)
     /// )?;
     ///
     /// let drag_selection = Selection::new(
@@ -351,25 +363,12 @@ impl Terminal<'_, '_> {
     /// );
     /// # Ok(())}
     /// ```
-    pub fn select_word_between(
-        &self,
-        options: SelectWordBetweenOptions,
-    ) -> Result<Option<Selection<'_>>> {
-        let mut value = ffi::Selection::default();
-
-        let result = unsafe {
-            ffi::ghostty_terminal_select_word_between(
-                self.inner.as_raw(),
-                &raw const options.inner,
-                &raw mut value,
-            )
-        };
-
-        let sel = from_optional_result(result, value)?;
-        Ok(sel.map(|v| unsafe {
-            // SAFETY: Selection should be initialized and valid on success
-            Selection::from_raw(v)
-        }))
+    pub fn select_word_between<'t>(
+        &'t self,
+        start: GridRef<'t>,
+        end: GridRef<'t>,
+    ) -> SelectWordBetween<'t> {
+        SelectWordBetween::new(self, start, end)
     }
 }
 
@@ -378,17 +377,19 @@ impl Terminal<'_, '_> {
 ///
 /// If [`with_whitespace`](Self::with_whitespace) is not called,
 /// Ghostty's default line-trim whitespace codepoints are used.
-#[derive(Clone, Debug)]
-pub struct SelectLineOptions<'t, 'ws> {
+#[derive(Debug)]
+#[must_use]
+pub struct SelectLine<'t> {
+    terminal: ffi::Terminal,
     inner: ffi::TerminalSelectLineOptions,
-    _phan: (PhantomData<&'t ffi::Terminal>, PhantomData<&'ws [char]>),
+    _phan: PhantomData<&'t ffi::Terminal>,
 }
-impl<'t, 'ws> SelectLineOptions<'t, 'ws> {
+impl<'t> SelectLine<'t> {
     /// Create a new set of options for [deriving a line selection](Terminal::select_line),
     /// from the given grid reference.
-    #[must_use]
-    pub fn new(grid_ref: GridRef<'t>) -> Self {
+    pub fn new(terminal: &'t Terminal<'_, '_>, grid_ref: GridRef<'t>) -> Self {
         Self {
+            terminal: terminal.inner.as_raw(),
             inner: ffi::TerminalSelectLineOptions {
                 ref_: grid_ref.inner,
                 whitespace: std::ptr::null(),
@@ -396,13 +397,12 @@ impl<'t, 'ws> SelectLineOptions<'t, 'ws> {
                 semantic_prompt_boundary: false,
                 ..ffi::sized!(ffi::TerminalSelectLineOptions)
             },
-            _phan: (PhantomData, PhantomData),
+            _phan: PhantomData,
         }
     }
 
     /// Specify the codepoints to trim from the start and end of the line.
-    #[must_use]
-    pub fn with_whitespace(mut self, value: &'ws [char]) -> Self {
+    pub fn with_whitespace(mut self, value: &[char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
         self.inner.whitespace = value.as_ptr().cast();
@@ -412,10 +412,26 @@ impl<'t, 'ws> SelectLineOptions<'t, 'ws> {
 
     /// Specify whether semantic prompt state changes should bound the line
     /// selection.
-    #[must_use]
     pub fn with_semantic_prompt_boundary(mut self, value: bool) -> Self {
         self.inner.semantic_prompt_boundary = value;
         self
+    }
+
+    /// Finish selecting a line.
+    ///
+    /// The returned selection is not installed as the terminal's current selection.
+    pub fn finish(self) -> Result<Option<Selection<'t>>> {
+        let mut value = ffi::Selection::default();
+
+        let result = unsafe {
+            ffi::ghostty_terminal_select_line(self.terminal, &raw const self.inner, &raw mut value)
+        };
+
+        let sel = from_optional_result(result, value)?;
+        Ok(sel.map(|v| unsafe {
+            // SAFETY: Selection should be initialized and valid on success
+            Selection::from_raw(self.terminal, v)
+        }))
     }
 }
 
@@ -424,33 +440,49 @@ impl<'t, 'ws> SelectLineOptions<'t, 'ws> {
 ///
 /// If [`with_boundary_codepoints`](Self::with_boundary_codepoints)
 /// is not called, Ghostty's default word-boundary codepoints are used.
-#[derive(Clone, Debug)]
-pub struct SelectWordOptions<'t, 'bc> {
+#[derive(Debug)]
+#[must_use]
+pub struct SelectWord<'t> {
+    terminal: ffi::Terminal,
     inner: ffi::TerminalSelectWordOptions,
-    _phan: (PhantomData<&'t ffi::Terminal>, PhantomData<&'bc [char]>),
+    _phan: PhantomData<&'t ffi::Terminal>,
 }
-impl<'t, 'bc> SelectWordOptions<'t, 'bc> {
-    /// Create a new set of options for [deriving a word selection](Terminal::select_word),
-    /// from the given grid reference.
-    #[must_use]
-    pub fn new(grid_ref: GridRef<'t>) -> Self {
+impl<'t> SelectWord<'t> {
+    fn new(terminal: &'t Terminal<'_, '_>, grid_ref: GridRef<'t>) -> Self {
         Self {
+            terminal: terminal.inner.as_raw(),
             inner: ffi::TerminalSelectWordOptions {
                 ref_: grid_ref.inner,
                 ..ffi::sized!(ffi::TerminalSelectWordOptions)
             },
-            _phan: (PhantomData, PhantomData),
+            _phan: PhantomData,
         }
     }
 
     /// Specify the word-boundary codepoints.
-    #[must_use]
-    pub fn with_boundary_codepoints(mut self, value: &'bc [char]) -> Self {
+    pub fn with_boundary_codepoints(mut self, value: &[char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
         self.inner.boundary_codepoints = value.as_ptr().cast();
         self.inner.boundary_codepoints_len = value.len();
         self
+    }
+
+    /// Finish selecting a word.
+    ///
+    /// The returned selection is not installed as the terminal's current selection.
+    pub fn finish(self) -> Result<Option<Selection<'t>>> {
+        let mut value = ffi::Selection::default();
+
+        let result = unsafe {
+            ffi::ghostty_terminal_select_word(self.terminal, &raw const self.inner, &raw mut value)
+        };
+
+        let sel = from_optional_result(result, value)?;
+        Ok(sel.map(|v| unsafe {
+            // SAFETY: Selection should be initialized and valid on success
+            Selection::from_raw(self.terminal, v)
+        }))
     }
 }
 
@@ -460,34 +492,53 @@ impl<'t, 'bc> SelectWordOptions<'t, 'bc> {
 /// If [`with_boundary_codepoints`](Self::with_boundary_codepoints)
 /// is not called, Ghostty's default word-boundary codepoints are used.
 #[derive(Debug)]
-pub struct SelectWordBetweenOptions<'t, 'bc> {
+#[must_use]
+pub struct SelectWordBetween<'t> {
+    terminal: ffi::Terminal,
     inner: ffi::TerminalSelectWordBetweenOptions,
-    _phan: (PhantomData<&'t ffi::Terminal>, PhantomData<&'bc [char]>),
+    _phan: PhantomData<&'t ffi::Terminal>,
 }
-impl<'t, 'bc> SelectWordBetweenOptions<'t, 'bc> {
-    /// Create a new set of options for
-    /// [deriving the nearest word selection](Terminal::select_word_between),
-    /// from the two given grid references.
-    #[must_use]
-    pub fn new(start: GridRef<'t>, end: GridRef<'t>) -> Self {
+impl<'t> SelectWordBetween<'t> {
+    fn new(terminal: &'t Terminal<'_, '_>, start: GridRef<'t>, end: GridRef<'t>) -> Self {
         Self {
+            terminal: terminal.inner.as_raw(),
             inner: ffi::TerminalSelectWordBetweenOptions {
                 start: start.inner,
                 end: end.inner,
                 ..ffi::sized!(ffi::TerminalSelectWordBetweenOptions)
             },
-            _phan: (PhantomData, PhantomData),
+            _phan: PhantomData,
         }
     }
 
     /// Specify the word-boundary codepoints.
-    #[must_use]
-    pub fn with_boundary_codepoints(mut self, value: &'bc [char]) -> Self {
+    pub fn with_boundary_codepoints(mut self, value: &[char]) -> Self {
         // Note: it's always safe to reinterpret char as a u32,
         // as long as no mutation occurs.
         self.inner.boundary_codepoints = value.as_ptr().cast();
         self.inner.boundary_codepoints_len = value.len();
         self
+    }
+
+    /// Finish selecting a word between two points.
+    ///
+    /// The returned selection is not installed as the terminal's current selection.
+    pub fn finish(self) -> Result<Option<Selection<'t>>> {
+        let mut value = ffi::Selection::default();
+
+        let result = unsafe {
+            ffi::ghostty_terminal_select_word_between(
+                self.terminal,
+                &raw const self.inner,
+                &raw mut value,
+            )
+        };
+
+        let sel = from_optional_result(result, value)?;
+        Ok(sel.map(|v| unsafe {
+            // SAFETY: Selection should be initialized and valid on success
+            Selection::from_raw(self.terminal, v)
+        }))
     }
 }
 

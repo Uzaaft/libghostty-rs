@@ -1,0 +1,29 @@
+[book]
+title = "Guide to libghostty-vt, Rust Edition"
+authors = ["Leah Amelia Chen"]
+language = "en"
+
+[output.html]
+git-repository-url = "https://github.com/Uzaaft/libghostty-rs"
+
+[preprocessor.rustdoc-links]
+after = ["links"]
+build.preludes = [
+  "libghostty_vt::*",
+  "libghostty_vt::alloc::Bytes",
+  "libghostty_vt::color::*",
+  "libghostty_vt::fmt::Formatter",
+  "libghostty_vt::grid_ref::*",
+  "libghostty_vt::kitty::graphics::{Graphics,PlacementIterator,PlacementIteration,Image}",
+  "libghostty_vt::mode::Mode",
+  "libghostty_vt::render::{RowIteration,CellIteration,Snapshot,RowIterator,CellIterator,ImageIterator,ImageIteration}",
+  "libghostty_vt::screen::{Cell,Row}",
+  "libghostty_vt::search::Search",
+  "libghostty_vt::selection::Selection",
+  "libghostty_vt::selection::gesture::{self,*}",
+  "libghostty_vt::style::Style",
+  "libghostty_vt::terminal::{Boundary,CompressionMode,CompressionResult,MemoryUsage,ScrollViewport,StringEnd,WriteStop}",
+]
+
+[preprocessor.permalinks]
+after = ["rustdoc-links"]

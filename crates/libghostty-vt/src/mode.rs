@@ -9,9 +9,76 @@
 //! encode a DECRPM report with [`Mode::encode`]. You don't need a
 //! terminal to pack one.
 use crate::{
-    error::{Result, from_result_with_len},
+    Terminal,
+    error::{Result, from_result, from_result_with_len},
     ffi,
 };
+
+/// Methods related to [terminal modes](crate::mode).
+impl Terminal<'_, '_> {
+    /// Get the current value of a terminal mode.
+    pub fn mode(&self, mode: Mode) -> Result<bool> {
+        let mut mode = ffi::TerminalModeConfig {
+            mode: mode.into(),
+            value: false,
+        };
+
+        let result = unsafe {
+            ffi::ghostty_terminal_get(
+                self.inner.as_raw(),
+                ffi::TerminalData::MODE,
+                (&raw mut mode).cast::<std::ffi::c_void>(),
+            )
+        };
+        from_result(result)?;
+        Ok(mode.value)
+    }
+
+    /// Set the current value of a terminal mode.
+    ///
+    /// This does not change the value restored by a full terminal reset (RIS).
+    pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
+        let mode = ffi::TerminalModeConfig {
+            mode: mode.into(),
+            value,
+        };
+
+        let result = unsafe {
+            ffi::ghostty_terminal_set(
+                self.inner.as_raw(),
+                ffi::TerminalOption::MODE,
+                (&raw const mode).cast::<std::ffi::c_void>(),
+            )
+        };
+        from_result(result)?;
+        Ok(self)
+    }
+
+    /// Set the reset default for a terminal mode.
+    ///
+    /// This unconditionally updates both the current value and the value
+    /// restored by a full terminal reset (RIS).
+    ///
+    /// Some recognized modes represent transitions or mirror additional
+    /// terminal state and cannot safely be configured as reset defaults.
+    /// Those modes return [`Error::InvalidValue`](crate::Error::InvalidValue).
+    pub fn set_default_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
+        let mode = ffi::TerminalModeConfig {
+            mode: mode.into(),
+            value,
+        };
+
+        let result = unsafe {
+            ffi::ghostty_terminal_set(
+                self.inner.as_raw(),
+                ffi::TerminalOption::MODE_DEFAULT,
+                (&raw const mode).cast::<std::ffi::c_void>(),
+            )
+        };
+        from_result(result)?;
+        Ok(self)
+    }
+}
 
 /// A terminal mode consisting of its value and its kind (DEC/ANSI).
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
