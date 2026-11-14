@@ -51,6 +51,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Building
 
+The minimum supported Rust version (MSRV) is **1.96**. Enabling the
+`allocator_api` feature requires **Rust 1.100** or newer. This feature adapts
+allocators implementing `std::alloc::Allocator`; it no longer uses
+`allocator-api2`. Custom allocators must implement the standard library trait.
+Cargo's `rust-version` remains `1.96` because Cargo cannot declare a separate
+MSRV for an optional feature; enabling `allocator_api` on an older compiler
+produces a compile-time error.
+
 Requires [Zig](https://ziglang.org/) 0.17.x on PATH, or selected through `ZIG`.
 Set `ZIG` to an executable path or command name, without arguments, to override
 the default `zig` executable. By default, the ghostty source is fetched

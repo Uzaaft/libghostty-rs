@@ -88,7 +88,7 @@ use crate::{
     feature = "allocator_api",
     doc = r"```compile_fail,E0505
 use libghostty_vt::{Terminal, alloc::Allocator, search::Search};
-let arena = allocator_api2::alloc::Global;
+let arena = std::alloc::Global;
 let alloc = Allocator::from(&arena);
 let mut terminal = Terminal::new_with_alloc(&alloc, 8, 2).unwrap();
 let mut search = Search::new(&mut terminal).unwrap();
@@ -105,7 +105,7 @@ search.tick().unwrap();
     feature = "allocator_api",
     doc = r"```compile_fail,E0505
 use libghostty_vt::{Terminal, alloc::Allocator, search::Search};
-let arena = allocator_api2::alloc::Global;
+let arena = std::alloc::Global;
 let alloc = Allocator::from(&arena);
 let mut terminal = Terminal::new(8, 2).unwrap();
 let search = Search::new_with_alloc(&alloc, &mut terminal).unwrap();

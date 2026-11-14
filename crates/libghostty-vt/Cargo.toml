@@ -9,7 +9,7 @@ rust-version.workspace = true
 
 [features]
 default = ["kitty-graphics"]
-allocator_api = ["dep:allocator-api2"]
+allocator_api = ["dep:rustversion"]
 kitty-graphics = ["libghostty-vt-sys/kitty-graphics"]
 png = ["dep:png"]
 log = ["dep:log"]
@@ -18,7 +18,7 @@ pkg-config = ["libghostty-vt-sys/pkg-config"]
 tracing = ["dep:tracing"]
 
 [dependencies]
-allocator-api2 = { version = "0.4.0", optional = true }
+rustversion = { version = "1.0", optional = true }
 bitflags = "2.11.0"
 libghostty-vt-sys.workspace = true
 int-enum = "1.2.0"
