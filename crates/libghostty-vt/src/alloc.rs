@@ -238,10 +238,10 @@ impl Allocator<'static> {
         inner: ffi::Allocator {
             ctx: std::ptr::null_mut(),
             vtable: &ffi::AllocatorVtable {
-                alloc: Some(_global_alloc),
-                free: Some(_global_free),
-                resize: Some(_global_resize),
-                remap: Some(_global_remap),
+                alloc: Some(rust_global_alloc),
+                free: Some(rust_global_free),
+                resize: Some(rust_global_resize),
+                remap: Some(rust_global_remap),
                 reserved: [std::ptr::null_mut(); 4],
             },
         },
@@ -249,7 +249,7 @@ impl Allocator<'static> {
     };
 }
 
-unsafe extern "C" fn _global_alloc(
+unsafe extern "C" fn rust_global_alloc(
     _allocator: *mut c_void,
     len: usize,
     alignment: u8,
@@ -261,7 +261,7 @@ unsafe extern "C" fn _global_alloc(
     unsafe { std::alloc::alloc(layout).cast::<c_void>() }
 }
 
-unsafe extern "C" fn _global_free(
+unsafe extern "C" fn rust_global_free(
     _allocator: *mut c_void,
     mem: *mut c_void,
     len: usize,
@@ -273,7 +273,7 @@ unsafe extern "C" fn _global_free(
     };
     unsafe { std::alloc::dealloc(mem.cast::<u8>(), layout) }
 }
-unsafe extern "C" fn _global_resize(
+unsafe extern "C" fn rust_global_resize(
     _allocator: *mut c_void,
     _mem: *mut c_void,
     _old_len: usize,
@@ -283,7 +283,7 @@ unsafe extern "C" fn _global_resize(
 ) -> bool {
     false
 }
-unsafe extern "C" fn _global_remap(
+unsafe extern "C" fn rust_global_remap(
     _allocator: *mut c_void,
     mem: *mut c_void,
     old_len: usize,
@@ -676,7 +676,7 @@ mod tests {
 
     use std::ptr::NonNull;
 
-    use super::{_global_alloc, _global_free, _global_remap};
+    use super::{rust_global_alloc, rust_global_free, rust_global_remap};
 
     // These tests stay entirely within Rust-owned allocator callbacks so Miri can
     // validate the pointer and initialization flow without executing Ghostty.
@@ -687,13 +687,13 @@ mod tests {
         let alignment_log2 = 4u8;
         let expected_alignment = 1usize << alignment_log2;
 
-        let raw = unsafe { _global_alloc(std::ptr::null_mut(), len, alignment_log2, 0) };
+        let raw = unsafe { rust_global_alloc(std::ptr::null_mut(), len, alignment_log2, 0) };
         let mem = NonNull::new(raw.cast::<u8>()).expect("global allocator returned null");
 
         assert_eq!((mem.as_ptr() as usize) % expected_alignment, 0);
 
         unsafe {
-            _global_free(
+            rust_global_free(
                 std::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 len,
@@ -709,7 +709,8 @@ mod tests {
         let new_len = 32usize;
         let alignment_log2 = 3u8;
 
-        let raw = unsafe { _global_alloc(std::ptr::null_mut(), initial_len, alignment_log2, 0) };
+        let raw =
+            unsafe { rust_global_alloc(std::ptr::null_mut(), initial_len, alignment_log2, 0) };
         let mem = NonNull::new(raw.cast::<u8>()).expect("global allocator returned null");
 
         let initial = unsafe { std::slice::from_raw_parts_mut(mem.as_ptr(), initial_len) };
@@ -718,7 +719,7 @@ mod tests {
         }
 
         let raw = unsafe {
-            _global_remap(
+            rust_global_remap(
                 std::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 initial_len,
@@ -735,7 +736,7 @@ mod tests {
         }
 
         unsafe {
-            _global_free(
+            rust_global_free(
                 std::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 new_len,

@@ -1261,7 +1261,6 @@ impl<'t> ClipboardRead<'t> {
     ///
     /// The values come straight from the program, so they are exposed as
     /// raw bytes.
-    #[must_use]
     pub fn mimes(&self) -> impl ExactSizeIterator<Item = &'t [u8]> + use<'t> {
         // SAFETY: The request lives for the callback duration.
         let (ptr, len) = unsafe { ((*self.ptr).mimes, (*self.ptr).mimes_len) };

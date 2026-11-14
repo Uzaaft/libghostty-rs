@@ -844,7 +844,7 @@ impl Terminal<'_, '_> {
     }
 }
 
-impl<'t> Graphics<'t> {
+impl Graphics<'_> {
     fn get<T>(&self, tag: ffi::KittyGraphicsData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {

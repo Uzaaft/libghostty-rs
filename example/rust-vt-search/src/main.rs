@@ -30,7 +30,7 @@ fn main() -> Result<(), Error> {
     // Drive the search. Interactive embedders interleave
     // `Search::tick` and `Search::feed` with their event
     // loop, but for a one-shot search we can just run it to completion.
-    search.run(&mut terminal)?;
+    search.run(&terminal)?;
 
     // The total match count, for find bar text like "1 of 3".
     let total = search.total_matches()?;
@@ -40,12 +40,10 @@ fn main() -> Result<(), Error> {
     // at the newest match, moves toward older content, and wraps around.
     // This scrolls the viewport to the match if it isn't visible, per
     // the `Search::scroll` policy.
-    while let Ok(Some(s)) = search.select_next(&mut terminal) {
+    while let Some(s) = search.select_next(&terminal)? {
         // Read the selection state. Index 0 is the newest
         // match, so a "k of n" find bar renders index + 1.
-        let Some(selected_index) = s.selected_index()? else {
-            continue;
-        };
+        let selected_index = s.index()?;
         println!("selected {} of {}", selected_index + 1, total);
 
         // Wrapped back around to the first match: stop.
@@ -59,10 +57,10 @@ fn main() -> Result<(), Error> {
     // highlights. The list can include matches just past the viewport
     // when they share a page with it, so convert each endpoint to
     // viewport coordinates and skip matches outside the visible rows.
-    let snapshot = search.feed(&mut terminal)?;
+    search.feed(&terminal)?;
 
     let mut match_buffer = MatchBuffer::new();
-    for m in snapshot.viewport_matches(&mut match_buffer)? {
+    for m in search.viewport_matches(&terminal, &mut match_buffer)? {
         let Ok(Some(start)) = terminal.point_from_grid_ref(m.start(), Space::Viewport) else {
             continue;
         };
