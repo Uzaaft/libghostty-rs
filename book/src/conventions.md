@@ -21,7 +21,7 @@ can be of the following:
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | [`Error::OutOfMemory`] | An allocation failed.                                                                                               |
 | [`Error::InvalidValue`] | An argument is wrong, such as a NULL pointer where a value is required or an enum value that is out of range.       |
-| [`Error::OutOfSpace`]   | The buffer you gave us is too small. See @ref conventions-buffers.                                                  |
+| [`Error::OutOfSpace`]   | The buffer you gave us is too small. See [Output Buffers](#conventions-buffers).                                                  |
 | [`Error::IoError`] | Reading from or writing to external I/O failed.                                                                     |
 | [`Error::LimitExceeded`] | Encoded input went past a configured limit.                                                                         |
 | [`Error::Rejected`] | A safety check refused the operation, such as pasted text that could inject commands. Nothing was done.             |
@@ -29,7 +29,7 @@ can be of the following:
 
 [`Error::Unsupported`] is how a program handles a library that isn't the one it was
 built for. See [Newer Headers, Older Libraries](values.md#values-older-libraries) and
-[Optional Features](features.md).
+[Optional Features](features.md#features).
 
 ## Handles {#conventions-handles}
 

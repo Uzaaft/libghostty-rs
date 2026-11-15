@@ -68,7 +68,7 @@ There are 19 effects:
 | [`on_desktop_notification`](Terminal::on_desktop_notification) | [`DesktopNotificationFn`](effect::DesktopNotificationFn) | Desktop notification via OSC 9 / OSC 777                                |
 | [`on_progress_report`](Terminal::on_progress_report)      | [`ProgressReportFn`](effect::ProgressReportFn)      | Progress report via OSC 9;4                                             |
 | [`on_program_status`](Terminal::on_program_status)       | [`ProgramStatusFn`](effect::ProgramStatusFn)       | Program status report via OSC 7501                                      |
-| [`on_unknown_sequence`](Terminal::on_unknown_sequence)     | [`UnknownSequenceFn`](effect::UnknownSequenceFn)     | APC or OSC sequence we don't implement. See @ref guide-custom-sequences |
+| [`on_unknown_sequence`](Terminal::on_unknown_sequence)     | [`UnknownSequenceFn`](effect::UnknownSequenceFn)     | APC or OSC sequence we don't implement. See [Custom Sequences](custom-sequences.md#guide-custom-sequences) |
 | [`on_render_hold`](Terminal::on_render_hold)          | [`RenderHoldFn`](effect::RenderHoldFn)          | Synchronized output (mode 2026) begins or ends                          |
 | [`on_semantic_prompt`](Terminal::on_semantic_prompt)      | [`SemanticPromptFn`](effect::SemanticPromptFn)      | Shell reports a prompt or command step via OSC 133                      |
 | [`on_reset`](Terminal::on_reset)                | [`ResetFn`](effect::ResetFn)               | Full reset (RIS, `ESC c`)                                               |
@@ -151,7 +151,7 @@ Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs
 ### Sequences we don't implement
 
 The callback for unknown sequences has more to it than the others, so it has its
-own guide. See @ref guide-custom-sequences.
+own guide. See [Custom Sequences](custom-sequences.md#guide-custom-sequences).
 
 ## Putting it together {#guide-effects-register}
 

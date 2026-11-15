@@ -49,12 +49,8 @@ programs should be resilient to this.
 To read the library's version when your program runs, use [`build_info::version_string`]
 for the string and `build_info::{major,minor,patch,pre}_version` for the numbers:
 
-@snippet c-vt-build-info/src/main.c version-library
+```rust,ignore
+{{#include ../../example/rust-vt-build-info/src/main.rs:version-library}}
+```
 
-To make sure the two work together, compare them when your program starts:
-
-@snippet c-vt-build-info/src/main.c version-compatible
-
-Full program: @ref c-vt-build-info/src/main.c
-
-See @ref version "Version" for the version macros and more examples.
+Full program: [rust-vt-build-info/src/main.rs](/example/rust-vt-build-info/src/main.rs)

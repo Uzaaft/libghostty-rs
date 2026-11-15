@@ -157,8 +157,8 @@ Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphi
 The list holds every Kitty image on screen, however the program placed it.
 Earlier versions left some images out, so renderers had to draw them from the
 storage's placement iterator. That's no longer needed. If your renderer still
-draws from that iterator, stop, or those images are drawn twice. See @ref
-guide-images-inspecting for what it's for.
+draws from that iterator, stop, or those images are drawn twice.
+See [Inspecting the storage](#guide-images-inspecting) for what it's for.
 
 ## Images partly outside the captured rows {#guide-images-clipping}
 
