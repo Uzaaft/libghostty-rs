@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Visit only the rows that changed. In the first frame, that's all of them.
     let mut row_iter = rows.update(&snapshot)?;
     while let Some((_y, row)) = row_iter.next_dirty() {
-        let mut cell_iter = cells.update(&row)?;
+        let mut cell_iter = cells.update(row)?;
 
         while let Some(cell) = cell_iter.next() {
             let style = cell.style()?;

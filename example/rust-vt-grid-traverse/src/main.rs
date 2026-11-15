@@ -12,11 +12,11 @@ fn main() -> Result<(), Error> {
     // Write some content so the grid has interesting data
     terminal.vt_write(b"Hello!\r\n"); // Row 0: H e l l o !
     terminal.vt_write(b"World\r\n"); // Row 1: W o r l d
-    terminal.vt_write(b"\033[1mBold"); // Row 2: B o l d (bold style)
+    terminal.vt_write(b"\x1b[1mBold"); // Row 2: B o l d (bold style)
 
     // Get terminal dimensions
     let cols = terminal.cols()?;
-    let rows = terminal.rows()?;
+    let rows = terminal.rows()? as u32;
 
     // Traverse the entire grid using grid refs
     for row in 0..rows {
@@ -42,7 +42,7 @@ fn main() -> Result<(), Error> {
         let point = Point::Active(Coordinate { x: 0, y: row });
         let grid_ref = terminal.grid_ref(point)?;
         let row = grid_ref.row()?;
-        print!(" (wrap={}", row.wrap()?);
+        print!(" (wrap={}", row.is_wrapped()?);
 
         // Check the style of the first cell with text
         let style = grid_ref.style()?;

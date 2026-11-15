@@ -302,7 +302,8 @@ async fn main() -> Result<()> {
         // vsync via `next_frame` regardless, so we have nothing to schedule
         // and the next tick simply happens on the next frame.
         let now_ms = u64::try_from(animation_clock.elapsed().as_millis())?;
-        terminal.kitty_graphics_animation_tick(now_ms)?;
+        let mut graphics = terminal.kitty_graphics()?;
+        graphics.tick_animation(now_ms)?;
 
         // Draw the current terminal screen.
         renderer.render_terminal(&terminal, dims, Some(&font))?;
@@ -464,9 +465,9 @@ impl<'alloc> Renderer<'alloc> {
 
         // Obtain the Kitty graphics storage from the terminal. We only need
         // it for the images' pixels. This is a reference valid until the next
-        // mutating terminal call. It's `None` when libghostty was built
-        // without Kitty graphics, in which case there are no images to draw.
-        let graphics = terminal.kitty_graphics()?;
+        // mutating terminal call. It's `Err(Error::Unsupported)` when libghostty
+        // was built without Kitty graphics, in which case there are no images to draw.
+        let graphics = terminal.kitty_graphics();
 
         // Populate the row iterator from the current render state snapshot,
         // resulting in a row *iteration* object, which can be thought of as
@@ -476,7 +477,7 @@ impl<'alloc> Renderer<'alloc> {
         let mut row_it = self.row_it.update(&snapshot)?;
 
         // --- Layer 1: images below cell backgrounds ---
-        if let Some(graphics) = graphics.as_ref() {
+        if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
                 &self.images,
                 &mut self.textures,
@@ -610,7 +611,7 @@ impl<'alloc> Renderer<'alloc> {
         // above-text images.  In our single-pass renderer the cell text
         // has already been drawn, but this still achieves the correct
         // visual for the common case where images sit behind text.
-        if let Some(graphics) = graphics.as_ref() {
+        if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
                 &self.images,
                 &mut self.textures,
@@ -640,7 +641,7 @@ impl<'alloc> Renderer<'alloc> {
         }
 
         // --- Layer 3: images above text ---
-        if let Some(graphics) = graphics.as_ref() {
+        if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
                 &self.images,
                 &mut self.textures,
@@ -1266,14 +1267,12 @@ impl SelectionState<'_> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         let grid_ref = terminal.grid_ref(point)?;
 
-        let selection = self
+        terminal.set_selection(self
             .press_event
             .set_repeat_distance(dims.cell_width.into())?
             .set_time(self.start_time.elapsed())?
             .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref)?;
-
-        terminal.set_selection(selection.as_ref())?;
+            .apply(&mut self.gesture, terminal, grid_ref)?)?;
         Ok(())
     }
 
@@ -1306,13 +1305,11 @@ impl SelectionState<'_> {
             screen_height: dims.window_height as u32,
         };
 
-        let selection = self
+        terminal.set_selection(self
             .drag_event
             .set_rectangle(Input::selection_rectangle_mods(mods))?
             .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref, geometry)?;
-
-        terminal.set_selection(selection.as_ref())?;
+            .apply(&mut self.gesture, terminal, grid_ref, geometry)?)?;
         Ok(())
     }
 

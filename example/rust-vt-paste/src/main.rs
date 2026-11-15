@@ -27,7 +27,7 @@ impl Clipboard {
             b"text/plain" => {
                 // Stream the text in small pieces just to show that it works.
                 for chunk in self.text.as_bytes().chunks(4) {
-                    writer.write(chunk)?;
+                    writer.write_all(chunk)?;
                 }
                 Ok(())
             }

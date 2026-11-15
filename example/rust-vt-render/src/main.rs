@@ -7,7 +7,6 @@ use libghostty_vt::{
     error::Error,
     point::{Coordinate, Point},
     render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator},
-    selection::Selection,
     style::Underline,
 };
 
@@ -20,9 +19,9 @@ fn main() -> Result<(), Error> {
     let mut render_state = RenderState::new()?;
 
     // Feed some styled content into the terminal.
-    terminal.vt_write(b"Hello, \033[1;32mworld\033[0m!\r\n"); // bold green "world"
-    terminal.vt_write(b"\033[4munderlined\033[0m text\r\n"); // underlined text
-    terminal.vt_write(b"\033[38;2;255;128;0morange\033[0m\r\n"); // 24-bit orange fg
+    terminal.vt_write(b"Hello, \x1b[1;32mworld\x1b[0m!\r\n"); // bold green "world"
+    terminal.vt_write(b"\x1b[4munderlined\x1b[0m text\r\n"); // underlined text
+    terminal.vt_write(b"\x1b[38;2;255;128;0morange\x1b[0m\r\n"); // 24-bit orange fg
 
     // Select "underlined" on the second row. Render state exposes this
     // later as a row-local selected cell range.
@@ -96,7 +95,7 @@ fn main() -> Result<(), Error> {
         }
 
         // Get cells for this row (reuses the same cells handle).
-        let mut cell_it = cells.update(&row)?;
+        let mut cell_it = cells.update(row)?;
         while let Some(cell) = cell_it.next() {
             // Get the graphemes of this cell.
             let graphemes = cell.graphemes()?;

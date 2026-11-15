@@ -2,7 +2,7 @@
 //! values as an OSC 10 override layers on top.
 
 use libghostty_vt::{
-    color::{Palette, PaletteIndex, Rgb},
+    color::{PaletteIndex, Rgb},
     error::Error,
     Terminal,
 };
@@ -88,20 +88,20 @@ fn main() -> Result<(), Error> {
     let mut terminal = Terminal::new(80, 24)?;
 
     // Before setting any colors, everything is unset
-    print_all_colors(&terminal, "Before setting defaults");
+    print_all_colors(&terminal, "Before setting defaults")?;
 
     // Set our color theme defaults
-    set_color_theme(&mut terminal);
-    print_all_colors(&terminal, "\nAfter setting defaults");
+    set_color_theme(&mut terminal)?;
+    print_all_colors(&terminal, "\nAfter setting defaults")?;
 
     // Simulate an OSC override (e.g. a program running inside the
     // terminal changes the foreground via OSC 10)
     terminal.vt_write(b"\x1B]10;rgb:FF/00/00\x1B\\");
-    print_all_colors(&terminal, "\nAfter OSC foreground override");
+    print_all_colors(&terminal, "\nAfter OSC foreground override")?;
 
     // Clear the foreground default — the OSC override is still active
-    terminal.set_default_fg_color(None);
-    print_all_colors(&terminal, "\nAfter clearing foreground default");
+    terminal.set_default_fg_color(None)?;
+    print_all_colors(&terminal, "\nAfter clearing foreground default")?;
 
     Ok(())
 }

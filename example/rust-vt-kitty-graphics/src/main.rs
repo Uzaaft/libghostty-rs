@@ -237,7 +237,7 @@ fn run_frames(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
             // Move to the bottom row and print two newlines to scroll.
             terminal.vt_write(b"\x1b[24;1H\r\n\r\n");
         }
-        let snapshot = state.update(&terminal)?;
+        let snapshot = state.update(terminal)?;
         let generation = snapshot.image_placements_generation()?;
 
         if have_draw_list && generation == last_generation {
@@ -249,7 +249,7 @@ fn run_frames(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
 
         println!("\nFrame {frame}: images changed, reading the list:");
 
-        let count = draw_images(&snapshot, &mut images, &terminal)?;
+        let count = draw_images(&snapshot, &mut images, terminal)?;
         println!("Total images: {count}");
     }
 
