@@ -209,6 +209,7 @@ dependencies = [
  "bitflags 2.13.2",
  "int-enum",
  "libghostty-vt-sys",
+ "rustversion",
  "tracing",
 ]
 
@@ -428,6 +429,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rust_vt_allocator"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
+name = "rust_vt_build_info"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_color_scheme"
 version = "0.0.0"
 dependencies = [
@@ -512,6 +527,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_modes"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_osc"
 version = "0.0.0"
 dependencies = [
@@ -561,6 +583,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_size_report"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_snapshot"
 version = "0.0.0"
 dependencies = [
@@ -573,6 +602,12 @@ version = "0.0.0"
 dependencies = [
  "libghostty-vt",
 ]
+
+[[package]]
+name = "rustversion"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "serde"

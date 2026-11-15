@@ -8,6 +8,8 @@
 # load the workspace at all.
 members = [
   "ghostling_rs",
+  "rust-vt-allocator",
+  "rust-vt-build-info",
   "rust-vt-colors",
   "rust-vt-color-scheme",
   "rust-vt-compression",
@@ -20,6 +22,7 @@ members = [
   "rust-vt-grid-traverse",
   "rust-vt-hello",
   "rust-vt-kitty-graphics",
+  "rust-vt-modes",
   "rust-vt-osc",
   "rust-vt-paste",
   "rust-vt-render",
@@ -27,6 +30,7 @@ members = [
   "rust-vt-selection",
   "rust-vt-selection-gesture",
   "rust-vt-sgr",
+  "rust-vt-size-report",
   "rust-vt-snapshot",
   "rust-vt-stream",
   "wasm_rs",
