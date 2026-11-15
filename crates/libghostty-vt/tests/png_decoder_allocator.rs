@@ -56,7 +56,7 @@ fn transmit_png() -> String {
     let mut terminal = Terminal::new(80, 24).unwrap();
     terminal.resize(80, 24, 8, 16).unwrap();
     terminal
-        .set_kitty_image_storage_limit(64 * 1024 * 1024)
+        .set_kitty_image_storage_limit(Some(64 * 1024 * 1024))
         .unwrap();
     let sink = Rc::clone(&replies);
     terminal

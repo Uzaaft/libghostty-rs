@@ -16,6 +16,11 @@
 //! # let mut terminal = Terminal::new(80, 24).unwrap();
 //! terminal.on_bell(|_term| println!("Bell rang!"));
 //! ```
+//!
+//! See the [Effects] guide for how to register them, the rules for callbacks,
+//! the list of effects, and examples.
+//!
+//! [Effects]: http://localhost:3000/guides/effects.html#guide-effects
 use std::{marker::PhantomData, num::NonZeroU16};
 
 use crate::{
@@ -80,7 +85,8 @@ macro_rules! handlers {
         impl<'alloc, 'cb> $crate::terminal::Terminal<'alloc, 'cb> {$(
             $(#[$fmeta])*
             ///
-            /// See [#Effects](Terminal#effects) for more details.
+            /// See [Effects](http://localhost:3000/guides/effects.html#guide-effects)
+            /// for more details.
             $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
                 unsafe extern "C" fn callback(
                     t: $crate::ffi::Terminal,
@@ -402,7 +408,7 @@ handlers! {
         from = TerminalEnquiryFn() -> ffi::String,
         to = <'t>EnquiryFn() -> Option<&'t str>,
     ) |term, func| {
-        func(term).unwrap_or("").into()
+        func(term).unwrap_or("").as_bytes().into()
     }
 
     /// Call the given function when the terminal receives an XTVERSION
@@ -414,7 +420,7 @@ handlers! {
         from = TerminalXtversionFn() -> ffi::String,
         to = <'t>XtversionFn() -> Option<&'t str>,
     ) |term, func| {
-        func(term).unwrap_or("").into()
+        func(term).unwrap_or("").as_bytes().into()
     }
 
     /// Call the given function when the terminal title changes

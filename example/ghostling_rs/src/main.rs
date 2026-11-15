@@ -131,7 +131,7 @@ async fn main() -> Result<()> {
     terminal
         // Enable Kitty graphics by setting a storage limit.  Without this the
         // terminal rejects all image data.  64 MiB is a generous default.
-        .set_kitty_image_storage_limit(64 * 1024 * 1024)?
+        .set_kitty_image_storage_limit(Some(64 * 1024 * 1024))?
         // Allow images to be transmitted via file, temp file, and shared
         // memory mediums in addition to the default inline (direct) medium.
         // The temp file medium is restricted to the system temp directory.

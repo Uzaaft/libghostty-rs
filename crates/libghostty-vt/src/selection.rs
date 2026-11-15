@@ -341,22 +341,21 @@ impl Terminal<'_, '_> {
     /// // "git" and drags to "status". The pointer may pass over whitespace, so
     /// // select the nearest word between the original click and current drag point
     /// // in both directions, then combine the outer word bounds.
-    /// fn ref_at<'t>(terminal: &'t Terminal<'_, '_>, x: u16, y: u32) -> Result<GridRef<'t>, Error> {
+    /// fn ref_at<'t>(
+    ///     terminal: &'t Terminal<'_, '_>,
+    ///     x: u16,
+    ///     y: u32
+    /// ) -> Result<GridRef<'t>, Error> {
     ///     terminal.grid_ref(Point::Active(Coordinate { x, y }))
     /// }
     ///
     /// let click_ref = ref_at(&terminal, 2, 0)?; // the "git" in "git status"
     /// let drag_ref = ref_at(&terminal, 6, 0)?;  // the "status" in "git status"
     ///
-    /// let start_word = terminal.select_word_between(
-    ///     SelectWordBetween::new(click_ref.clone(), drag_ref.clone())
-    /// )?;
+    /// let start_word = terminal.select_word_between(click_ref, drag_ref).finish()?;
+    /// let end_word = terminal.select_word_between(drag_ref, click_ref).finish()?;
     ///
-    /// let end_word = terminal.select_word_between(
-    ///     SelectWordBetween::new(drag_ref, click_ref)
-    /// )?;
-    ///
-    /// let drag_selection = Selection::new(
+    /// let drag_selection = terminal.select(
     ///     start_word.unwrap().start(),
     ///     end_word.unwrap().end(),
     ///     false,

@@ -23,7 +23,7 @@ the protocol and deletes every stored image and placement. If Kitty graphics
 were disabled at build time, this option returns [`Error::Unsupported`].
 
 ```rust,ignore
-terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?; // 64 MiB
+terminal.set_kitty_image_storage_limit(Some(64 * 1024 * 1024))?; // 64 MiB
 ```
 
 The terminal also needs a cell size. Image sizes depend on the size of a cell in

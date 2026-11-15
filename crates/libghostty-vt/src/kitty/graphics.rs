@@ -1,578 +1,16 @@
-//! API for the images that programs send with the
+//! Read the images that programs send with the Kitty graphics protocol.
+//!
+//! [`Graphics`] is a handle to the image storage of the active screen,
+//! where the terminal keeps every image a program sends with the
 //! [Kitty graphics protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/).
 //!
-//! The terminal keeps every image a program sends, and every placement of an
-//! image on screen, in an image storage. Each screen (main and alternate) has
-//! its own. [`Graphics`] is a handle to the storage of the active screen. Use
-//! it to:
+//! Read it from a terminal with [`Terminal::kitty_graphics`]. Use it to read
+//! pixels, play animations, and inspect what the storage holds. It doesn't tell
+//! you where to draw. The render state does that.
 //!
-//!   - Read the pixels of an image so you can draw it.
-//!   - Play animated images (with [`Graphics::tick_animation`]).
-//!   - Inspect the images and placements the storage holds.
+//! See [Images] for how to set up, decode PNGs, and draw images.
 //!
-//! This API doesn't tell you where to draw images. The render state does
-//! that. See [Drawing images](#drawing-images) below.
-//!
-//! ## Setting up
-//!
-//! Kitty graphics are off until you give the terminal a storage limit with
-//! [`Terminal::set_kitty_image_storage_limit`]. To accept PNG images, also
-//! install a PNG decoder with [`set_png_decoder`].
-//!
-//! Get the storage handle with [`Terminal::kitty_graphics`]. The handle is
-//! borrowed from the terminal. It stays valid until the next call that
-//! changes the terminal, such as [`Terminal::vt_write`] or
-//! [`Terminal::reset`], so get it again after each of those.
-//!
-//! ## Drawing images
-//!
-//! Use the render state's image list
-//! ([`ImageIterator`](crate::render::ImageIterator)) to find what to draw. It
-//! lists every Kitty image on screen, however the program placed it:
-//!
-//!   - At a cell, so the image scrolls with the text.
-//!   - With placeholder cells (see [Unicode placeholders](#unicode-placeholders)
-//!     below).
-//!   - Relative to another image.
-//!
-//! Each entry already has its position, size, source rectangle, layer and
-//! z-index worked out, so one drawing routine handles all of them. See
-//! [Images](crate::RenderState#images) in the render state documentation for
-//! the details.
-//!
-//! The storage only provides the pixels. Each entry in the list has an
-//! [image ID](crate::render::ImageIteration::image_id). Look it up with
-//! [`Graphics::image`], then read the image's [size](Image::width),
-//! [pixel format](Image::format) and [pixels](Image::data). The pixels are
-//! always decoded and uncompressed, so you can upload them as they are.
-//!
-//! Don't also draw images from this API's [`PlacementIterator`]. The render
-//! state's list already includes those placements, so they would be drawn
-//! twice. See [Inspecting the storage](#inspecting-the-storage) below for what
-//! the iterator is for.
-//!
-//! ## Knowing what changed
-//!
-//! Most frames don't change any image, so a renderer can skip most of its
-//! image work. Two values tell you what to redo:
-//!
-//!   - [`Snapshot::image_placements_generation`](crate::render::Snapshot::image_placements_generation)
-//!     belongs to the render state's whole list. It tells you when to read
-//!     the list again, for example after an image moved because the text
-//!     scrolled.
-//!   - [`Image::generation`] belongs to a single image. It tells you when to
-//!     upload that image's pixels again. It changes when a program sends the
-//!     image again and on every animation frame. The render state reports
-//!     the same value for each entry as
-//!     [`ImageIteration::image_generation`](crate::render::ImageIteration::image_generation),
-//!     so you can check your texture cache without touching the storage.
-//!
-//! Use the image generation as part of your texture cache key. Don't rely on
-//! the image's size or data length instead: a program can send new pixels
-//! with the same size under the same ID.
-//!
-//! For a frame loop that reads the list only when it changed, see
-//! [Knowing when images changed](crate::RenderState#knowing-when-images-changed)
-//! in the render state documentation, or the [example](#example) below.
-//!
-//! The storage also has a generation of its own, [`Graphics::generation`]. It
-//! changes whenever a program sends, places or deletes an image, but not when
-//! images only move on screen. It can't tell you when to read the render
-//! state's list again. It is useful for work that only depends on what the
-//! storage holds, such as freeing textures of images that were deleted.
-//!
-//! The two storage generations are never reused, not even across the main and
-//! alternate screens, terminal resets, or different terminals. That makes
-//! either one safe to use as a cache key on its own. The render state's
-//! placements generation is different: only compare it with the last value
-//! you read from the same render state.
-//!
-//! ## Animation
-//!
-//! The Kitty graphics protocol lets programs send images with several frames
-//! and ask the terminal to play them, much like an animated GIF. The terminal
-//! stores every frame, but it does not keep its own timer. Your application
-//! drives playback by calling [`Graphics::tick_animation`].
-//!
-//! Each call shows whichever frame is due at the time you pass in. When an
-//! image moves to a new frame, two things change:
-//!
-//!   - [`Image::data`] returns the pixels of the new frame.
-//!   - [`Image::generation`] returns a new value.
-//!
-//! If you already cache textures by image generation (see
-//! [Knowing what changed](#knowing-what-changed) above), new frames appear
-//! without any extra work.
-//!
-//! The tick also tells you when the next frame is due. Use that time to
-//! schedule a single redraw instead of calling the tick in a loop:
-//!
-//!   1. Call the tick each time you prepare a frame to draw, as long as the
-//!      storage holds at least one image.
-//!   2. If it returns `Some` time, schedule one redraw at the returned time.
-//!      Don't schedule it sooner than your shortest frame interval (for
-//!      example 8 ms for a 120 Hz display).
-//!   3. If it returns `None`, nothing is playing. Don't schedule anything.
-//!
-//! You never need to watch for animations starting. A program starts or
-//! resumes playback by writing a command to the terminal, and that write
-//! already gives you a reason to redraw. The tick on that redraw picks up the
-//! animation. A terminal with no playing animations costs nothing extra.
-//!
-//! Here is a helper, `tick_animations`, that follows these steps. A renderer
-//! calls it once per frame and uses the result to schedule the next redraw.
-//! The example plays a two-frame animation with that helper. It uses a
-//! pretend clock so that it runs instantly:
-//!
-//! ```
-//! use libghostty_vt::{Terminal, error};
-//!
-//! /// The shortest time between two redraws. About 8 ms suits a 120 Hz display.
-//! const MIN_FRAME_INTERVAL_MS: u64 = 8;
-//!
-//! /// Advance any playing animations while preparing a frame to draw.
-//! ///
-//! /// Call this once per frame, before drawing images. It returns how many
-//! /// milliseconds to wait before the next redraw, or `None` if no animation
-//! /// is playing. In that case, don't schedule a redraw for animations at
-//! /// all. A program that starts an animation does so by writing to the
-//! /// terminal, which already causes a redraw.
-//! ///
-//! /// `now_ms` comes from a clock you choose, such as milliseconds since your
-//! /// app started. Always use the same clock with the same starting point.
-//! fn tick_animations(terminal: &mut Terminal<'_, '_>, now_ms: u64) -> error::Result<Option<u64>> {
-//!     let Some(next_ms) = terminal.kitty_graphics_animation_tick(now_ms)? else {
-//!         return Ok(None);
-//!     };
-//!
-//!     // `next_ms` is an absolute time. Turn it into a delay from now.
-//!     let delay_ms = next_ms.saturating_sub(now_ms);
-//!     Ok(Some(delay_ms.max(MIN_FRAME_INTERVAL_MS)))
-//! }
-//!
-//! /// Print the first pixel and the generation of an image.
-//! fn print_image(
-//!     terminal: &Terminal<'_, '_>,
-//!     image_id: u32,
-//! ) -> Result<(), Box<dyn std::error::Error>> {
-//!     // Upstream can be built without Kitty graphics (it always is for
-//!     // wasm). Then there is no image storage, and so nothing to print.
-//!     let Some(graphics) = terminal.kitty_graphics()? else {
-//!         return Ok(());
-//!     };
-//!     let image = graphics.image(image_id).ok_or("no such image")?;
-//!     let pixels = image.data()?.ok_or("pixels still loading")?;
-//!     let generation = image.generation()?;
-//!     print!(
-//!         "pixel=({},{},{}) generation={generation}",
-//!         pixels[0], pixels[1], pixels[2],
-//!     );
-//!     Ok(())
-//! }
-//!
-//! # /// The first pixel and the generation of image 2, for the asserts.
-//! # fn image(terminal: &Terminal<'_, '_>) -> ([u8; 3], u64) {
-//! #     let graphics = terminal.kitty_graphics().unwrap().unwrap();
-//! #     let image = graphics.image(2).unwrap();
-//! #     let pixels = image.data().unwrap().unwrap();
-//! #     ([pixels[0], pixels[1], pixels[2]], image.generation().unwrap())
-//! # }
-//! #
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! let mut terminal = Terminal::new(80, 24)?;
-//! terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?;
-//!
-//! // These commands set up the animation:
-//! //
-//! //   a=T  Send a red 1x1 RGBA image with ID 2 and display it.
-//! //   a=f  Add a blue second frame that shows for 40 ms.
-//! //   a=a  Make the first frame show for 30 ms. It starts at 0 ms,
-//! //        which would mean the frame is skipped.
-//! //   a=a  Start playing on a loop (s=3).
-//! //
-//! // q=2 tells the terminal not to send replies.
-//! terminal.vt_write(
-//!     b"\x1b_Ga=T,f=32,i=2,s=1,v=1,q=2;/wAA/w==\x1b\\\
-//!       \x1b_Ga=f,f=32,i=2,s=1,v=1,z=40,q=2;AAD//w==\x1b\\\
-//!       \x1b_Ga=a,i=2,r=1,z=30,q=2\x1b\\\
-//!       \x1b_Ga=a,i=2,s=3,q=2\x1b\\",
-//! );
-//!
-//! // Draw three frames, following each delay. A real app waits for the
-//! // delay that `tick_animations` returns. To keep this example quick, a
-//! // pretend clock jumps ahead by that delay instead.
-//! let mut now_ms = 0;
-//! # let mut frames = Vec::new();
-//! for _ in 0..3 {
-//!     let delay_ms = tick_animations(&mut terminal, now_ms)?;
-//!
-//!     // The tick invalidates image handles, so `print_image` looks the
-//!     // image up again. The generation changes whenever the frame does.
-//!     print!("  t={now_ms} ms: ");
-//!     print_image(&terminal, 2)?;
-//! #   frames.push((now_ms, image(&terminal), delay_ms));
-//!     let Some(delay_ms) = delay_ms else {
-//!         println!(", nothing playing");
-//!         break;
-//!     };
-//!     println!(", next redraw in {delay_ms} ms");
-//!
-//!     now_ms += delay_ms;
-//! }
-//! # // The first tick starts the red frame's 30 ms timer without changing
-//! # // the image. At 30 ms the blue frame shows for 40 ms, then at 70 ms
-//! # // playback loops back to red, each time with a new generation.
-//! # let [(t0, (p0, g0), d0), (t1, (p1, g1), d1), (t2, (p2, g2), d2)] = frames[..] else {
-//! #     panic!("expected three frames, got {frames:?}");
-//! # };
-//! # assert_eq!((t0, p0, d0), (0, [255, 0, 0], Some(30)));
-//! # assert_eq!((t1, p1, d1), (30, [0, 0, 255], Some(40)));
-//! # assert_eq!((t2, p2, d2), (70, [255, 0, 0], Some(30)));
-//! # assert!(g0 != g1 && g1 != g2 && g0 != g2);
-//!
-//! // Stop playback (s=1). Once stopped, the tick asks for no redraws.
-//! terminal.vt_write(b"\x1b_Ga=a,i=2,s=1,q=2\x1b\\");
-//! let delay_ms = tick_animations(&mut terminal, now_ms)?;
-//! if delay_ms.is_none() {
-//!     println!("  t={now_ms} ms: stopped, no redraw needed");
-//! }
-//! # assert_eq!(delay_ms, None);
-//! # // Stopping leaves the image on the frame it was showing.
-//! # assert_eq!(image(&terminal), (p2, g2));
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! ## Unicode placeholders
-//!
-//! A program can place an image with text instead of at a cell. It creates a
-//! virtual placement, which has no position of its own, and prints
-//! placeholder characters (U+10EEEE) where the image should appear. The image
-//! then moves with those characters, like text. Programs such as tmux use
-//! this so that images scroll, move and disappear along with the text around
-//! them.
-//!
-//! Only the cells know where these images are, so the storage can't tell
-//! you. The render state finds the placeholder cells and lists each part of
-//! the image like any other entry, so you draw them the same way as every
-//! other image. See
-//! [Kitty graphics placeholders](crate::RenderState#kitty-graphics-placeholders)
-//! in the render state documentation.
-//!
-//! ## Inspecting the storage
-//!
-//! A [`PlacementIterator`] lists every placement in the storage, including
-//! placements that are off screen and virtual placements. Use it for tools
-//! such as debuggers or tests that need to see what the storage holds. A
-//! renderer doesn't need it.
-//!
-//!   1. Create an iterator with [`PlacementIterator::new`].
-//!   2. Fill it from the storage with [`PlacementIterator::update`], which
-//!      returns a [`PlacementIteration`].
-//!   3. Optionally limit it to one layer with
-//!      [`PlacementIteration::set_layer`].
-//!   4. Move to each placement with [`PlacementIteration::next`] and read its
-//!      values with the methods on [`PlacementIteration`], such as
-//!      [`PlacementIteration::image_id`].
-//!
-//! These functions work out the geometry of the iterator's current placement
-//! from the storage:
-//!
-//!   - [`PlacementIteration::pixel_size`]: the size to draw the image at, in
-//!     pixels.
-//!   - [`PlacementIteration::grid_size`]: the number of columns and rows of
-//!     cells it covers.
-//!   - [`PlacementIteration::viewport_pos`]: the top-left cell, relative to
-//!     the viewport.
-//!   - [`PlacementIteration::source_rect`]: the part of the image to draw, in
-//!     image pixels.
-//!   - [`PlacementIteration::rect`]: the cells it covers, as a [`Selection`].
-//!   - [`PlacementIteration::render_info`]: all of the above except
-//!     the selection, in one call.
-//!
-//! They only know about placements at a cell, and placements relative to
-//! one. They can't find virtual placements, or placements relative to a
-//! virtual placement, because those depend on the cells. The render state
-//! gives the same values for every entry in its list, so prefer it whenever
-//! you are drawing.
-//!
-//! ## Lifetimes and thread-safety
-//!
-//! All handles borrowed from the terminal ([`Graphics`], [`Image`]) become
-//! invalid after any call that changes the terminal. The placement iterator
-//! belongs to you and is freed when dropped, but the values it returns are
-//! only valid until the terminal changes.
-//!
-//! ## Example
-//!
-//! The following example creates a terminal, places one image at a cell and
-//! another with placeholder cells, lists both from the render state, and reads
-//! each image's pixels from the storage:
-//!
-//! ```
-//! use libghostty_vt::{
-//!     RenderState, Terminal,
-//!     alloc::{Allocator, Bytes},
-//!     kitty::graphics,
-//!     render::{ImageIterator, ImageProtocol},
-//! };
-//! # use libghostty_vt::render::{ImageLayer, KittyPlacementKind};
-//!
-//! /// Minimal PNG decoder.
-//! ///
-//! /// A real implementation would use a PNG library (libpng, stb_image, etc.)
-//! /// to decode the PNG data. This example uses a hardcoded 1x1 red pixel
-//! /// since we know exactly what image we're sending.
-//! ///
-//! /// WARNING: This is only an example for providing a callback, it DOES NOT
-//! /// actually decode the PNG it is passed. It hardcodes a response.
-//! struct StubPngDecoder;
-//!
-//! impl graphics::DecodePng for StubPngDecoder {
-//!     fn decode_png<'alloc, 'ctx>(
-//!         &mut self,
-//!         alloc: &'alloc Allocator<'ctx>,
-//!         _data: &[u8],
-//!     ) -> Option<graphics::DecodedImage<'alloc>> {
-//!         // Allocate RGBA pixel data through the provided allocator.
-//!         let mut data = Bytes::new_zeroed_with_alloc(alloc, 4).ok()?;
-//!
-//!         // Fill with red (R=255, G=0, B=0, A=255).
-//!         data.copy_from_slice(&[255, 0, 0, 255]);
-//!
-//!         Some(graphics::DecodedImage {
-//!             width: 1,
-//!             height: 1,
-//!             data,
-//!         })
-//!     }
-//! }
-//!
-//! fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // SAFETY: No other thread uses libghostty yet.
-//!     unsafe { graphics::set_png_decoder(Some(Box::new(StubPngDecoder))) }?;
-//!
-//!     // Create a terminal with Kitty graphics enabled.
-//!     let mut terminal = Terminal::new(80, 24)?;
-//!
-//!     // Set the cell size in pixels. Image sizes depend on it.
-//!     terminal.resize(80, 24, 8, 16)?;
-//!
-//!     // Set a storage limit (64 MiB) to enable Kitty graphics.
-//!     terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?;
-//!
-//!     // Install pty_write to see the protocol response.
-//!     terminal.on_pty_write(|_, data| println!("  response: {}", data.escape_ascii()))?;
-//!
-//!     // Move the cursor to row 10 so the images have room to scroll up.
-//!     terminal.vt_write(b"\x1b[10;1H");
-//!
-//!     // Send a 1x1 PNG image and place it at the cursor. The image is
-//!     // attached to that cell, so it moves when the text moves.
-//!     //
-//!     // The escape sequence is:
-//!     //   ESC _G a=T,f=100,q=1; <base64 PNG data> ESC \
-//!     //
-//!     // Where:
-//!     //   a=T    transmit the image and place it
-//!     //   f=100  the data is a PNG
-//!     //   q=1    only reply on errors (q=0 would also reply on success)
-//!     println!("Sending Kitty graphics PNG image:");
-//!     terminal.vt_write(
-//!         b"\x1b_Ga=T,f=100,q=1;\
-//!           iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA\
-//!           DUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==\
-//!           \x1b\\",
-//!     );
-//!
-//!     // Show a second image with placeholder cells. First send a green 1x1
-//!     // image with ID 3 and give it a virtual placement 2 columns wide and
-//!     // 1 row tall (U=1). Then, on the next row, print two placeholder
-//!     // characters (U+10EEEE) where the image should appear:
-//!     //
-//!     //   ESC[38;5;3m    the foreground color says which image: ID 3
-//!     //   U+0305 U+0305  the first cell shows row 0, column 0 of the image
-//!     //   U+0305 U+030D  the second cell shows row 0, column 1
-//!     //
-//!     // The image moves with those cells, like text.
-//!     terminal.vt_write(
-//!         "\x1b_Ga=T,U=1,f=32,i=3,s=1,v=1,c=2,r=1,q=2;AP8A/w==\x1b\\\
-//!          \r\n\x1b[38;5;3m\
-//!          \u{10EEEE}\u{0305}\u{0305}\
-//!          \u{10EEEE}\u{0305}\u{030D}\
-//!          \x1b[39m"
-//!             .as_bytes(),
-//!     );
-//!
-//!     // The storage has a generation of its own. It changes when a program
-//!     // sends, places or deletes an image, but not when images only move on
-//!     // screen. That is why the frames below use the render state's
-//!     // placements generation to know when to read the list again.
-//!     //
-//!     // Upstream can be built without Kitty graphics (it always is for
-//!     // wasm), and then there is no storage at all, so stop here.
-//!     let Some(storage) = terminal.kitty_graphics()? else {
-//!         println!("Kitty graphics are disabled at build time");
-//!         return Ok(());
-//!     };
-//!     let storage_generation = storage.generation()?;
-//!     println!("Storage generation: {storage_generation}");
-//! #   assert_ne!(storage_generation, 0);
-//!
-//!     // Find what to draw from the render state, over three frames.
-//!     //
-//!     // Each frame updates the render state and compares the placements
-//!     // generation with the one from the last time the list was read. The
-//!     // first frame always reads the list. The second frame changes nothing,
-//!     // so it keeps the list it has. Before the third frame, new output
-//!     // scrolls the screen by two rows, which moves both images, so the third
-//!     // frame reads the list again.
-//!
-//!     // Create the render state and the image iterator once, and reuse them.
-//!     let mut render_state = RenderState::new()?;
-//!     let mut images = ImageIterator::new()?;
-//!
-//!     // Starting at `None` makes sure the first frame always reads the list.
-//!     let mut last_generation: Option<u64> = None;
-//! #   let mut lists_read = 0;
-//!
-//!     for frame in 1..=3 {
-//!         if frame == 3 {
-//!             // Move to the bottom row and print two newlines to scroll.
-//!             terminal.vt_write(b"\x1b[24;1H\r\n\r\n");
-//!         }
-//!
-//!         let snapshot = render_state.update(&terminal)?;
-//!         let generation = snapshot.image_placements_generation()?;
-//!         if last_generation == Some(generation) {
-//!             println!("Frame {frame}: no image changed, keep drawing the last list");
-//!             continue;
-//!         }
-//!         last_generation = Some(generation);
-//! #       lists_read += 1;
-//!
-//!         // Read the render state's image list, the way a renderer builds its
-//!         // list of images to draw.
-//!         //
-//!         // The list holds every Kitty image on screen, however the program
-//!         // placed it, with its position, size and draw order worked out. The
-//!         // Kitty graphics storage is only used to read pixels.
-//!         //
-//!         // A real renderer would find or upload a texture for each image and
-//!         // queue it for drawing, sorted by layer and then z. This example
-//!         // prints what it would draw instead.
-//!         println!("Frame {frame}: images changed, reading the list:");
-//!         let mut placements = images.update(&snapshot)?;
-//!
-//!         // The storage is only needed to read pixels. It existed before the
-//!         // loop, and whether it does is fixed at build time.
-//!         let graphics = terminal.kitty_graphics()?.ok_or("no Kitty graphics")?;
-//!
-//!         let mut count = 0;
-//!         while let Some(placement) = placements.next() {
-//!             // Skip protocols this renderer doesn't support.
-//!             let Ok(ImageProtocol::Kitty) = placement.protocol() else {
-//!                 continue;
-//!             };
-//!
-//!             count += 1;
-//!             let image_id = placement.image_id()?;
-//!             let generation = placement.image_generation()?;
-//!             println!(
-//!                 "  image #{count}: kind={:?} image_id={image_id} placement_id={:?}",
-//!                 placement.kitty_kind()?,
-//!                 placement.kitty_placement_id()?,
-//!             );
-//!             println!(
-//!                 "    layer={:?} z={} cell=({},{}) cells={}x{} offset=({},{})",
-//!                 placement.layer()?,
-//!                 placement.z()?,
-//!                 placement.viewport_col()?,
-//!                 placement.viewport_row()?,
-//!                 placement.grid_cols()?,
-//!                 placement.grid_rows()?,
-//!                 placement.cell_offset_x()?,
-//!                 placement.cell_offset_y()?,
-//!             );
-//!             println!(
-//!                 "    size={}x{} source=({},{} {}x{})",
-//!                 placement.pixel_width()?,
-//!                 placement.pixel_height()?,
-//!                 placement.source_x()?,
-//!                 placement.source_y()?,
-//!                 placement.source_width()?,
-//!                 placement.source_height()?,
-//!             );
-//!
-//!             // Read the pixels to upload them as a texture. A real renderer
-//!             // keys its textures by protocol, image ID and image generation,
-//!             // and only gets here when it has no texture for that key yet.
-//!             // The generation changes whenever the pixels do, so most frames
-//!             // skip this.
-//!             let Some(image) = graphics.image(image_id) else {
-//!                 continue;
-//!             };
-//!             let pixels = image.data()?.unwrap_or_default();
-//!             println!(
-//!                 "    pixels: {}x{} format={:?} data_len={} generation={generation}",
-//!                 image.width()?,
-//!                 image.height()?,
-//!                 image.format()?,
-//!                 pixels.len(),
-//!             );
-//! #           // Both images are 1x1 RGBA, and the render state reports the
-//! #           // storage's image generation.
-//! #           assert_eq!((image.width()?, image.height()?), (1, 1));
-//! #           assert_eq!(image.format()?, graphics::ImageFormat::Rgba);
-//! #           assert_eq!(image.generation()?, generation);
-//! #           // Neither command gave a placement ID, and nothing is cropped.
-//! #           assert_eq!(placement.kitty_placement_id()?, Some(0));
-//! #           assert_eq!(placement.source_x()?, 0);
-//! #           assert_eq!(placement.source_y()?, 0);
-//! #           assert_eq!(placement.source_width()?, 1);
-//! #           assert_eq!(placement.source_height()?, 1);
-//! #           // The scroll before frame 3 moves both images up two rows.
-//! #           let scrolled = if frame == 3 { 2 } else { 0 };
-//! #           let at = (placement.viewport_col()?, placement.viewport_row()?);
-//! #           let cells = (placement.grid_cols()?, placement.grid_rows()?);
-//! #           let offset = (placement.cell_offset_x()?, placement.cell_offset_y()?);
-//! #           let size = (placement.pixel_width()?, placement.pixel_height()?);
-//! #           if image_id == 3 {
-//! #               // The green image, shown by the two placeholder cells on
-//! #               // row 11 (10 from 0). Virtual placements have z -1, which is
-//! #               // below the text. The 1x1 image is scaled to fit its 2x1
-//! #               // cells (16x16 pixels), which it fills exactly.
-//! #               assert_eq!(placement.kitty_kind()?, Some(KittyPlacementKind::Virtual));
-//! #               assert_eq!(placement.z()?, -1);
-//! #               assert_eq!(placement.layer()?, ImageLayer::BelowText);
-//! #               assert_eq!(at, (0, 10 - scrolled));
-//! #               assert_eq!(cells, (2, 1));
-//! #               assert_eq!(offset, (0, 0));
-//! #               assert_eq!(size, (16, 16));
-//! #               assert_eq!(pixels, [0, 255, 0, 255]);
-//! #           } else {
-//! #               // The red PNG at the cursor on row 10 (9 from 0), drawn at
-//! #               // its own size of 1x1 pixels in one cell. z defaults to 0,
-//! #               // which is above the text.
-//! #               assert_eq!(placement.kitty_kind()?, Some(KittyPlacementKind::Fixed));
-//! #               assert_eq!(placement.z()?, 0);
-//! #               assert_eq!(placement.layer()?, ImageLayer::AboveText);
-//! #               assert_eq!(at, (0, 9 - scrolled));
-//! #               assert_eq!(cells, (1, 1));
-//! #               assert_eq!(offset, (0, 0));
-//! #               assert_eq!(size, (1, 1));
-//! #               assert_eq!(pixels, [255, 0, 0, 255]);
-//! #           }
-//!         }
-//!         println!("Total images: {count}");
-//! #       assert_eq!(count, 2);
-//!     }
-//! #   // Frame 2 kept the list from frame 1.
-//! #   assert_eq!(lists_read, 2);
-//!     Ok(())
-//! }
-//! ```
-//!
+//! [Images]: http://localhost:3000/guides/images.html#guide-images
 
 #![cfg(feature = "kitty-graphics")]
 
@@ -613,88 +51,15 @@ pub struct Graphics<'t> {
 /// Opaque reference to a Kitty graphics image.
 ///
 /// Obtained via [`Graphics::image`] with an image ID. The reference is
-/// borrowed from the storage with lifetime `'t` and remains valid until
-/// the next mutating terminal call.
+/// borrowed from the storage with lifetime `'g` and remains valid until
+/// the next mutating terminal or graphics storage call
+/// (e.g. [`Graphics::tick_animation`]).
 #[derive(Debug)]
-pub struct Image<'t> {
-    inner: Ref<'t, ffi::KittyGraphicsImageImpl>,
+pub struct Image<'g> {
+    inner: Ref<'g, ffi::KittyGraphicsImageImpl>,
 }
 
 /// Opaque reference to a Kitty graphics placement iterator.
-///
-/// It lists every placement in the storage, including virtual placements and
-/// placements that are off screen. Use it to inspect the storage, not to draw.
-/// See [Inspecting the storage](crate::kitty::graphics#inspecting-the-storage).
-///
-/// # Example
-///
-/// ```
-/// use libghostty_vt::{
-///     Terminal,
-///     kitty::graphics::{GridSize, PixelSize, PlacementIterator, ViewportPos},
-/// };
-///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// # let mut terminal = Terminal::new(80, 24)?;
-/// # // Cells are 8x16 pixels. Image sizes depend on it.
-/// # terminal.resize(80, 24, 8, 16)?;
-/// # terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?;
-/// // Send a 20x24 RGBA image with ID 1 (all zero bytes, which base64-encode
-/// // to "A"s) and place it at row 10 (9 from 0) with placement ID 5 and
-/// // z-index 2.
-/// let (width, height) = (20, 24);
-/// let pixels = "A".repeat(width * height * 4 / 3 * 4);
-/// terminal.vt_write(b"\x1b[10;1H");
-/// terminal.vt_write(
-///     format!("\x1b_Ga=T,f=32,s={width},v={height},i=1,p=5,z=2,q=2;{pixels}\x1b\\").as_bytes(),
-/// );
-///
-/// // Send a 1x1 image with ID 3 and give it a virtual placement, which a
-/// // program shows with Unicode placeholder cells. The storage lists it even
-/// // though it has no position of its own.
-/// terminal.vt_write(b"\x1b_Ga=T,U=1,f=32,i=3,s=1,v=1,c=2,r=1,q=2;AP8A/w==\x1b\\");
-///
-/// // Upstream can be built without Kitty graphics (it always is for wasm).
-/// // Then there is no image storage, and so nothing to iterate.
-/// let Some(graphics) = terminal.kitty_graphics()? else {
-///     return Ok(());
-/// };
-/// let mut iterator = PlacementIterator::new()?;
-/// let mut placements = iterator.update(&graphics)?;
-///
-/// let mut count = 0;
-/// while let Some(placement) = placements.next() {
-///     count += 1;
-///     let image_id = placement.image_id()?;
-///     let image = graphics.image(image_id).ok_or("placement without image")?;
-///     let viewport_pos = placement.viewport_pos(&image, &terminal)?;
-///
-///     if placement.is_virtual()? {
-///         // Only the placeholder cells know where a virtual placement is.
-///         assert_eq!(image_id, 3);
-///         assert_eq!(viewport_pos, None);
-///     } else {
-///         // Without columns and rows, the image is drawn at its own size and
-///         // covers as many cells as that takes: 20/8 rounds up to 3 columns,
-///         // 24/16 rounds up to 2 rows.
-///         assert_eq!(image_id, 1);
-///         assert_eq!(placement.placement_id()?, 5);
-///         assert_eq!(placement.z()?, 2);
-///         assert_eq!(viewport_pos, Some(ViewportPos { col: 0, row: 9 }));
-///         assert_eq!(
-///             placement.pixel_size(&image, &terminal)?,
-///             PixelSize { width: 20, height: 24 },
-///         );
-///         assert_eq!(
-///             placement.grid_size(&image, &terminal)?,
-///             GridSize { cols: 3, rows: 2 },
-///         );
-///     }
-/// }
-/// assert_eq!(count, 2);
-/// # Ok(())
-/// # }
-/// ```
 #[derive(Debug)]
 pub struct PlacementIterator<'alloc> {
     inner: Object<'alloc, ffi::KittyGraphicsPlacementIteratorImpl>,
@@ -795,9 +160,17 @@ impl Terminal<'_, '_> {
     ///
     /// Applied to all initialized screens (primary and alternate).
     /// A value of zero disables the Kitty graphics protocol entirely,
-    /// deleting all stored images and placements.
-    pub fn set_kitty_image_storage_limit(&mut self, limit: u64) -> Result<&mut Self> {
-        self.set(ffi::TerminalOption::KITTY_IMAGE_STORAGE_LIMIT, &limit)?;
+    /// deleting all stored images and placements. The default is 10 MB
+    /// (10,000,000 bytes), and a `None` value restores it. Values too large
+    /// for the platform's address space are treated as the largest possible
+    /// limit.
+    ///
+    /// Returns [`Error::Unsupported`] when Kitty graphics are disabled at build time.
+    pub fn set_kitty_image_storage_limit(&mut self, limit: Option<u64>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::KITTY_IMAGE_STORAGE_LIMIT,
+            limit.as_ref(),
+        )?;
         Ok(self)
     }
     /// Enable or disable Kitty image loading via the file medium.
@@ -813,12 +186,8 @@ impl Terminal<'_, '_> {
     ///
     /// Has no effect when Kitty graphics are disabled at build time.
     pub fn set_kitty_image_temp_file_dir(&mut self, dir: Option<&Path>) -> Result<&mut Self> {
-        // GhosttyString carries UTF-8, so reject paths that
-        // [`Terminal::kitty_image_temp_file_dir`] could never read back.
-        let dir = dir
-            .map(|dir| dir.to_str().ok_or(Error::InvalidValue))
-            .transpose()?
-            .map(ffi::String::from);
+        let dir = dir.map(|dir| ffi::String::from(dir.as_os_str().as_encoded_bytes()));
+
         self.set_optional(
             ffi::TerminalOption::KITTY_IMAGE_MEDIUM_TEMP_FILE,
             dir.as_ref(),
@@ -878,7 +247,9 @@ impl Graphics<'_> {
     /// storage. So this value can't tell you when to read the render state's
     /// image list again. For that, use
     /// [`Snapshot::image_placements_generation`](crate::render::Snapshot::image_placements_generation).
-    /// See [Knowing what changed](crate::kitty::graphics#knowing-what-changed).
+    /// See [Knowing what changed].
+    ///
+    /// [Knowing what changed]: http://localhost:3000/guides/images.html#guide-images-changes
     ///
     /// A value is never reused, not even by another screen, after a reset, or
     /// by another terminal. You can use it as a cache key on its own.
@@ -904,14 +275,13 @@ impl Graphics<'_> {
     ///
     /// This call changes the image storage. Like [`Terminal::vt_write`], it
     /// invalidates any [`Image`] handles and image data you are holding, so
-    /// look images up again afterwards. Because this method takes
-    /// `&mut self`, any [`Graphics`], [`Image`] or pixel slice must be dropped
-    /// first and looked up again afterwards with [`Terminal::kitty_graphics`],
-    /// [`Graphics::image`] and [`Image::data`]:
+    /// look images up again afterwards.
     ///
     /// Call this once each time you prepare a frame to draw, not in a loop.
-    /// The [Animation](crate::kitty::graphics#animation) section explains how
-    /// to schedule redraws with the returned time and includes an example.
+    /// The [Animation] section explains how to schedule redraws with the
+    /// returned time and includes an example.
+    ///
+    /// [Animation]: http://localhost:3000/guides/images.html#guide-images-animation
     ///
     /// Returns `Some` with the time the next frame is due, in milliseconds on
     /// the same clock as `now_ms`, if an animation is playing. Returns `None`
@@ -929,7 +299,7 @@ impl Graphics<'_> {
     }
 }
 
-impl<'t> Image<'t> {
+impl<'g> Image<'g> {
     fn get<T>(&self, tag: ffi::KittyGraphicsImageData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
@@ -977,30 +347,29 @@ impl<'t> Image<'t> {
         self.get(ffi::KittyGraphicsImageData::HEIGHT)
     }
 
-    /// A value that changes whenever this image's pixels may have changed:
-    /// when a program sends the image or replaces it, and when an
-    /// [animation](crate::kitty::graphics#animation) moves to a new frame.
+    /// A value that changes whenever this image's pixels may have changed.
     ///
-    /// Use it as part of your texture cache key. If it matches the texture you
-    /// have, you don't need to read the pixels again. The render state reports
-    /// the same value for each of its entries as
+    /// When a program sends the image or replaces it, and when an animation
+    /// moves to a new frame. Use it as part of your texture cache key. If it
+    /// matches the texture you have, you don't need to read the pixels again.
+    /// The render state reports the same value for each of its entries as
     /// [`ImageIteration::image_generation`](crate::render::ImageIteration::image_generation).
     ///
-    /// Don't use the image's size or data length to detect changes instead. A
-    /// program can send new pixels of the same size under the same ID.
+    /// Don't use the image's size or data length to detect changes instead.
+    /// A program can send new pixels of the same size under the same ID.
     ///
     /// A value is never reused, not even by another image, another screen, or
-    /// another terminal. It is never 0 for a stored image, so you can use 0 to
-    /// mean "no texture yet".
+    /// another terminal. It is never 0 for a stored image, so you can use 0
+    /// to mean "no texture yet".
     ///
     /// One case doesn't change this value. When a program finishes sending an
     /// image whose pixels were still on the way, the image keeps its value,
-    /// and [`Image::data`] starts returning the pixels.
-    /// [`Graphics::generation`] changes when that happens, so read
-    /// [`Image::data`] again then.
+    /// and [`Image::data`] starts returning the pixels. [`Image::generation`]
+    /// changes when that happens, so read [`Image::data`] again then.
     pub fn generation(&self) -> Result<u64> {
         self.get(ffi::KittyGraphicsImageData::GENERATION)
     }
+
     /// Pixel format of the image.
     pub fn format(&self) -> Result<ImageFormat> {
         self.get::<ffi::KittyImageFormat::Type>(ffi::KittyGraphicsImageData::FORMAT)
@@ -1012,12 +381,13 @@ impl<'t> Image<'t> {
             .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
 
-    /// Borrowed pointer to the raw pixel data.
+    /// The image's pixel data.
     ///
-    /// Valid as long as the underlying terminal is not mutated.
+    /// Valid as long as the underlying terminal and graphics storage
+    /// are not mutated.
     ///
-    /// Returns `None` when the image metadata is resident but its pixel
-    /// payload is pending.
+    /// Returns `None` if the image's pixels have not arrived yet. The expected
+    /// size is still available through [`Image::expected_len`].
     ///
     /// The data is always fully decoded, uncompressed pixels in the format
     /// reported by [`Image::format`]: zlib payloads are inflated and PNG
@@ -1029,14 +399,7 @@ impl<'t> Image<'t> {
     /// is the pixel data of the current animation frame. The image's
     /// [generation](Image::generation) changes whenever the current frame
     /// changes, so generation-keyed caches remain coherent.
-    ///
-    /// Pending pixels only arrive while their source is still delivering
-    /// them. For example, the images of a snapshot get their pixels from
-    /// [`IncrementalDecoder::next`](crate::snapshot::IncrementalDecoder::next).
-    /// If decoding stops early or fails, or the snapshot was taken while the
-    /// image was still pending, the image can stay pending and this keeps
-    /// returning `None`.
-    pub fn data(&self) -> Result<Option<&'t [u8]>> {
+    pub fn data(&self) -> Result<Option<&'g [u8]>> {
         self.get_optional::<ffi::String>(ffi::KittyGraphicsImageData::PIXELS)
             .map(|pixels| {
                 pixels.map(|pixels| {
@@ -1046,11 +409,15 @@ impl<'t> Image<'t> {
                 })
             })
     }
-    /// Length of the raw pixel data in bytes. Always equal to
-    /// width * height * bytes-per-pixel for the reported format. For a
-    /// pending image, this is the expected length reserved against the
-    /// storage limit even though [`Image::data`] is not available yet.
-    pub fn data_len(&self) -> Result<usize> {
+
+    /// The size of the image's pixel data in bytes, which is
+    /// `width * height * bytes per pixel` for the reported format.
+    ///
+    /// This is available even before the pixels arrive, when [`Image::data`]
+    /// still returns `None`. In that case the image already counts this many
+    /// bytes against the storage limit. Once the pixels arrive, this equals
+    /// the length of [`Image::data`].
+    pub fn expected_len(&self) -> Result<usize> {
         self.get(ffi::KittyGraphicsImageData::EXPECTED_LEN)
     }
 }
@@ -1230,8 +597,9 @@ impl<'t> PlacementIteration<'t, '_> {
     /// image list ([`ImageIterator`](crate::render::ImageIterator)) instead.
     /// It positions every image on screen, including virtual placements and
     /// placements relative to them, and covers overscan rows. If you draw
-    /// from both, images are drawn twice. See
-    /// [Drawing images](crate::kitty::graphics#drawing-images).
+    /// from both, images are drawn twice. See [Drawing images].
+    ///
+    /// [Drawing images]: http://localhost:3000/guides/images.html#guide-images-drawing
     ///
     /// The row is negative when the top of the placement scrolled above the
     /// viewport. For example, an image 4 rows tall that scrolled up by 2 rows
@@ -1284,14 +652,8 @@ impl<'t> PlacementIteration<'t, '_> {
     /// Compute the grid rectangle occupied by the current placement.
     ///
     /// Uses the placement's pin, the image dimensions, and the terminal's
-    /// cell/pixel geometry to calculate the bounding rectangle. The rectangle
-    /// is returned as a [`Selection`] with [`rectangle`](Selection::rectangle)
-    /// set to `true`.
-    ///
-    /// Returns `None` if it is a virtual placement (unicode placeholder) or
-    /// relative to one, if its pin was garbage collected, if it covers no
-    /// cells (e.g. no cell pixel size is set), or if Kitty graphics are
-    /// disabled at build time.
+    /// cell/pixel geometry to calculate the bounding rectangle. Virtual
+    /// placements (unicode placeholders) return `None`.
     ///
     /// Returns [`Error::InvalidValue`] if `terminal` isn't the terminal whose
     /// [`Graphics`] this placement came from.
@@ -1300,19 +662,8 @@ impl<'t> PlacementIteration<'t, '_> {
         image: &Image<'t>,
         terminal: &'t Terminal<'_, '_>,
     ) -> Result<Option<Selection<'t>>> {
-        // Upstream takes the corners from the placement's pin, which lives in
-        // the pages of the terminal the placement came from, but clamps the
-        // end column to `terminal`'s width. With another, wider terminal the
-        // end could point past the end of the placement's page, and reading
-        // its cell would be out of bounds. Lifetimes can't tell two terminals
-        // apart, so check at runtime, like `IncrementalDecoder::next` does
-        // for the same reason (libghostty would touch the wrong terminal).
-        //
-        // `image` needs no check: upstream only reads its width and height,
-        // so an image from another terminal gives a wrong size, but the
-        // corners still come from the placement's pin, the bottom row stops
-        // at the end of its pages and the end column is clamped to the width
-        // of `terminal`, which we know is the placement's terminal.
+        // BUG: Upstream doesn't check if the given terminal is the same
+        // terminal as the one that created the graphics storage...
         if self.terminal != terminal.id {
             return Err(Error::InvalidValue);
         }
@@ -1329,15 +680,9 @@ impl<'t> PlacementIteration<'t, '_> {
         // error, since a virtual placement has no position of its own:
         // only the placeholder cells know where it is.
         let sel = from_optional_result(result, sel)?;
-        // SAFETY: On success, upstream writes the whole struct. Both
-        // endpoints point into the pages of the placement's terminal, which
-        // we checked above is `terminal`: every `Terminal`, including the
-        // views passed to callbacks, carries the id of the terminal it refers
-        // to, and no two terminals share one. Upstream clamps the end column to
-        // that same terminal's width, so both endpoints are in bounds of
-        // their pages. `terminal` is borrowed for `'t`, so it can't be
-        // mutated (which would invalidate these untracked grid refs) while
-        // the selection is alive, so the selection is bound by `'t`.
+
+        // SAFETY: Selection belongs to the correct terminal and should
+        // share its lifetime with the given terminal.
         Ok(sel.map(|sel| unsafe { Selection::from_raw(terminal.inner.as_raw(), sel) }))
     }
 
@@ -1350,12 +695,10 @@ impl<'t> PlacementIteration<'t, '_> {
     /// image list ([`ImageIterator`](crate::render::ImageIterator)) instead.
     /// It gives the same values for every image on screen, including virtual
     /// placements and placements relative to them. If you draw from both,
-    /// images are drawn twice. See
-    /// [Drawing images](crate::kitty::graphics#drawing-images).
+    /// images are drawn twice. See [Drawing images].
     ///
-    /// The call succeeds even when the placement isn't in the viewport.
-    /// Check `viewport_visible` before using `viewport_col` and
-    /// `viewport_row`.
+    /// [Drawing images]: http://localhost:3000/guides/images.html#guide-images-drawing
+    // FIXME: Use our own RenderInfo type instead or re-exporting
     pub fn render_info(
         &self,
         image: &Image<'t>,
@@ -1388,8 +731,9 @@ impl<'t> PlacementIteration<'t, '_> {
     /// A virtual placement appears wherever its placeholder cells are, so the
     /// storage has no position for it. The render state's image list
     /// positions it from its cells like any other placement, so a renderer
-    /// doesn't need to check this. See
-    /// [Unicode placeholders](crate::kitty::graphics#unicode-placeholders).
+    /// doesn't need to check this. See [Placeholders].
+    ///
+    /// [Placeholders]: http://localhost:3000/guides/images.html#guide-images-placeholders
     pub fn is_virtual(&self) -> Result<bool> {
         self.get(ffi::KittyGraphicsPlacementData::IS_VIRTUAL)
     }
@@ -1819,7 +1163,7 @@ mod placement_tests {
         // 80 cols * 10px = 800px, 24 rows * 20px = 480px.
         terminal.resize(80, 24, 10, 20).unwrap();
         terminal
-            .set_kitty_image_storage_limit(64 * 1024 * 1024)
+            .set_kitty_image_storage_limit(Some(64 * 1024 * 1024))
             .unwrap();
 
         // Upstream's sequence: a 1x2 RGB image placed at the cursor (0,0),
@@ -1933,7 +1277,7 @@ mod placement_tests {
         let mut narrow = Terminal::new(10, 24).unwrap();
         narrow.resize(10, 24, 10, 20).unwrap();
         narrow
-            .set_kitty_image_storage_limit(64 * 1024 * 1024)
+            .set_kitty_image_storage_limit(Some(64 * 1024 * 1024))
             .unwrap();
         // A 1x2 RGB image at the cursor (0,0), 40 columns wide and 1 row
         // tall.
@@ -1952,7 +1296,7 @@ mod animation_tests {
     fn terminal() -> Terminal<'static, 'static> {
         let mut terminal = Terminal::new(80, 24).unwrap();
         terminal
-            .set_kitty_image_storage_limit(64 * 1024 * 1024)
+            .set_kitty_image_storage_limit(Some(64 * 1024 * 1024))
             .unwrap();
         terminal
     }

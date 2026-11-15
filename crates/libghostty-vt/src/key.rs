@@ -332,7 +332,7 @@ impl<'alloc> Event<'alloc> {
             Some(text) => unsafe {
                 ffi::ghostty_key_event_set_utf8(
                     self.inner.as_raw(),
-                    ffi::String::from(text.as_str()),
+                    ffi::String::from(text.as_str().as_bytes()),
                 );
             },
             None => unsafe {

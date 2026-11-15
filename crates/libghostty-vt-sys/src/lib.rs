@@ -25,7 +25,7 @@ macro_rules! sized {
 
 impl<S> From<S> for bindings::String
 where
-    S: Deref<Target = str>,
+    S: Deref<Target = [u8]>,
 {
     fn from(value: S) -> Self {
         Self {

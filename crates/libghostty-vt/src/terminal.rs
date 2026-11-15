@@ -1,4 +1,4 @@
-//! Types and functions around terminal state management.
+//! Complete terminal emulator state and rendering.
 
 use std::mem::MaybeUninit;
 
@@ -17,210 +17,30 @@ pub use ffi::{TerminalMemoryUsage as MemoryUsage, TerminalScrollbar as Scrollbar
 
 /// Complete terminal emulator state and rendering.
 ///
-/// A terminal instance manages the full emulator state including the screen,
-/// scrollback, cursor, styles, modes, and VT stream processing.
+/// A [`Terminal`] is a whole terminal emulator: you write VT data into it, and
+/// it keeps the screen, scrollback, cursor, styles, and modes.
 ///
-/// Once a terminal session is up and running, you can configure a key encoder
-/// to write keyboard input via [`key::Encoder::set_options_from_terminal`].
+/// Nearly everything in this library starts here. All you need to make one is a
+/// size. It doesn't draw and it doesn't talk to a pty. Both of those are yours.
+/// If you only want one parser or encoder, the [Building Blocks](crate#building-blocks)
+/// work without a terminal.
 ///
-/// ## Example: VT stream processing
-///
-/// ```
-/// use libghostty_vt::Terminal;
-///
-/// // Create a terminal
-/// let mut terminal = Terminal::new(80, 24).unwrap();
-///
-/// // Feed VT data into the terminal
-/// terminal.vt_write(b"Hello, World!\r\n");
-///
-/// // ANSI color codes: ESC[1;32m = bold green, ESC[0m = reset
-/// terminal.vt_write(b"\x1b[1;32mGreen Text\x1b[0m\r\n");
-///
-/// // Cursor positioning: ESC[1;1H = move to row 1, column 1
-/// terminal.vt_write(b"\x1b[1;1HTop-left corner\r\n");
-///
-/// // Cursor movement: ESC[5B = move down 5 lines
-/// terminal.vt_write(b"\x1b[5B");
-/// terminal.vt_write(b"Moved down!\r\n");
-///
-/// // Erase line: ESC[2K = clear entire line
-/// terminal.vt_write(b"\x1b[2K");
-/// terminal.vt_write(b"New content\r\n");
-///
-/// // Multiple lines
-/// terminal.vt_write(b"Line A\r\nLine B\r\nLine C\r\n");
-/// ```
-///
-/// # Effects
-///
-/// By default, the terminal sequence processing with [`Terminal::vt_write`]
-/// only process sequences that directly affect terminal state and ignores
-/// sequences that have side effect behavior or require responses. These
-/// sequences include things like bell characters, title changes, device
-/// attributes queries, and more. To handle these sequences, the user
-/// must configure "effects."
-///
-/// Effects are callbacks that the terminal invokes, mostly in response to VT
-/// sequences processed during [`Terminal::vt_write`]. They let the embedding
-/// application react to terminal-initiated events such as bell characters,
-/// title changes, device status report responses, and more.
-///
-/// Each effect is registered with its corresponding `Terminal::on_<effect>`
-/// function, which accepts a closure with access to the terminal state and
-/// possibly other parameters. Some examples include [`Terminal::on_bell`]
-/// and [`Terminal::on_pty_write`].
-///
-/// All callbacks are invoked synchronously, mostly during
-/// [`Terminal::vt_write`]. A few also fire from [`Terminal::reset`] and
-/// [`Terminal::resize`], such as [`Terminal::on_render_hold`] and the
-/// in-band size report sent through [`Terminal::on_pty_write`].
-/// Callbacks must be very careful to not block for too long or perform
-/// expensive operations, since they are blocking further IO processing.
-///
-/// ## Shared state
-///
-/// **Unlike the C API**, you *cannot* specify arbitrary user data that's
-/// shared between all callbacks, mainly because a safe, idiomatic Rust
-/// equivalent of this pattern is very difficult to implement and use
-/// due to Rust's much stricter safety guarantees. In turn, we use the
-/// user data internally for callback dispatch purposes.
-///
-/// You should instead use types that allow safe *interior mutability*
-/// (e.g. [`Cell`](std::cell::Cell) or [`RefCell`](std::cell::RefCell))
-/// and pass a shared reference into each effect handler that needs to mutate
-/// the shared state. Note that reference counting mechanisms like
-/// [`Rc`](std::rc::Rc) and [`Arc`](std::sync::Arc) are optional.
-///
-/// ## Example: Registering effects and processing VT data
+/// # Example
 ///
 /// ```rust
-/// use std::cell::Cell;
 /// use libghostty_vt::Terminal;
 ///
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// // Set up a simple bell counter.
-/// //
-/// // `usize` is a simple, `Copy`able type, which means `Cell`s are
-/// // perfectly suitable here. More complex, non-`Copy` types should
-/// // use `RefCell`s instead.
-/// //
-/// // This has to be done before the terminal is created, since
-/// // its effect handlers will continue to refer to the bell counter
-/// // during the lifetime of the terminal.
-/// let bell_count = Cell::new(0usize);
-///
-/// let mut terminal = Terminal::new(80, 24)?;
-/// terminal
-///     .on_pty_write(|_term, data| {
-///         println!("Replying {} bytes to the PTY", data.len());
-///     })?
-///    .on_bell({
-///        // Explicitly borrow the bell count, or otherwise `move`
-///        // will attempt to capture the entire `Cell` and cause a
-///        // compiler error
-///        let bell_count = &bell_count;
-///        move |_term| {
-///            bell_count.update(|v| v + 1);
-///            println!("Bell! (count = {})", bell_count.get())
-///        }
-///     })?
-///    .on_title_changed(|term| {
-///        // Query the cursor position to confirm the terminal processed the
-///        // title change (the title itself is tracked by the embedder via the
-///        // OSC parser or its own state).
-///        let col = term.cursor_x().unwrap();
-///        println!("Title changed! (cursor at col {col})");
-///    })?;
-///
-/// // Feed VT data that triggers effects:
-/// // 1. Bell (BEL = 0x07)
-/// terminal.vt_write(b"\x07");
-/// // 2. Title change (OSC 2 ; <title> ST)
-/// terminal.vt_write(b"\x1b]2;Hello Effects\x1b\\");
-/// // 3. Device status report (DECRQM for wraparound mode ?7)
-/// //    triggers write_pty with the response
-/// terminal.vt_write(b"\x1B[?7$p");
-/// // 4. Another bell to show the counter increments
-/// terminal.vt_write(b"\x07");
-///
-/// assert_eq!(bell_count.get(), 2);
-/// # Ok(())}
+/// let mut terminal = Terminal::new(80, 24).unwrap();
+/// terminal.vt_write(b"Hello, \x1b[1;32mworld\x1b[0m!\r\n");
 /// ```
 ///
-/// # Color theme
+/// The guides cover the rest: [Effects] for what programs ask of the terminal,
+/// [Colors], [Scrollback], and [Custom Sequences].
 ///
-/// The terminal maintains a set of colors used for rendering: a foreground
-/// color, a background color, a cursor color, and a 256-color palette. Each
-/// of these has two layers: a **default** value set by the embedder, and an
-/// **override** value that programs running in the terminal can set via OSC
-/// escape sequences (e.g. OSC 10/11/12 for foreground/background/cursor,
-/// OSC 4 for individual palette entries).
-///
-/// ## Default colors
-///
-/// Use [`Terminal::set_default_fg_color`], [`Terminal::set_default_bg_color`],
-/// [`Terminal::set_default_cursor_color`] and [`Terminal::set_default_color_palette`]
-/// to configure the default colors. These represent the theme or configuration
-/// chosen by the embedder. Passing `None` clears the default, leaving the color
-/// unset.
-///
-/// For the palette, passing `None` resets to the built-in default palette.
-/// The palette set operation preserves any per-index OSC overrides that programs
-/// have applied; only unmodified indices are updated.
-///
-/// ## Reading colors
-///
-/// Use functions like [`Terminal::default_cursor_color`],
-/// [`Terminal::bg_color`], [`Terminal::default_color_palette`], etc. to read
-/// colors. There are two variants for each color: the **effective** value
-/// (which returns the OSC override if one is active, otherwise the default)
-/// and the **default** value (which ignores any OSC overrides).
-///
-/// For foreground, background, and cursor colors, the getters return `Ok(None)`
-/// if no color is configured (neither a default nor an OSC override).
-/// The palette getters always succeed since the palette always has a value
-/// (the built-in default if nothing else is set).
-///
-/// ## Setting a color theme
-///
-/// ```
-/// use libghostty_vt::{
-///     color::{Rgb, PaletteIndex},
-///     Error,
-///     Terminal,
-/// };
-///
-/// fn set_color_theme(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
-///     // Set default foreground (light gray) and background (dark)
-///     terminal
-///         .set_default_fg_color(Some(
-///             Rgb { r: 0xDD, g: 0xDD, b: 0xDD }
-///         ))?
-///         .set_default_bg_color(Some(
-///             Rgb { r: 0x1E, g: 0x1E, b: 0x2E }
-///         ))?
-///         .set_default_cursor_color(Some(
-///             Rgb { r: 0xF5, g: 0xE0, b: 0xDC }
-///         ))?;
-///     
-///     // Set a custom palette — start from the built-in default and override
-///     // the first 8 entries with a custom dark theme.
-///     let mut palette = terminal.default_color_palette()?;
-///     palette.set(PaletteIndex::BLACK, Rgb { r: 0x45, g: 0x47, b: 0x5A });
-///     palette.set(PaletteIndex::RED, Rgb { r: 0xF3, g: 0x8B, b: 0xA8 });
-///     palette.set(PaletteIndex::GREEN, Rgb { r: 0xA6, g: 0xE3, b: 0xA1 });
-///     palette.set(PaletteIndex::YELLOW, Rgb { r: 0xF9, g: 0xE2, b: 0xAF });
-///     palette.set(PaletteIndex::BLUE, Rgb { r: 0x89, g: 0xB4, b: 0xFA });
-///     palette.set(PaletteIndex::MAGENTA, Rgb { r: 0xF5, g: 0xC2, b: 0xE7 });
-///     palette.set(PaletteIndex::CYAN, Rgb { r: 0x94, g: 0xE2, b: 0xD5 });
-///     palette.set(PaletteIndex::WHITE, Rgb { r: 0xBA, g: 0xC2, b: 0xDE });
-///     
-///     terminal.set_default_color_palette(Some(palette))?;
-///     Ok(())
-/// }
-/// ```
-///
+/// [Effects]: http://localhost:3000/guides/effects.html#guide-effects
+/// [Colors]: http://localhost:3000/guides/colors.html#guide-colors
+/// [Scrollback]: http://localhost:3000/guides/scrollback.html#guide-scrollback
+/// [Custom Sequences]: http://localhost:3000/guides/custom-sequences.html#guide-custom-sequences
 #[derive(Debug)]
 pub struct Terminal<'alloc: 'cb, 'cb> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,

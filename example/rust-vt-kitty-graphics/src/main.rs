@@ -1,13 +1,13 @@
 use libghostty_vt::{
-    Terminal,
     alloc::{Allocator, Bytes},
     error::Error,
     kitty::graphics::{self, Graphics},
     render::{ImageIterator, ImageProtocol, RenderState, Snapshot},
+    Terminal,
 };
 use std::sync::{
-    Arc,
     atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 // ANCHOR: kitty-graphics-decode-png
@@ -274,7 +274,7 @@ fn main() -> Result<(), Error> {
     terminal.resize(80, 24, 8, 16)?;
 
     // Set a storage limit to enable Kitty graphics.
-    terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?; // 64 MiB
+    terminal.set_kitty_image_storage_limit(Some(64 * 1024 * 1024))?; // 64 MiB
 
     // Install write_pty to see the protocol response.
     // The Kitty graphics protocol sends an APC response back to the pty

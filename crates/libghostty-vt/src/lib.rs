@@ -43,6 +43,7 @@
 //! - [Search](crate::search) - Find a string in a terminal, including its scrollback
 //! - [Formatter](crate::fmt) - Turn terminal content into plain text, VT
 //!   sequences, or HTML
+//!
 //! ## Rendering
 //!
 //! - [Render State](crate::render) - Find out what changed since the last frame

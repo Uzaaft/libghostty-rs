@@ -8,6 +8,10 @@
 //! on a terminal with [`Terminal::set_mode`](super::Terminal::set_mode), or to
 //! encode a DECRPM report with [`Mode::encode`]. You don't need a
 //! terminal to pack one.
+//!
+//! See the [Input] guide for the modes that change what input encodes to.
+//!
+//! [Input]: http://localhost:3000/guides/input.html#guide-input
 use crate::{
     Terminal,
     error::{Result, from_result, from_result_with_len},
