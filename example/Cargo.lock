@@ -512,6 +512,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_osc"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_paste"
 version = "0.0.0"
 dependencies = [
@@ -541,6 +548,13 @@ dependencies = [
 
 [[package]]
 name = "rust_vt_selection_gesture"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
+name = "rust_vt_sgr"
 version = "0.0.0"
 dependencies = [
  "libghostty-vt",

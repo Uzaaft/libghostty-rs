@@ -132,7 +132,7 @@ impl<'alloc> Parser<'alloc> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn end<'p>(&'p mut self, terminator: u8) -> Command<'p, 'alloc> {
+    pub fn end(&mut self, terminator: u8) -> Command<'_, 'alloc> {
         Command {
             // NULL for an invalid or cancelled sequence.
             // `ghostty_osc_command_type` reports that as an invalid command,
