@@ -15,7 +15,7 @@ belong only to this example, not to the library crates.
 From the repository root:
 
 ```sh
-nix develop -c cargo build --locked --manifest-path example/Cargo.toml -p wasm_rs --target wasm32-unknown-unknown --release
+nix develop -c cargo build --locked --manifest-path example/Cargo.toml -p wasm_rs --target wasm32-unknown-unknown --features wasm_rs/vendored --release
 ```
 
 Serve the repository root with a static HTTP server, for example:
