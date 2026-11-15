@@ -43,3 +43,14 @@ publish = false
 
 [workspace.dependencies]
 libghostty-vt = { path = "../crates/libghostty-vt" }
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+enum_glob_use = "allow"
+# Examples are faithfully translated, nothing we can do about this.
+too_many_lines = "allow"
+# Too many false positives
+doc_markdown = "allow"

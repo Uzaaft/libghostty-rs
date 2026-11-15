@@ -8,3 +8,6 @@ publish.workspace = true
 
 [dependencies]
 libghostty-vt.workspace = true
+
+[lints]
+workspace = true

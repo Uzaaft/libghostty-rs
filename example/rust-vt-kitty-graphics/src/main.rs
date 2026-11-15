@@ -1,13 +1,13 @@
 use libghostty_vt::{
+    Terminal,
     alloc::{Allocator, Bytes},
     error::Error,
     kitty::graphics::{self, Graphics},
     render::{ImageIterator, ImageProtocol, RenderState, Snapshot},
-    Terminal,
 };
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 
 // ANCHOR: kitty-graphics-decode-png
@@ -24,9 +24,9 @@ struct StubPngDecoder {
 }
 
 impl graphics::DecodePng for StubPngDecoder {
-    fn decode_png<'alloc, 'ctx>(
+    fn decode_png<'alloc>(
         &mut self,
-        alloc: &'alloc Allocator<'ctx>,
+        alloc: &'alloc Allocator<'_>,
         data: &[u8],
     ) -> Option<graphics::DecodedImage<'alloc>> {
         _ = self.decode_count.fetch_add(1, Ordering::SeqCst);

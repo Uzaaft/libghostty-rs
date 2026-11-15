@@ -1,7 +1,7 @@
 use libghostty_vt::{
+    Terminal,
     error::Error,
     fmt::{Format, Formatter},
-    Terminal,
 };
 use std::io;
 

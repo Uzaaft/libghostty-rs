@@ -3,7 +3,7 @@
 //! (mode 5522). It also checks paste safety and encodes paste data without
 //! a terminal.
 
-use libghostty_vt::{effect, error::Error, paste, Terminal};
+use libghostty_vt::{Terminal, effect, error::Error, paste};
 use std::{
     cell::RefCell,
     io::{self, Write},

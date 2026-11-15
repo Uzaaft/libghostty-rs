@@ -1,13 +1,13 @@
 use libghostty_vt::{
+    Terminal,
     error::Error,
     fmt::{Format, Formatter},
     grid_ref::GridRef,
     point::{Coordinate, Point},
     selection::{
-        gesture::{self, Gesture},
         Selection,
+        gesture::{self, Gesture},
     },
-    Terminal,
 };
 use std::io::Write;
 

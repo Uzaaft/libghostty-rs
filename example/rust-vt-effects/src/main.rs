@@ -2,9 +2,9 @@
 //! the bell, title changes, OSC 52 clipboard reads and writes, and unknown
 //! sequences. You need these as soon as a real program runs in the terminal.
 use libghostty_vt::{
+    Terminal,
     effect::{ClipboardReplyContent, UnknownSequence},
     osc::Terminator,
-    Terminal,
 };
 use std::{cell::Cell, error::Error};
 

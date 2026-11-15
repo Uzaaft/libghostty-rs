@@ -2,14 +2,12 @@
 //! focus reporting (mode 1004).
 
 // ANCHOR: focus-encode
-use libghostty_vt::{error::Error, focus};
+use libghostty_vt::focus;
 
-fn main() -> Result<(), Error> {
+fn main() {
     let mut buf = [0u8; 8];
     if let Ok(len) = focus::Event::Gained.encode(&mut buf) {
         println!("Encoded {} bytes: {}", len, buf[0..len].escape_ascii());
     }
-
-    Ok(())
 }
 // ANCHOR_END: focus-encode

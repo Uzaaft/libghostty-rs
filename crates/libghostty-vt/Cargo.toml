@@ -31,3 +31,5 @@ libghostty-vt-sys.workspace = true
 
 [package.metadata.docs.rs]
 all-features = true
+
+[lints]

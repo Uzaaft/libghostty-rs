@@ -1,7 +1,6 @@
 use libghostty_vt::{
-    fmt,
+    Terminal, fmt,
     render::{CellIterator, RenderState, RowIterator},
-    Terminal,
 };
 use std::error::Error;
 
@@ -71,7 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             if style.bold {
                 print!("\x1b[1m");
             }
-            print!("{}", graphemes);
+            print!("{graphemes}");
             if style.bold {
                 print!("\x1b[0m");
             }

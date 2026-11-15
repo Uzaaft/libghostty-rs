@@ -47,10 +47,10 @@ fn advanced_example() -> Result<(), Error> {
 
     let mut count = 0usize;
     while let Some(attr) = parser.next()? {
+        use sgr::Attribute::*;
         count += 1;
         println!("Attribute {count}: ");
 
-        use sgr::Attribute::*;
         match attr {
             Underline(v) => println!("Underline style = {v:?}"),
             DirectColorFg(v) => println!("Foreground RGB = ({}, {}, {})", v.r, v.g, v.b),

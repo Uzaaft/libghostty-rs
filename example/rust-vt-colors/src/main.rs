@@ -2,9 +2,9 @@
 //! values as an OSC 10 override layers on top.
 
 use libghostty_vt::{
+    Terminal,
     color::{PaletteIndex, Rgb},
     error::Error,
-    Terminal,
 };
 
 #[rustfmt::skip]

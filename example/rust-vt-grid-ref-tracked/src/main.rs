@@ -1,8 +1,8 @@
 use libghostty_vt::{
+    Terminal,
     error::Error,
     grid_ref::TrackedGridRef,
     point::{Coordinate, Point, Space},
-    Terminal,
 };
 
 // ANCHOR: grid-ref-tracked

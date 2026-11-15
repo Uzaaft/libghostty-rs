@@ -27,7 +27,7 @@ use libghostty_vt::{
     build_info, color,
     effect::{
         ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
-        PrimaryDeviceAttributes, SecondaryDeviceAttributes,
+        PrimaryDeviceAttributes, SecondaryDeviceAttributes, TertiaryDeviceAttributes,
     },
     key::{self, Key},
     kitty::graphics::{self, DecodePng, DecodedImage, Graphics},
@@ -185,7 +185,7 @@ async fn main() -> Result<()> {
                     rom_cartridge: 0,
                 },
                 // DA3: default unit id (0).
-                tertiary: Default::default(),
+                tertiary: TertiaryDeviceAttributes::default(),
             })
         })?
         // xtversion effect — responds to CSI > q with our application name.
@@ -259,7 +259,7 @@ async fn main() -> Result<()> {
                 input.response.clear();
 
                 match pty.read(&mut terminal) {
-                    Ok(_) => {}
+                    Ok(()) => {}
                     Err(PtyError::EndOfStream) => {
                         // EOF — the child's side of the pty is closed.
                         child = Child::Exited(pid);
@@ -307,7 +307,7 @@ async fn main() -> Result<()> {
 
         // Draw the current terminal screen.
         renderer.render_terminal(&terminal, dims, Some(&font))?;
-        next_frame().await
+        next_frame().await;
     }
 }
 
@@ -485,7 +485,7 @@ impl<'alloc> Renderer<'alloc> {
                 ImageLayer::BelowBackground,
                 dims,
                 grid,
-            )?
+            )?;
         }
 
         // Small padding from the window edges.
@@ -569,10 +569,10 @@ impl<'alloc> Renderer<'alloc> {
                     draw_text_ex(
                         &text,
                         x,
-                        y + FONT_SIZE as f32 + ROW_GAP,
+                        y + f32::from(FONT_SIZE) + ROW_GAP,
                         TextParams {
                             font,
-                            font_size: (FONT_SIZE as f32 * screen_dpi_scale()) as u16,
+                            font_size: (f32::from(FONT_SIZE) * screen_dpi_scale()) as u16,
                             color: color(fg),
                             ..Default::default()
                         },
@@ -588,10 +588,10 @@ impl<'alloc> Renderer<'alloc> {
                         draw_text_ex(
                             &text,
                             x + 1.0,
-                            y + FONT_SIZE as f32 + ROW_GAP,
+                            y + f32::from(FONT_SIZE) + ROW_GAP,
                             TextParams {
                                 font,
-                                font_size: (FONT_SIZE as f32 * screen_dpi_scale()) as u16,
+                                font_size: (f32::from(FONT_SIZE) * screen_dpi_scale()) as u16,
                                 color: color(fg),
                                 ..Default::default()
                             },
@@ -600,7 +600,6 @@ impl<'alloc> Renderer<'alloc> {
                 }
 
                 x += dims.cell_width;
-                continue;
             }
 
             y += dims.cell_height;
@@ -619,7 +618,7 @@ impl<'alloc> Renderer<'alloc> {
                 ImageLayer::BelowText,
                 dims,
                 grid,
-            )?
+            )?;
         }
 
         // Draw the cursor if visible.
@@ -632,8 +631,8 @@ impl<'alloc> Renderer<'alloc> {
             let cursor_color = colors.cursor.unwrap_or(colors.foreground);
 
             draw_rectangle(
-                PADDING + vp.x as f32 * dims.cell_width,
-                PADDING + vp.y as f32 * dims.cell_height,
+                PADDING + f32::from(vp.x) * dims.cell_width,
+                PADDING + f32::from(vp.y) * dims.cell_height,
                 dims.cell_width,
                 dims.cell_height,
                 color(cursor_color),
@@ -649,7 +648,7 @@ impl<'alloc> Renderer<'alloc> {
                 ImageLayer::AboveText,
                 dims,
                 grid,
-            )?
+            )?;
         }
 
         // The whole frame is drawn, so mark all of it clean at once so the
@@ -794,7 +793,10 @@ impl Dimensions {
         (cols, rows)
     }
     fn update(&mut self) -> bool {
-        if screen_width() == self.window_width && screen_height() == self.window_height {
+        let epsilon = 1e-6f32;
+        if (screen_width() - self.window_width).abs() < epsilon
+            && (screen_height() - self.window_height).abs() < epsilon
+        {
             return false;
         }
         self.window_width = screen_width();
@@ -1096,12 +1098,12 @@ impl<'alloc> Input<'alloc> {
         let (xpos, ypos) = mouse_position();
 
         let x = if xpos > PADDING {
-            ((xpos - PADDING) / dims.cell_width).clamp(0.0, cols as f32) as u16
+            ((xpos - PADDING) / dims.cell_width).clamp(0.0, f32::from(cols)) as u16
         } else {
             0
         };
         let y = if ypos > PADDING {
-            ((ypos - PADDING) / dims.cell_height).clamp(0.0, rows as f32) as u32
+            ((ypos - PADDING) / dims.cell_height).clamp(0.0, f32::from(rows)) as u32
         } else {
             0
         };
@@ -1125,8 +1127,8 @@ impl<'alloc> Input<'alloc> {
         let (xpos, ypos) = mouse_position();
         let left = PADDING;
         let top = PADDING;
-        let right = left + cols as f32 * dims.cell_width;
-        let bottom = top + rows as f32 * dims.cell_height;
+        let right = left + f32::from(cols) * dims.cell_width;
+        let bottom = top + f32::from(rows) * dims.cell_height;
 
         if xpos < left || xpos >= right || ypos < top || ypos >= bottom {
             return Ok(false);
@@ -1267,12 +1269,13 @@ impl SelectionState<'_> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         let grid_ref = terminal.grid_ref(point)?;
 
-        terminal.set_selection(self
-            .press_event
-            .set_repeat_distance(dims.cell_width.into())?
-            .set_time(self.start_time.elapsed())?
-            .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref)?)?;
+        terminal.set_selection(
+            self.press_event
+                .set_repeat_distance(dims.cell_width.into())?
+                .set_time(self.start_time.elapsed())?
+                .set_position(x.into(), y.into())?
+                .apply(&mut self.gesture, terminal, grid_ref)?,
+        )?;
         Ok(())
     }
 
@@ -1305,11 +1308,12 @@ impl SelectionState<'_> {
             screen_height: dims.window_height as u32,
         };
 
-        terminal.set_selection(self
-            .drag_event
-            .set_rectangle(Input::selection_rectangle_mods(mods))?
-            .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref, geometry)?)?;
+        terminal.set_selection(
+            self.drag_event
+                .set_rectangle(Input::selection_rectangle_mods(mods))?
+                .set_position(x.into(), y.into())?
+                .apply(&mut self.gesture, terminal, grid_ref, geometry)?,
+        )?;
         Ok(())
     }
 
@@ -1407,8 +1411,8 @@ impl DecodePng for PngDecoder {
         data.copy_from_slice(&img.bytes);
 
         Some(DecodedImage {
-            width: img.width as u32,
-            height: img.height as u32,
+            width: u32::from(img.width),
+            height: u32::from(img.height),
             data,
         })
     }
@@ -1514,17 +1518,16 @@ mod pty {
             loop {
                 match nix::unistd::read(&self.0, &mut buf) {
                     // EOF -- the child closed its side of the pty.
-                    Ok(0) => return Err(PtyError::EndOfStream),
+                    // On Linux, the slave closing often produces EIO rather
+                    // than a clean EOF (read returning 0). Treat it the same.
+                    Ok(0) | Err(Errno::EIO) => return Err(PtyError::EndOfStream),
                     Ok(len) => term.vt_write(&buf[..len]),
 
                     // Distinguish "no data right now" from real errors.
                     Err(Errno::EAGAIN) => return Ok(()),
-                    Err(Errno::EINTR) => continue, // retry the read
-                    // On Linux, the slave closing often produces EIO rather
-                    // than a clean EOF (read returning 0). Treat it the same.
-                    Err(Errno::EIO) => return Err(PtyError::EndOfStream),
+                    Err(Errno::EINTR) => {}, // retry the read
                     Err(err) => return Err(PtyError::OtherError(err)),
-                };
+                }
             }
         }
 
@@ -1538,7 +1541,7 @@ mod pty {
             while !remaining.is_empty() {
                 match nix::unistd::write(&self.0, remaining) {
                     Ok(len) => remaining = &remaining[len..],
-                    Err(Errno::EINTR) => continue,
+                    Err(Errno::EINTR) => {}
                     // EAGAIN or real error -- drop the remainder.
                     Err(_) => break,
                 }

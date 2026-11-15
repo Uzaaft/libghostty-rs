@@ -4,9 +4,9 @@
 #![allow(unused_variables)]
 
 use libghostty_vt::{
+    Terminal,
     error::Error,
     snapshot::{Decoder, ProgressKind},
-    Terminal,
 };
 use std::io::Read;
 
@@ -97,7 +97,7 @@ fn main() -> Result<(), Error> {
         // check the kind before reading the page values.
         match progress.kind()? {
             ProgressKind::Image { id, .. } => {
-                println!("restored the pixels of image {}", id);
+                println!("restored the pixels of image {id}");
             }
             ProgressKind::Page { rows, remaining } => {
                 println!(

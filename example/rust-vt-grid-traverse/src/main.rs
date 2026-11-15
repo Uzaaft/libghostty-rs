@@ -1,7 +1,7 @@
 use libghostty_vt::{
+    Terminal,
     error::Error,
     point::{Coordinate, Point},
-    Terminal,
 };
 
 // ANCHOR: grid-ref-traverse
@@ -16,7 +16,7 @@ fn main() -> Result<(), Error> {
 
     // Get terminal dimensions
     let cols = terminal.cols()?;
-    let rows = terminal.rows()? as u32;
+    let rows = u32::from(terminal.rows()?);
 
     // Traverse the entire grid using grid refs
     for row in 0..rows {

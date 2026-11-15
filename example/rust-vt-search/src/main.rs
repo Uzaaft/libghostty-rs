@@ -2,10 +2,10 @@
 //! and read the viewport matches to draw highlights.
 // ANCHOR: search-main
 use libghostty_vt::{
+    Terminal,
     error::Error,
     point::Space,
     search::{MatchBuffer, Search},
-    Terminal,
 };
 
 fn main() -> Result<(), Error> {

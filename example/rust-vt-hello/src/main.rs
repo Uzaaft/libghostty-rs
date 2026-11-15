@@ -1,7 +1,7 @@
 //! The smallest complete program: create a terminal, write text with a color
 //! sequence in it, and print the screen. This is the program on the main page.
 // ANCHOR: hello
-use libghostty_vt::{error::Error, fmt::Formatter, Terminal};
+use libghostty_vt::{Terminal, error::Error, fmt::Formatter};
 
 fn main() -> Result<(), Error> {
     // Create an 80x24 terminal with the default allocator.

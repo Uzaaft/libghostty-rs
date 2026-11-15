@@ -127,7 +127,7 @@ fn main() -> Result<(), Error> {
             print!("\x1b[0m"); // Reset style after each cell.
         }
 
-        println!()
+        println!();
     }
     // ANCHOR_END: render-row-iterate
 
