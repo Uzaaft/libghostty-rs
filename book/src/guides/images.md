@@ -143,11 +143,10 @@ The pixels are different, because the render state doesn't copy them. It only
 knows where to draw. Read pixels from the terminal while you still have access
 to it, for example right after the update while you hold your terminal lock.
 
-Each entry has an image ID. Look it up with [`kitty::Graphics::image()`], then
-read the image's size, pixel format and pixels with various getters on
-[`kitty::graphics::Image`]. The pixels are always decoded and
-uncompressed, so you can upload them as they are. This example reads a list and
-prints what it would draw, including the pixels:
+Each entry has an image ID. Look it up with [`Graphics::image()`], then
+read the image's size, pixel format and pixels with various getters on [`Image`].
+The pixels are always decoded and uncompressed, so you can upload them as they are.
+This example reads a list and prints what it would draw, including the pixels:
 
 ```rs
 {{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-draw}}
@@ -320,7 +319,7 @@ list when any part of it is in the captured rows, even if its parent isn't.
 
 Programs can send images with several frames and ask the terminal to play them,
 much like an animated GIF. The terminal stores every frame, but it has no timer
-of its own. You drive playback by calling [`Terminal::kitty_graphics_animation_tick()`].
+of its own. You drive playback by calling [`Graphics::tick_animation()`].
 
 Each call shows whichever frame is due at the time you pass in. When an image
 moves to a new frame, [`Image::data()`] returns the pixels of the new frame and
@@ -397,12 +396,12 @@ every entry in its list, so prefer it whenever you're drawing.
 
 ## Lifetime {#guide-images-lifetime}
 
-Everything borrowed from the terminal is short-lived. [`kitty::Graphics`] and
-[`kitty::graphics::Image`] handles stay valid until the next call that changes
-the terminal, such as [`Terminal::vt_write()`] or [`Terminal::reset()`].
-So get them again after each of those.
+Everything borrowed from the terminal is short-lived. [`Graphics`] and [`Image`]
+handles stay valid until the next call that changes the terminal, such as
+[`Terminal::vt_write()`] or [`Terminal::reset()`]. So get them again after
+each of those.
 
-[`Terminal::kitty_graphics_animation_tick()`] changes the storage too. It invalidates
+[`Graphics::tick_animation()`] changes the storage too. It invalidates
 image handles and image data slices, so look images up again afterward.
 
 The placement iterator belongs to you, but the values it returns are only valid

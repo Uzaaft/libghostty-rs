@@ -171,7 +171,7 @@ changes. A renderer that watches that value picks up the new pixels on its next 
 
 Pixels can arrive between history pages, so they're only known to be done when
 next returns `None`. To show progress, compare
-[`snapshot::Decoder::kitty_pending_bytes_primary`] with what arrives.
+[`snapshot::IncrementalDecoder::kitty_pending_bytes_primary`] with what arrives.
 [`snapshot::IncrementalDecoder::next`] has an example.
 
 ## The format {#guide-snapshots-format}

@@ -154,6 +154,7 @@ the string, so it doesn't stop.
 [`APC_START`]: Boundary::APC_START
 [`APC_END`]: Boundary::APC_END
 [`OSC_START`]: Boundary::OSC_START
+[`OSC_END`]: Boundary::OSC_START
 
 ### One byte that ends a string and starts another
 

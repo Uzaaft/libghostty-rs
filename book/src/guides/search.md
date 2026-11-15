@@ -62,10 +62,6 @@ operation that changes the terminal, including [`Terminal::vt_write()`],
 resize, reset and free. Read matches after a feed, use them before the terminal
 changes again, and read them again rather than caching them.
 
-We keep the selected match accurate across terminal changes. So the safe way to
-follow a match is to read [`search::Snapshot::selected_match()`] again after
-each feed.
-
 ## Lifetime {#guide-search-lifetime}
 
 A search borrows the terminal it was created with and never owns it. Any number
