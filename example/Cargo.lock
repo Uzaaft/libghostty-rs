@@ -477,6 +477,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_vt_formatter"
+version = "0.0.0"
+dependencies = [
+ "libghostty-vt",
+]
+
+[[package]]
 name = "rust_vt_grid_ref_tracked"
 version = "0.0.0"
 dependencies = [
