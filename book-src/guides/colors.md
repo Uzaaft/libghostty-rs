@@ -31,7 +31,7 @@ default palette, and setting it keeps any per-index overrides that programs have
 applied. Only the unmodified indices are updated.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-colors/src/main.rs:colors-set-defaults}}
+{{#include ../../example/rust-vt-colors/src/main.rs:colors-set-defaults}}
 ```
 
 Full program: [rust-vt-colors/src/main.rs](/example/rust-vt-colors/src/main.rs)
@@ -59,7 +59,7 @@ terminal starts with these unset. The palette getters always succeed, since the
 palette always has a value. If nothing else is set, it's the built-in default.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-colors/src/main.rs:colors-read}}
+{{#include ../../example/rust-vt-colors/src/main.rs:colors-read}}
 ```
 
 Full program: [rust-vt-colors/src/main.rs](/example/rust-vt-colors/src/main.rs)
@@ -68,7 +68,7 @@ Here are the two layers working together. A program overrides the foreground
 with OSC 10, and then clearing the default leaves the override in place.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-colors/src/main.rs:colors-main}}
+{{#include ../../example/rust-vt-colors/src/main.rs:colors-main}}
 ```
 
 Full program: [rust-vt-colors/src/main.rs](/example/rust-vt-colors/src/main.rs)
@@ -177,7 +177,7 @@ If your buffer is too small, the function returns [`Error::OutOfSpace`] and
 sets the output parameter to the size it needs.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-color-scheme/src/main.rs:color-scheme-report-encode}}
+{{#include ../../example/rust-vt-color-scheme/src/main.rs:color-scheme-report-encode}}
 ```
 
 Full program: [rust-vt-color-scheme/src/main.rs](/example/rust-vt-color-scheme/src/main.rs)

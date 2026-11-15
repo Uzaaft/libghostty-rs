@@ -151,7 +151,7 @@ something else needs it. Until then, the memory the system reports for your
 process (its RSS) can be higher than the resident figures here.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-compression/src/main.rs:memory-usage}}
+{{#include ../../example/rust-vt-compression/src/main.rs:memory-usage}}
 ```
 
 Full program: [rust-vt-compression/src/main.rs](/example/rust-vt-compression/src/main.rs)
@@ -173,7 +173,7 @@ same thing. It changes only when compression-relevant state changes, so restart
 your idle timer when it does.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-compression/src/main.rs:compression-activity}}
+{{#include ../../example/rust-vt-compression/src/main.rs:compression-activity}}
 ```
 
 Full program: [rust-vt-compression/src/main.rs](/example/rust-vt-compression/src/main.rs)
@@ -192,7 +192,7 @@ work. There are three results:
   you have to do something else, such as closing a terminal.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-compression/src/main.rs:compression-idle-step}}
+{{#include ../../example/rust-vt-compression/src/main.rs:compression-idle-step}}
 ```
 
 Full program: [rust-vt-compression/src/main.rs](/example/rust-vt-compression/src/main.rs)

@@ -79,7 +79,7 @@ sequences are always kept in allocated memory.
 This callback handles both kinds and prints what it gets:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-effects/src/main.rs:effects-unknown-sequence}}
+{{#include ../../example/rust-vt-effects/src/main.rs:effects-unknown-sequence}}
 ```
 
 Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)

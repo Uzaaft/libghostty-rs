@@ -65,7 +65,7 @@ This example shows the shape of a decoder, but it doesn't actually decode
 anything. It hardcodes one red pixel.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-decode-png}}
+{{#include ../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-decode-png}}
 ```
 
 Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
@@ -149,7 +149,7 @@ The pixels are always decoded and uncompressed, so you can upload them as they a
 This example reads a list and prints what it would draw, including the pixels:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-draw}}
+{{#include ../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-draw}}
 ```
 
 Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
@@ -244,7 +244,7 @@ size under the same ID.
 Here's a frame loop that reads the list only when it changed:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-frame}}
+{{#include ../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-frame}}
 ```
 
 Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
@@ -345,7 +345,7 @@ Here's a helper that follows these steps. A renderer calls it once per frame and
 uses the result to schedule the next redraw:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-animation-tick}}
+{{#include ../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-animation-tick}}
 ```
 
 Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
@@ -354,7 +354,7 @@ This plays a two-frame animation with that helper. It uses a pretend clock so
 that it runs instantly:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-animation-play}}
+{{#include ../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-animation-play}}
 ```
 
 Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)
@@ -414,7 +414,7 @@ cells, lists both from the render state, and reads each image's pixels from the
 storage.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-main}}
+{{#include ../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-main}}
 ```
 
 Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphics/src/main.rs)

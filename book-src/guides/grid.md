@@ -97,7 +97,7 @@ This walks the whole grid, reading each cell's text, each row's wrap state, and
 a style:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-grid-traverse/src/main.rs:grid-ref-traverse}}
+{{#include ../../example/rust-vt-grid-traverse/src/main.rs:grid-ref-traverse}}
 ```
 
 Full program: [rust-vt-grid-traverse/src/main.rs](/example/rust-vt-grid-traverse/src/main.rs)
@@ -130,7 +130,7 @@ What you get back is an untracked reference with the same short life as any
 other. [`TrackedGridRef::point()`] gets you the position without that step.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-grid-ref-tracked/src/main.rs:grid-ref-tracked}}
+{{#include ../../example/rust-vt-grid-ref-tracked/src/main.rs:grid-ref-tracked}}
 ```
 
 Full program: [rust-vt-grid-ref-tracked/src/main.rs](/example/rust-vt-grid-ref-tracked/src/main.rs)

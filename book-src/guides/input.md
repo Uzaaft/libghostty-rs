@@ -82,7 +82,7 @@ depending on the encoder's options.
 This one has no terminal, so it turns on the Kitty keyboard protocol by hand:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-encode-key/src/main.rs:key-encode}}
+{{#include ../../example/rust-vt-encode-key/src/main.rs:key-encode}}
 ```
 
 Full program: [rust-vt-encode-key/src/main.rs](/example/rust-vt-encode-key/src/main.rs)
@@ -114,7 +114,7 @@ Call [`mouse::Encoder::set_any_button_pressed`] as well, to say whether a button
 is held. Neither one comes from the terminal.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-encode-mouse/src/main.rs:mouse-encode}}
+{{#include ../../example/rust-vt-encode-mouse/src/main.rs:mouse-encode}}
 ```
 
 Full program: [rust-vt-encode-mouse/src/main.rs](/example/rust-vt-encode-mouse/src/main.rs)
@@ -143,7 +143,7 @@ if terminal.mode(Mode::FOCUS_EVENT).ok_or(false) {
 If the buffer is too small, you get [`Error::OutOfSpace`] and the size you need.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-encode-focus/src/main.rs:focus-encode}}
+{{#include ../../example/rust-vt-encode-focus/src/main.rs:focus-encode}}
 ```
 
 Full program: [rust-vt-encode-focus/src/main.rs](/example/rust-vt-encode-focus/src/main.rs)
@@ -199,7 +199,7 @@ stay the same between reads. The confirmed retry just pastes whatever the source
 holds by then, and a refused or failed paste writes nothing at all.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-paste/src/main.rs:terminal-paste}}
+{{#include ../../example/rust-vt-paste/src/main.rs:terminal-paste}}
 ```
 
 Full program: [rust-vt-paste/src/main.rs](/example/rust-vt-paste/src/main.rs)
@@ -211,7 +211,7 @@ If you encode without a terminal, there are two building blocks.
 sequences. It's conservative, and it ignores terminal state.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-paste/src/main.rs:paste-safety}}
+{{#include ../../example/rust-vt-paste/src/main.rs:paste-safety}}
 ```
 
 Full program: [rust-vt-paste/src/main.rs](/example/rust-vt-paste/src/main.rs)
@@ -220,7 +220,7 @@ Full program: [rust-vt-paste/src/main.rs](/example/rust-vt-paste/src/main.rs)
 wrapping and unsafe byte stripping. It modifies your input buffer in place.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-paste/src/main.rs:paste-encode}}
+{{#include ../../example/rust-vt-paste/src/main.rs:paste-encode}}
 ```
 
 Full program: [rust-vt-paste/src/main.rs](/example/rust-vt-paste/src/main.rs)

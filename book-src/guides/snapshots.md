@@ -34,7 +34,7 @@ both at ground, encoding still works. If either one is unfinished, encoding
 returns [`Error::InvalidValue`].
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-encode}}
+{{#include ../../example/rust-vt-snapshot/src/main.rs:snapshot-encode}}
 ```
 
 Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
@@ -57,7 +57,7 @@ reached or the decoder is freed. Bytes after FINISH aren't consumed, and
 [`snapshot::Decoder::source_offset()`] tells you where they start.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-decode}}
+{{#include ../../example/rust-vt-snapshot/src/main.rs:snapshot-decode}}
 ```
 
 Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
@@ -86,7 +86,7 @@ the decode never holds more than one uncompressed history page at a time.
 The snapshot format doesn't change, so this works with any snapshot.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-compress-history}}
+{{#include ../../example/rust-vt-snapshot/src/main.rs:snapshot-compress-history}}
 ```
 
 Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
@@ -129,13 +129,13 @@ starvation. If your source is nonblocking, wait outside the decoder or block in
 your reader implementation.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-buffer-reader}}
+{{#include ../../example/rust-vt-snapshot/src/main.rs:snapshot-buffer-reader}}
 ```
 
 Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-incremental}}
+{{#include ../../example/rust-vt-snapshot/src/main.rs:snapshot-incremental}}
 ```
 
 Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)

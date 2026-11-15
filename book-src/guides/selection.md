@@ -88,7 +88,7 @@ prompt changes, so a line at a shell prompt selects the input and leaves out the
 `$ `.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-selection/src/main.rs:selection-main}}
+{{#include ../../example/rust-vt-selection/src/main.rs:selection-main}}
 ```
 
 Full program: [rust-vt-selection/src/main.rs](/example/rust-vt-selection/src/main.rs)
@@ -103,7 +103,7 @@ drag point, ask again in the other direction, and combine the two. The gesture
 API below does this for you.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-selection/src/main.rs:selection-word-between}}
+{{#include ../../example/rust-vt-selection/src/main.rs:selection-word-between}}
 ```
 
 Full program: [rust-vt-selection/src/main.rs](/example/rust-vt-selection/src/main.rs)
@@ -158,7 +158,7 @@ do get a selection, it isn't installed anywhere. You decide whether to draw it,
 copy it, or install it as the terminal's selection.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-selection-gesture/src/main.rs:selection-gesture-main}}
+{{#include ../../example/rust-vt-selection-gesture/src/main.rs:selection-gesture-main}}
 ```
 
 Full program: [rust-vt-selection-gesture/src/main.rs](/example/rust-vt-selection-gesture/src/main.rs)

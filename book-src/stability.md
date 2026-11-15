@@ -50,7 +50,7 @@ To read the library's version when your program runs, use [`build_info::version_
 for the string and `build_info::{major,minor,patch,pre}_version` for the numbers:
 
 ```rust,ignore
-{{#include ../../example/rust-vt-build-info/src/main.rs:version-library}}
+{{#include ../example/rust-vt-build-info/src/main.rs:version-library}}
 ```
 
 Full program: [rust-vt-build-info/src/main.rs](/example/rust-vt-build-info/src/main.rs)

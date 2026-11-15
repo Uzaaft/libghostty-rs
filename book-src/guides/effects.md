@@ -87,7 +87,7 @@ pty. The data is only valid during the call, so copy it if you can't write it
 right away.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-effects/src/main.rs:effects-write-pty}}
+{{#include ../../example/rust-vt-effects/src/main.rs:effects-write-pty}}
 ```
 
 Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
@@ -99,11 +99,11 @@ placed within a [`Cell`](std::cell::Cell), which allows for
 [_interior mutability_](https://doc.rust-lang.org/reference/interior-mutability.html).
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-effects/src/main.rs:effects-state-lifetime}}
+{{#include ../../example/rust-vt-effects/src/main.rs:effects-state-lifetime}}
 
     // ...
 
-{{#include ../../../example/rust-vt-effects/src/main.rs:effects-bell}}
+{{#include ../../example/rust-vt-effects/src/main.rs:effects-bell}}
 ```
 
 Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
@@ -114,7 +114,7 @@ The callback tells you the title changed, but not what it changed to. You can
 read the new title with [`Terminal::title`] inside the callback.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-effects/src/main.rs:effects-title-changed}}
+{{#include ../../example/rust-vt-effects/src/main.rs:effects-title-changed}}
 ```
 
 Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
@@ -131,7 +131,7 @@ value, so commit them together. A `contents_len` of zero asks you to clear the
 clipboard.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-effects/src/main.rs:effects-clipboard-write}}
+{{#include ../../example/rust-vt-effects/src/main.rs:effects-clipboard-write}}
 ```
 
 Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
@@ -143,7 +143,7 @@ before you return. If you return without replying, the program gets an empty
 clipboard for OSC 52 and `EPERM` for OSC 5522.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-effects/src/main.rs:effects-clipboard-read}}
+{{#include ../../example/rust-vt-effects/src/main.rs:effects-clipboard-read}}
 ```
 
 Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)
@@ -159,7 +159,7 @@ This registers the callbacks above, along with the unknown sequence callback,
 and then writes a sequence for each one so you can watch them fire.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-effects/src/main.rs:effects-register}}
+{{#include ../../example/rust-vt-effects/src/main.rs:effects-register}}
 ```
 
 Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs)

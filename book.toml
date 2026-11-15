@@ -2,6 +2,7 @@
 title = "Guide to libghostty-vt, Rust Edition"
 authors = ["Leah Amelia Chen"]
 language = "en"
+src = "book-src"
 
 [output.html]
 git-repository-url = "https://github.com/Uzaaft/libghostty-rs"

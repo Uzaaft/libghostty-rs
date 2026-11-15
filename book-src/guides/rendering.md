@@ -28,7 +28,7 @@ There are three steps:
 3. Read from the snapshot to draw.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-render/src/main.rs:render-state-update}}
+{{#include ../../example/rust-vt-render/src/main.rs:render-state-update}}
 ```
 
 Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
@@ -36,7 +36,7 @@ Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 Now read what you need. The colors come as one struct:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-render/src/main.rs:render-colors}}
+{{#include ../../example/rust-vt-render/src/main.rs:render-colors}}
 ```
 
 Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
@@ -44,7 +44,7 @@ Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 So does the cursor:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-render/src/main.rs:render-cursor}}
+{{#include ../../example/rust-vt-render/src/main.rs:render-cursor}}
 ```
 
 Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
@@ -53,7 +53,7 @@ Rows and cells have their own iterators. Row and cell data is only valid until
 the next update.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-render/src/main.rs:render-row-iterate}}
+{{#include ../../example/rust-vt-render/src/main.rs:render-row-iterate}}
 ```
 
 Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
@@ -91,7 +91,7 @@ partially dirty or fully dirty. A flag on each row says which rows changed in a
 partially dirty frame.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-render/src/main.rs:render-dirty-check}}
+{{#include ../../example/rust-vt-render/src/main.rs:render-dirty-check}}
 ```
 
 Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
@@ -101,7 +101,7 @@ you've drawn a complete frame, [`Snapshot::clean`] clears both layers in one
 call:
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-render/src/main.rs:render-dirty-reset}}
+{{#include ../../example/rust-vt-render/src/main.rs:render-dirty-reset}}
 ```
 
 Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)

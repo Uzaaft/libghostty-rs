@@ -108,7 +108,7 @@ This creates a search, runs it, steps through the matches like a find bar, and
 reads the viewport matches to draw highlights.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-search/src/main.rs:search-main}}
+{{#include ../../example/rust-vt-search/src/main.rs:search-main}}
 ```
 
 Full program: [rust-vt-search/src/main.rs](/example/rust-vt-search/src/main.rs)

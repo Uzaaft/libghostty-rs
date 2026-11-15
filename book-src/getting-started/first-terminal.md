@@ -15,7 +15,7 @@ We'll walk through [rust-vt-stream](/example/rust-vt-stream/src/main.rs).
 ## Create a Terminal {#first-terminal-create}
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-init}}
+{{#include ../../example/rust-vt-stream/src/main.rs:vt-stream-init}}
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
@@ -30,7 +30,7 @@ the [`Result`](error::Result) of every function.
 ## Write Bytes {#first-terminal-write}
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-write}}
+{{#include ../../example/rust-vt-stream/src/main.rs:vt-stream-write}}
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
@@ -70,7 +70,7 @@ through a pty, such as a text file, that's now your job. Beware!
 > Use a render state instead. See [Draw the Screen](#first-terminal-render).
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-read}}
+{{#include ../../example/rust-vt-stream/src/main.rs:vt-stream-read}}
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
@@ -110,7 +110,7 @@ rendering. It does dirty tracking, viewport handling, smooth scroll handling,
 and more.
 
 ```rust,ignore
-{{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-render}}
+{{#include ../../example/rust-vt-stream/src/main.rs:vt-stream-render}}
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
