@@ -56,7 +56,7 @@ You can fill in a selection by hand with [`Terminal::select`] (or equivalently,
 [`Selection::new`]). This selects the first ten cells of the second row and
 makes that the terminal's selection:
 
-```rs
+```rust,ignore
 use libghostty_vt::{
     point::{Coordinate, Point},
     selection::Selection,
@@ -87,7 +87,7 @@ pass your own. Set `semantic_prompt_boundary` and the line stops at semantic
 prompt changes, so a line at a shell prompt selects the input and leaves out the
 `$ `.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-selection/src/main.rs:selection-main}}
 ```
 
@@ -102,7 +102,7 @@ pointer is between words. So ask for the nearest word between the click and the
 drag point, ask again in the other direction, and combine the two. The gesture
 API below does this for you.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-selection/src/main.rs:selection-word-between}}
 ```
 
@@ -157,7 +157,7 @@ produces one, and in fact always returns a `Ok(())` when successful. When you
 do get a selection, it isn't installed anywhere. You decide whether to draw it,
 copy it, or install it as the terminal's selection.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-selection-gesture/src/main.rs:selection-gesture-main}}
 ```
 
@@ -188,7 +188,7 @@ A selection names cells. To get the text, use a [formatter](Formatter) with
 clipboard, use plain output with [`Formatter::set_unwrap`] and
 [`Formatter::set_trim`] both true:
 
-```rs
+```rust,ignore
 use libghostty_vt::{fmt::{Format, Formatter}};
 
 let Some(selection) = terminal.selection()? else {

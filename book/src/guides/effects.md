@@ -21,7 +21,7 @@ skip this page. You need effects as soon as a real program runs in the terminal.
 Each effect can be registered by passing a callback into a corresponding function on
 [`Terminal`], prefixed with `on_`:
 
-```rs
+```rust,ignore
 terminal.on_bell(|_term| println!("Ring-a-ding-a-ding!"));
 ```
 
@@ -86,7 +86,7 @@ as the answer to a device status report or a mode query. Write the bytes to your
 pty. The data is only valid during the call, so copy it if you can't write it
 right away.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-effects/src/main.rs:effects-write-pty}}
 ```
 
@@ -98,7 +98,7 @@ The bell has no data at all. This one counts bells with a state variable
 placed within a [`Cell`](std::cell::Cell), which allows for
 [_interior mutability_](https://doc.rust-lang.org/reference/interior-mutability.html).
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-effects/src/main.rs:effects-state-lifetime}}
 
     // ...
@@ -113,7 +113,7 @@ Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs
 The callback tells you the title changed, but not what it changed to. You can
 read the new title with [`Terminal::title`] inside the callback.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-effects/src/main.rs:effects-title-changed}}
 ```
 
@@ -130,7 +130,7 @@ write is denied. Every entry in `contents` is a representation of the same
 value, so commit them together. A `contents_len` of zero asks you to clear the
 clipboard.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-effects/src/main.rs:effects-clipboard-write}}
 ```
 
@@ -142,7 +142,7 @@ Reads work the same way. Ask first unless `granted` is set, and call `reply`
 before you return. If you return without replying, the program gets an empty
 clipboard for OSC 52 and `EPERM` for OSC 5522.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-effects/src/main.rs:effects-clipboard-read}}
 ```
 
@@ -158,7 +158,7 @@ own guide. See @ref guide-custom-sequences.
 This registers the callbacks above, along with the unknown sequence callback,
 and then writes a sequence for each one so you can watch them fire.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-effects/src/main.rs:effects-register}}
 ```
 

@@ -19,7 +19,7 @@ That lets you use a newer key when it's there and fall back when it isn't. In
 this example, imagine that [`render::Snapshot::cursor_blinking`] was added
 in a later release than the library your program loads:
 
-```rs
+```rust,ignore
 let blinking = match snapshot.cursor_blinking() {
   Ok(v) => v,
   // This library predates the key. Use a sensible default instead.

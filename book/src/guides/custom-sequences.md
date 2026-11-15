@@ -46,7 +46,7 @@ that's what the program expects.
 The rules from [The rules for callbacks](effects.md#guide-effects-rules)
 all apply here.
 
-```rs
+```rust,ignore
 terminal
   // Keep up to 4 KiB of each unknown sequence and report them.
   .set_unknown_max_bytes(4096)?
@@ -78,7 +78,7 @@ sequences are always kept in allocated memory.
 
 This callback handles both kinds and prints what it gets:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-effects/src/main.rs:effects-unknown-sequence}}
 ```
 
@@ -108,7 +108,7 @@ several calls later.
 This loop handles one chunk of output and finds the content of the APC strings
 in it. DCS and OSC strings work the same way with their own flags:
 
-```rs
+```rust,ignore
 let want = Boundary::APC_START | Boundary::APC_END;
 
 let mut off = 0usize;

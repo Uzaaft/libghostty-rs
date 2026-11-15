@@ -33,7 +33,7 @@ input is written. If tracking is off and the VT parser and UTF-8 decoder are
 both at ground, encoding still works. If either one is unfinished, encoding
 returns [`Error::InvalidValue`].
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-encode}}
 ```
 
@@ -56,7 +56,7 @@ The bytes aren't copied. They have to stay valid and unchanged until FINISH is
 reached or the decoder is freed. Bytes after FINISH aren't consumed, and
 [`snapshot::Decoder::source_offset()`] tells you where they start.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-decode}}
 ```
 
@@ -85,7 +85,7 @@ stays that way until you call [`Terminal::compress()`]. With the option on,
 the decode never holds more than one uncompressed history page at a time.
 The snapshot format doesn't change, so this works with any snapshot.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-compress-history}}
 ```
 
@@ -128,13 +128,13 @@ A successful read of zero bytes is permanent end-of-file, not temporary
 starvation. If your source is nonblocking, wait outside the decoder or block in
 your reader implementation.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-buffer-reader}}
 ```
 
 Full program: [rust-vt-snapshot/src/main.rs](/example/rust-vt-snapshot/src/main.rs)
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-snapshot/src/main.rs:snapshot-incremental}}
 ```
 
@@ -183,7 +183,7 @@ has the rest.
 A snapshot is an ordered, CRC-protected record stream. Every integer is unsigned
 and little-endian. The stream begins with this fixed ten-byte envelope:
 
-```
+```text
 byte  0               8       10
       +---------------+--------+
       | "GHOSTSNP"    | version|
@@ -195,7 +195,7 @@ After that come independently checksummed records. A record's CRC32C covers its
 encoded tag and payload length, followed by its payload. It doesn't cover the
 CRC field itself.
 
-```
+```text
 byte  0       2             6          10             10 + payload_len
       +-------+-------------+-----------+----------------+
       | tag   | payload_len | CRC32C    | payload        |
@@ -211,7 +211,7 @@ number of PAGE records it declares. Active SCREEN pages make the terminal
 renderable. HISTORY pages are older scrollback, ordered newest to oldest so an
 incremental decoder can prepend them as they arrive.
 
-```
+```text
 +---------------- TERMINAL ----------------+
 | terminal-wide state and screen count     |
 +----------------- SCREEN -----------------+  repeated per screen

@@ -30,7 +30,7 @@ The palette is a little different. Passing `None` resets it to the built-in
 default palette, and setting it keeps any per-index overrides that programs have
 applied. Only the unmodified indices are updated.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-colors/src/main.rs:colors-set-defaults}}
 ```
 
@@ -58,7 +58,7 @@ there's neither a default nor an override. So handle that case, because a new
 terminal starts with these unset. The palette getters always succeed, since the
 palette always has a value. If nothing else is set, it's the built-in default.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-colors/src/main.rs:colors-read}}
 ```
 
@@ -67,7 +67,7 @@ Full program: [rust-vt-colors/src/main.rs](/example/rust-vt-colors/src/main.rs)
 Here are the two layers working together. A program overrides the foreground
 with OSC 10, and then clearing the default leaves the override in place.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-colors/src/main.rs:colors-main}}
 ```
 
@@ -92,7 +92,7 @@ when you only want to accept X11 names.
 The [`FromStr`](std::str::FromStr) implementation on `Rgb` is identical to
 [`Rgb::parse`], so you may use it instead if you have a color string.
 
-```rs
+```rust,ignore
 let color = match Rgb::parse("ForestGreen") {
     Ok(color) => color,
     Err(e) => { /* Handle invalid color input. */ },
@@ -109,7 +109,7 @@ let color = "rgb:12/34/56".parse::<Rgb>().unwrap();
 them to someone. The table is static memory that lives as long as the program.
 Entries are in rgb.txt order. [`X11ColorNames::len()`] returns the number of entries.
 
-```rs
+```rust,ignore
 // X11ColorNames implements IntoIterator, so you can directly use a for-loop
 for name in X11ColorNames::new() {
     println!("{:?} = {:?}", name.name, name.color);
@@ -124,7 +124,7 @@ palette override in `INDEX=COLOR` form. The index can be decimal or use a `0x`,
 `0o` or `0b` prefix, and the color side accepts anything [`Rgb::parse()`]
 does.
 
-```rs
+```rust,ignore
 let mut palette = Palette::default();
 if let Some((index, rgb)) = Palette::parse_palette_entry("0x10=#282c34") {
     palette.set(index, rgb);
@@ -136,7 +136,7 @@ ramp from a base palette, a background and a foreground, so they match the
 theme. Set bits in a [`PaletteMask`] to keep specific indices from the
 base palette.
 
-```rs
+```rust,ignore
 let palette = Palette::default();
 let mut skip = PaletteMask::default();
 skip.set(PaletteIndex(16));
@@ -176,7 +176,7 @@ reply to the query.
 If your buffer is too small, the function returns [`Error::OutOfSpace`] and
 sets the output parameter to the size it needs.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-color-scheme/src/main.rs:color-scheme-report-encode}}
 ```
 

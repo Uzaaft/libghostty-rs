@@ -34,7 +34,7 @@ in:
 
 Here's how they line up on a 24-row terminal with 100 rows of scrollback:
 
-```
+```text
                     screen y   history y   active y
 +----------------+
 | scrollback     |         0           0
@@ -56,7 +56,7 @@ wide because a row in scrollback can be a long way from the top.
 
 [`Terminal::grid_ref()`] resolves a point to a grid reference:
 
-```rs
+```rust,ignore
 use libghostty_vt::point::{Point, Coordinate};
 
 let point = Point::Active(Coordinate { x: 4, y: 0 });
@@ -96,7 +96,7 @@ to get the full style.
 This walks the whole grid, reading each cell's text, each row's wrap state, and
 a style:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-grid-traverse/src/main.rs:grid-ref-traverse}}
 ```
 
@@ -129,7 +129,7 @@ To read cell data, snapshot it first with [`TrackedGridRef::snapshot()`].
 What you get back is an untracked reference with the same short life as any
 other. [`TrackedGridRef::point()`] gets you the position without that step.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-grid-ref-tracked/src/main.rs:grid-ref-tracked}}
 ```
 

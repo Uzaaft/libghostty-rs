@@ -22,7 +22,7 @@ If you set both, the first one reached is used.
 | [`Terminal::set_scrollback_max_bytes()`] | 10,000 bytes | No limit   | Restores the default |
 | [`Terminal::set_scrollback_max_lines()`] | No limit     | No limit   | No limit             |
 
-```rs
+```rust,ignore
 // Keep up to 10 MB of history.
 terminal.set_scrollback_max_bytes(Some(10 * 1024 * 1024))?;
 ```
@@ -59,7 +59,7 @@ The viewport is the part of the terminal you're showing. Move it with
 | [`ScrollViewport::Row`]         | Scroll so that this row is the first one visible     |
 | [`ScrollViewport::DeltaPrompt`] | Scroll by a number of prompts, negative for backward |
 
-```rs
+```rust,ignore
 terminal.scroll_viewport(ScrollViewport::Delta(-5))?; // up 5 rows
 ```
 
@@ -90,7 +90,7 @@ The `offset` is the same row space as [`ScrollViewport::Row`], so
 when someone drags your scrollbar you can scroll straight to the position you
 drew.
 
-```rs
+```rust,ignore
 let bar = terminal.scrollbar()?;
 
 // Someone dragged the scrollbar halfway down.
@@ -113,7 +113,7 @@ screen buffer without scrollback, it can't pull rows back, and it will disagree
 with the terminal about the screen after a resize. Windows ConPTY is the case
 that needs this. Call [`Terminal::set_resize_pull_scrollback()`] with false:
 
-```rs
+```rust,ignore
 terminal.set_resize_pull_scrollback(false)?;
 ```
 
@@ -150,7 +150,7 @@ On macOS, the system takes back memory freed by compression lazily, when
 something else needs it. Until then, the memory the system reports for your
 process (its RSS) can be higher than the resident figures here.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-compression/src/main.rs:memory-usage}}
 ```
 
@@ -172,7 +172,7 @@ for equality, because it can wrap, and a change in either direction means the
 same thing. It changes only when compression-relevant state changes, so restart
 your idle timer when it does.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-compression/src/main.rs:compression-activity}}
 ```
 
@@ -191,7 +191,7 @@ work. There are three results:
   [`MemoryUsage`] tells you the same thing, and to lower memory there
   you have to do something else, such as closing a terminal.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-compression/src/main.rs:compression-idle-step}}
 ```
 

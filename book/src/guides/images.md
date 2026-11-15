@@ -22,7 +22,7 @@ with [`Terminal::set_kitty_image_storage_limit()`]. A limit of zero disables
 the protocol and deletes every stored image and placement. If Kitty graphics
 were disabled at build time, this option returns [`Error::Unsupported`].
 
-```rs
+```rust,ignore
 terminal.set_kitty_image_storage_limit(64 * 1024 * 1024)?; // 64 MiB
 ```
 
@@ -64,7 +64,7 @@ has the rest of the contract.
 This example shows the shape of a decoder, but it doesn't actually decode
 anything. It hardcodes one red pixel.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-decode-png}}
 ```
 
@@ -93,7 +93,7 @@ Later versions may add more protocols and more kinds of placements. Skip any
 placement whose protocol you don't support, and your renderer keeps working when
 that happens.
 
-```rs
+```rust,ignore
 // Create the iterator once and reuse it for every frame.
 let mut images = ImageIterator::new()?;
 
@@ -148,7 +148,7 @@ read the image's size, pixel format and pixels with various getters on [`Image`]
 The pixels are always decoded and uncompressed, so you can upload them as they are.
 This example reads a list and prints what it would draw, including the pixels:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-draw}}
 ```
 
@@ -192,7 +192,7 @@ compare it with the value from the last time you read the list. If they match,
 the list is the same as before, and you can keep drawing what you built last
 time:
 
-```rs
+```rust,ignore
 // Kept by your renderer between frames. The flag makes sure the first
 // frame always reads the list.
 let mut last_generation = 0u64;
@@ -243,7 +243,7 @@ size under the same ID.
 
 Here's a frame loop that reads the list only when it changed:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-frame}}
 ```
 
@@ -344,7 +344,7 @@ with no playing animations costs nothing extra.
 Here's a helper that follows these steps. A renderer calls it once per frame and
 uses the result to schedule the next redraw:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-animation-tick}}
 ```
 
@@ -353,7 +353,7 @@ Full program: [rust-vt-kitty-graphics/src/main.rs](/example/rust-vt-kitty-graphi
 This plays a two-frame animation with that helper. It uses a pretend clock so
 that it runs instantly:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-animation-play}}
 ```
 
@@ -413,7 +413,7 @@ This creates a terminal, places one image at a cell and another with placeholder
 cells, lists both from the render state, and reads each image's pixels from the
 storage.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-kitty-graphics/src/main.rs:kitty-graphics-main}}
 ```
 

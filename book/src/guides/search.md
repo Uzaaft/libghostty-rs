@@ -107,7 +107,7 @@ takes the terminal follows the terminal's serialization rule above.
 This creates a search, runs it, steps through the matches like a find bar, and
 reads the viewport matches to draw highlights.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-search/src/main.rs:search-main}}
 ```
 

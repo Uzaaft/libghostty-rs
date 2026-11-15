@@ -33,7 +33,7 @@ The two `set_options_from_terminal` calls read the terminal's state when you mak
 They don't stay attached to it, and a program can change its modes in any write.
 So sync the encoder after you write to the terminal, or right before you encode.
 
-```rs
+```rust,ignore
 // Create a terminal and feed it some VT data that changes modes.
 let mut terminal = Terminal::new(80, 24)?;
 
@@ -81,7 +81,7 @@ depending on the encoder's options.
 
 This one has no terminal, so it turns on the Kitty keyboard protocol by hand:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-encode-key/src/main.rs:key-encode}}
 ```
 
@@ -113,7 +113,7 @@ The default is a 1x1 pixel screen with 1x1 pixel cells, which is never what you 
 Call [`mouse::Encoder::set_any_button_pressed`] as well, to say whether a button
 is held. Neither one comes from the terminal.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-encode-mouse/src/main.rs:mouse-encode}}
 ```
 
@@ -134,7 +134,7 @@ or `CSI O`. There's no encoder to create and no options to set.
 
 It also doesn't look at the terminal, so it's up to you to check the mode first:
 
-```rs
+```rust,ignore
 if terminal.mode(Mode::FOCUS_EVENT).ok_or(false) {
   // Encode the event and write it to the pty.
 }
@@ -142,7 +142,7 @@ if terminal.mode(Mode::FOCUS_EVENT).ok_or(false) {
 
 If the buffer is too small, you get [`Error::OutOfSpace`] and the size you need.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-encode-focus/src/main.rs:focus-encode}}
 ```
 
@@ -198,7 +198,7 @@ and buffers it whole while the rule is applied. So your source doesn't have to
 stay the same between reads. The confirmed retry just pastes whatever the source
 holds by then, and a refused or failed paste writes nothing at all.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-paste/src/main.rs:terminal-paste}}
 ```
 
@@ -210,7 +210,7 @@ If you encode without a terminal, there are two building blocks.
 [`paste::is_safe`] checks whether paste data contains potentially dangerous
 sequences. It's conservative, and it ignores terminal state.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-paste/src/main.rs:paste-safety}}
 ```
 
@@ -219,7 +219,7 @@ Full program: [rust-vt-paste/src/main.rs](/example/rust-vt-paste/src/main.rs)
 [`paste::encode`] encodes paste data for the pty, including bracketed paste
 wrapping and unsafe byte stripping. It modifies your input buffer in place.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-paste/src/main.rs:paste-encode}}
 ```
 

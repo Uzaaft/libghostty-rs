@@ -14,7 +14,7 @@ We'll walk through [rust-vt-stream](/example/rust-vt-stream/src/main.rs).
 
 ## Create a Terminal {#first-terminal-create}
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-init}}
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
@@ -29,7 +29,7 @@ the [`Result`](error::Result) of every function.
 
 ## Write Bytes {#first-terminal-write}
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-write}}
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
@@ -69,7 +69,7 @@ through a pty, such as a text file, that's now your job. Beware!
 > to a file or printing it once. Don't use it for a real, live render.
 > Use a render state instead. See [Draw the Screen](#first-terminal-render).
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-read}}
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
@@ -84,7 +84,7 @@ are.
 
 The program prints this:
 
-```
+```text
 Top-left corner
 Green Text
 
@@ -109,7 +109,7 @@ frame-by-frame renderer. It can be used as the foundation for CPU or GPU
 rendering. It does dirty tracking, viewport handling, smooth scroll handling,
 and more.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-stream/src/main.rs:vt-stream-render}}
 ```
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).

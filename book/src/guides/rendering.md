@@ -27,7 +27,7 @@ There are three steps:
    snapshot of the render state.
 3. Read from the snapshot to draw.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-render/src/main.rs:render-state-update}}
 ```
 
@@ -35,7 +35,7 @@ Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 
 Now read what you need. The colors come as one struct:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-render/src/main.rs:render-colors}}
 ```
 
@@ -43,7 +43,7 @@ Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 
 So does the cursor:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-render/src/main.rs:render-cursor}}
 ```
 
@@ -52,7 +52,7 @@ Full program: [rust-vt-render/src/main.rs](/example/rust-vt-render/src/main.rs)
 Rows and cells have their own iterators. Row and cell data is only valid until
 the next update.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-render/src/main.rs:render-row-iterate}}
 ```
 
@@ -69,7 +69,7 @@ object. [`render::Update::end()`] finishes any work that was deferred, and it
 only touches memory the render state owns. So lock, begin, unlock, and then end
 while the IO thread goes back to modifying the terminal:
 
-```rs
+```rust,ignore
 let update = {
   let terminal = terminal_mutex.lock().unwrap();
   render_state.begin_update(&terminal)
@@ -90,7 +90,7 @@ There are two independent layers. A global state says if the frame is clean,
 partially dirty or fully dirty. A flag on each row says which rows changed in a
 partially dirty frame.
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-render/src/main.rs:render-dirty-check}}
 ```
 
@@ -100,7 +100,7 @@ An update only ever sets dirty state, it never clears it. That's your job. Once
 you've drawn a complete frame, [`Snapshot::clean`] clears both layers in one
 call:
 
-```rs
+```rust,ignore
 {{#include ../../../example/rust-vt-render/src/main.rs:render-dirty-reset}}
 ```
 
@@ -199,7 +199,7 @@ This draws one frame of a smooth scroll. `offset_px` comes from your own scroll
 animation. It's how far the grid is shifted up, from zero up to but not
 including one row height.
 
-```rs
+```rust,ignore
 // Once, when setting up the render state. One row below the viewport
 // is enough to draw the partially visible row at the bottom edge.
 render_state.set_overscan(Overscan { above: 0, below: 1 })?;
@@ -241,7 +241,7 @@ or is changed in place by the terminal, for example when a program scrolls only
 part of the screen. Ids are never reused, so an old id can never match a
 different row. You can throw away cache entries for ids that no longer appear.
 
-```rs
+```rust,ignore
 while let Some(row) = row_iter.next() {
   let id = row.id()?;
 
