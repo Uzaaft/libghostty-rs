@@ -10,8 +10,7 @@
 //!
 //! See [Images] for how to set up, decode PNGs, and draw images.
 //!
-//! [Images]: http://localhost:3000/guides/images.html#guide-images
-
+#![doc = crate::guide_ref!("Images", "images")]
 #![cfg(feature = "kitty-graphics")]
 
 use std::{
@@ -248,8 +247,7 @@ impl Graphics<'_> {
     /// image list again. For that, use
     /// [`Snapshot::image_placements_generation`](crate::render::Snapshot::image_placements_generation).
     /// See [Knowing what changed].
-    ///
-    /// [Knowing what changed]: http://localhost:3000/guides/images.html#guide-images-changes
+    #[doc = crate::guide_ref!("Knowing what changed", "images", "changes")]
     ///
     /// A value is never reused, not even by another screen, after a reset, or
     /// by another terminal. You can use it as a cache key on its own.
@@ -281,11 +279,11 @@ impl Graphics<'_> {
     /// The [Animation] section explains how to schedule redraws with the
     /// returned time and includes an example.
     ///
-    /// [Animation]: http://localhost:3000/guides/images.html#guide-images-animation
-    ///
     /// Returns `Some` with the time the next frame is due, in milliseconds on
     /// the same clock as `now_ms`, if an animation is playing. Returns `None`
     /// if nothing is playing or Kitty graphics are disabled at build time.
+    ///
+    #[doc = crate::guide_ref!("Animation", "images", "animation")]
     pub fn tick_animation(&mut self, now_ms: u64) -> Result<Option<u64>> {
         let mut next_ms = MaybeUninit::<u64>::zeroed();
         let result = unsafe {
@@ -598,8 +596,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// It positions every image on screen, including virtual placements and
     /// placements relative to them, and covers overscan rows. If you draw
     /// from both, images are drawn twice. See [Drawing images].
-    ///
-    /// [Drawing images]: http://localhost:3000/guides/images.html#guide-images-drawing
+    #[doc = crate::guide_ref!("Drawing images", "images", "drawing")]
     ///
     /// The row is negative when the top of the placement scrolled above the
     /// viewport. For example, an image 4 rows tall that scrolled up by 2 rows
@@ -696,8 +693,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// It gives the same values for every image on screen, including virtual
     /// placements and placements relative to them. If you draw from both,
     /// images are drawn twice. See [Drawing images].
-    ///
-    /// [Drawing images]: http://localhost:3000/guides/images.html#guide-images-drawing
+    #[doc = crate::guide_ref!("Drawing images", "images", "drawing")]
     // FIXME: Use our own RenderInfo type instead or re-exporting
     pub fn render_info(
         &self,
@@ -733,7 +729,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// positions it from its cells like any other placement, so a renderer
     /// doesn't need to check this. See [Placeholders].
     ///
-    /// [Placeholders]: http://localhost:3000/guides/images.html#guide-images-placeholders
+    #[doc = crate::guide_ref!("Placeholders", "images", "placeholders")]
     pub fn is_virtual(&self) -> Result<bool> {
         self.get(ffi::KittyGraphicsPlacementData::IS_VIRTUAL)
     }

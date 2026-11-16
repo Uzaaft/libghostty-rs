@@ -20,7 +20,7 @@
 //! See the [Effects] guide for how to register them, the rules for callbacks,
 //! the list of effects, and examples.
 //!
-//! [Effects]: http://localhost:3000/guides/effects.html#guide-effects
+#![doc = crate::guide_ref!("Effects", "effects")]
 use std::{marker::PhantomData, num::NonZeroU16};
 
 use crate::{
@@ -85,8 +85,9 @@ macro_rules! handlers {
         impl<'alloc, 'cb> $crate::terminal::Terminal<'alloc, 'cb> {$(
             $(#[$fmeta])*
             ///
-            /// See [Effects](http://localhost:3000/guides/effects.html#guide-effects)
-            /// for more details.
+            /// See [Effects] for more details.
+            ///
+            #[doc = crate::guide_ref!("Effects", "effects")]
             $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
                 unsafe extern "C" fn callback(
                     t: $crate::ffi::Terminal,

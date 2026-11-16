@@ -11,7 +11,7 @@
 //!
 //! See the [Input] guide for the modes that change what input encodes to.
 //!
-//! [Input]: http://localhost:3000/guides/input.html#guide-input
+#![doc = crate::guide_ref!("Input", "input")]
 use crate::{
     Terminal,
     error::{Result, from_result, from_result_with_len},

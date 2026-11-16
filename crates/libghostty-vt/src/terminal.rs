@@ -1,4 +1,29 @@
 //! Complete terminal emulator state and rendering.
+//!
+//! A [`Terminal`] is a whole terminal emulator: you write VT data into it, and
+//! it keeps the screen, scrollback, cursor, styles, and modes.
+//!
+//! Nearly everything in this library starts here. All you need to make one is a
+//! size. It doesn't draw and it doesn't talk to a pty. Both of those are yours.
+//! If you only want one parser or encoder, the [Building Blocks](crate#building-blocks)
+//! work without a terminal.
+//!
+//! # Example
+//!
+//! ```rust
+//! use libghostty_vt::Terminal;
+//!
+//! let mut terminal = Terminal::new(80, 24).unwrap();
+//! terminal.vt_write(b"Hello, \x1b[1;32mworld\x1b[0m!\r\n");
+//! ```
+//!
+//! The guides cover the rest: [Effects] for what programs ask of the terminal,
+//! [Colors], [Scrollback], and [Custom Sequences].
+//!
+#![doc = crate::guide_ref!("Effects", "effects")]
+#![doc = crate::guide_ref!("Colors", "colors")]
+#![doc = crate::guide_ref!("Scrollback", "scrollback")]
+#![doc = crate::guide_ref!("Custom Sequences", "custom-sequences")]
 
 use std::mem::MaybeUninit;
 
@@ -15,32 +40,7 @@ use crate::{
 #[doc(inline)]
 pub use ffi::{TerminalMemoryUsage as MemoryUsage, TerminalScrollbar as Scrollbar};
 
-/// Complete terminal emulator state and rendering.
-///
-/// A [`Terminal`] is a whole terminal emulator: you write VT data into it, and
-/// it keeps the screen, scrollback, cursor, styles, and modes.
-///
-/// Nearly everything in this library starts here. All you need to make one is a
-/// size. It doesn't draw and it doesn't talk to a pty. Both of those are yours.
-/// If you only want one parser or encoder, the [Building Blocks](crate#building-blocks)
-/// work without a terminal.
-///
-/// # Example
-///
-/// ```rust
-/// use libghostty_vt::Terminal;
-///
-/// let mut terminal = Terminal::new(80, 24).unwrap();
-/// terminal.vt_write(b"Hello, \x1b[1;32mworld\x1b[0m!\r\n");
-/// ```
-///
-/// The guides cover the rest: [Effects] for what programs ask of the terminal,
-/// [Colors], [Scrollback], and [Custom Sequences].
-///
-/// [Effects]: http://localhost:3000/guides/effects.html#guide-effects
-/// [Colors]: http://localhost:3000/guides/colors.html#guide-colors
-/// [Scrollback]: http://localhost:3000/guides/scrollback.html#guide-scrollback
-/// [Custom Sequences]: http://localhost:3000/guides/custom-sequences.html#guide-custom-sequences
+/// Opaque handle to a terminal instance.
 #[derive(Debug)]
 pub struct Terminal<'alloc: 'cb, 'cb> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
@@ -56,21 +56,6 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
     // still holds the terminal it decodes into, and Kitty placement rects use
     // it to tell whether a placement belongs to the terminal they're given.
     pub(crate) id: u64,
-}
-
-/// Default visual style used when the cursor style is reset.
-#[repr(i32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[non_exhaustive]
-pub enum CursorStyle {
-    /// Bar cursor (DECSCUSR 5, 6).
-    Bar = ffi::CursorStyle::BAR,
-    /// Block cursor (DECSCUSR 1, 2).
-    Block = ffi::CursorStyle::BLOCK,
-    /// Underline cursor (DECSCUSR 3, 4).
-    Underline = ffi::CursorStyle::UNDERLINE,
-    /// Hollow block cursor.
-    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
@@ -142,131 +127,35 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Write VT-encoded data to the terminal, stopping right after the first
     /// byte that reaches one of the requested boundaries.
     ///
-    /// This works like [`Self::vt_write`], but it can pause at points you
-    /// care about. It tells you exactly where a control string starts or
-    /// ends, using the same parse that updates the terminal. For example, a
-    /// program that sits between a shell and a terminal can use it to:
+    /// This works like [`Terminal::vt_write`], but it can pause at points you
+    /// care about. It tells you exactly where a control string starts or ends,
+    /// using the same parse that updates the terminal. For example, a program
+    /// that sits between a shell and a terminal can use it to:
     ///
     /// - Find the exact bytes of each APC, DCS or OSC string, such as a Kitty
     ///   graphics command, a tmux control mode message or a clipboard write,
-    ///   so it can forward, rewrite or drop that string.
-    /// - Wait until the stream is at ground before inserting its own
-    ///   sequences, so it never splits a sequence from the program.
+    ///   so it can forward, rewrite or drop that string
     ///
-    /// Pass the boundaries to stop at as [`Boundary`] flags. The call
-    /// consumes input up to and including the first byte that reaches one of
-    /// them, and reports that point as a [`WriteStop`]. The terminal only
-    /// processes the consumed bytes, and callbacks only run for those bytes.
-    /// Pass the remaining bytes in your next call.
+    /// - Wait until the stream is at ground before inserting its own sequences,
+    ///   so it never splits a sequence from the program.
+    ///
+    /// Pass the boundaries to stop at as [`Boundary`] flags. The call consumes
+    /// input up to and including the first byte that reaches one of them, and
+    /// reports that point in out. The terminal only processes the consumed
+    /// bytes, and callbacks only run for those bytes. Pass the remaining bytes
+    /// in your next call.
     ///
     /// Every byte you pass is eventually consumed in order, so the terminal
-    /// ends up in the same state as if you had called [`Self::vt_write`] with
-    /// all of it. Like [`Self::vt_write`], the input is assumed to be
-    /// untrusted.
+    /// ends up in the same state as if you had called [`Terminal::vt_write`]
+    /// with all of it.
     ///
-    /// Returns `Ok(Some(stop))` if a boundary was reached, and `Ok(None)` if
-    /// all input was consumed without reaching a boundary.
-    /// `Err(Error::InvalidValue)` is returned if `boundaries` is empty or
-    /// contains undefined flags. No input is consumed in that case.
-    /// `Err(Error::InvalidValue)` is also returned if a newer libghostty
-    /// reports a [`StringKind`], [`StringIntroducer`] or [`StringEnd`] these
-    /// bindings don't know. In that case the input up to the stop has
-    /// already been consumed.
-    ///
-    /// # Finding string content
-    ///
-    /// After a START stop, the string's content begins at the first byte that
-    /// was not consumed. For a Kitty graphics command that byte is `G`. For an
-    /// OSC it is the first digit of the command number. An END stop consumes
-    /// the byte that ended the string, which is not part of the content. A
-    /// string can start in one call and end several calls later.
-    ///
-    /// This loop handles one chunk of output and finds the content of the APC
-    /// strings in it. DCS and OSC strings work the same way with their own
-    /// flags:
-    ///
-    /// ```
-    /// use libghostty_vt::{Terminal, terminal::Boundary};
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut terminal = Terminal::new(80, 24)?;
-    /// // A Kitty graphics command surrounded by plain text.
-    /// let data = b"hi\x1b_Gf=100,s=1,v=1;AAAA\x1b\\there";
-    ///
-    /// let want = Boundary::APC_START | Boundary::APC_END;
-    /// let mut off = 0;
-    /// let mut content_start = 0;
-    /// let mut apcs = Vec::new();
-    /// while off < data.len() {
-    ///     let Some(stop) = terminal.vt_write_until(&data[off..], want)? else {
-    ///         // No boundary in the rest of the chunk. Everything was consumed.
-    ///         break;
-    ///     };
-    ///
-    ///     off += stop.consumed;
-    ///     if stop.reached.contains(Boundary::APC_START) {
-    ///         // The content starts at `data[off]`.
-    ///         content_start = off;
-    ///     }
-    ///     if stop.reached.contains(Boundary::APC_END) {
-    ///         // The ending byte is at `data[off - 1]`. The content stops
-    ///         // just before it.
-    ///         apcs.push(&data[content_start..off - 1]);
-    ///     }
-    /// }
-    ///
-    /// assert_eq!(apcs, [b"Gf=100,s=1,v=1;AAAA"]);
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Strings that end with ESC
-    ///
-    /// The usual string terminator is the two bytes `ESC \`. The call stops
-    /// after the ESC with [`StringEnd::StEsc`] and does not consume the `\`.
-    /// The loop above needs no special case for this. The `\` is simply the
-    /// first byte of the next call, where it completes the terminator and
-    /// brings the stream back to ground.
-    ///
-    /// # DCS strings
-    ///
-    /// A [`Boundary::DCS_START`] stop lands on the introducer, before the
-    /// header. The bytes after it are the parameters, intermediates and final
-    /// byte of the header, then the payload. For `ESC P 1 ; 2 | data ESC \`
-    /// the stop lands on `P`, and `1;2|` is the header that follows.
-    ///
-    /// The string can end in its header. CAN, SUB, 0x9C, ESC or another 8-bit
-    /// control byte there gives a [`Boundary::DCS_END`] stop for a DCS that
-    /// never had a payload. Past the header, only ESC, CAN and SUB end the
-    /// string, and every other byte is payload, 8-bit bytes included. A 0x90
-    /// in the header restarts the header without ending the string, so it
-    /// does not stop.
-    ///
-    /// # One byte that ends a string and starts another
-    ///
-    /// An 8-bit introducer of a different kind inside an APC, or inside a DCS
-    /// header, ends that string and starts the new one on the same byte. The
-    /// stop has both an END flag and a START flag in
-    /// [`reached`](WriteStop::reached), [`end`](WriteStop::end) is
-    /// [`StringEnd::Aborted`] and [`introducer`](WriteStop::introducer) is
-    /// [`StringIntroducer::C1`]. The content of the new string begins right
-    /// after the stop.
-    ///
-    /// For example, in `ESC _ a 0x9D 2 ; t BEL` the 0x9D ends the APC and
-    /// starts an OSC. Asking for [`Boundary::APC_END`] and
-    /// [`Boundary::OSC_START`] gives one stop on the 0x9D with both flags
-    /// set, [`kind`](WriteStop::kind) [`StringKind::Apc`] and
-    /// [`byte`](WriteStop::byte) 0x9D. The OSC content `2;t` begins right
-    /// after it, and the BEL then gives a [`Boundary::OSC_END`] stop.
-    /// [`WriteStop::reached`] lists which bytes do this.
-    ///
-    /// # Waiting for ground
-    ///
-    /// [`Boundary::GROUND`] is a state, not an event. If the stream is
-    /// already at ground, the call returns `Ok(Some(stop))` right away with
-    /// [`consumed`](WriteStop::consumed) set to 0. If you keep asking for
-    /// ground with the same input, you never make progress. After a ground
-    /// stop, write the next bytes without the [`Boundary::GROUND`] flag, or
-    /// with [`Self::vt_write`].
+    /// See [Stopping a write at a string boundary] for how to find string
+    /// content, the cases that need care, and waiting for ground.
+    #[doc = crate::guide_ref!(
+        "Stopping a write at a string boundary",
+        "custom-sequences",
+        "write-until"
+    )]
     pub fn vt_write_until(
         &mut self,
         data: &[u8],
@@ -1034,6 +923,26 @@ impl Drop for Terminal<'_, '_> {
         // views are ManuallyDrop and never reach this destructor.
         unsafe { drop(Box::from_raw(self.vtable)) }
     }
+}
+
+/// The shape of the cursor.
+///
+/// Programs change the cursor's shape with the DECSCUSR escape sequence
+/// (CSI Ps SP q). Set the shape that DECSCUSR 0 restores with
+/// [`Terminal::set_default_cursor_style`]. Read the shape to draw with
+/// [`crate::render::Snapshot::cursor_visual_style`].
+#[repr(i32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
+#[non_exhaustive]
+pub enum CursorStyle {
+    /// Bar cursor (DECSCUSR 5, 6).
+    Bar = ffi::CursorStyle::BAR,
+    /// Block cursor (DECSCUSR 1, 2).
+    Block = ffi::CursorStyle::BLOCK,
+    /// Underline cursor (DECSCUSR 3, 4).
+    Underline = ffi::CursorStyle::UNDERLINE,
+    /// Hollow block cursor.
+    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 /// Scroll viewport behavior.

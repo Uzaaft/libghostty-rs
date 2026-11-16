@@ -3,11 +3,14 @@
 //! [open source](https://github.com/ghostty-org/ghostty) and
 //! [MIT licensed](https://github.com/ghostty-org/ghostty/blob/main/LICENSE).
 //!
-//! We are currently in process of porting the
-//! [C documentation](https://lib.ghostty.org/vt) to Rust. In the mean time,
-//! feel free to browse through each module and consult the original
-//! [libghostty guides](https://lib.ghostty.org/vt/guides.html).
-//! They remain useful even though some details will be different in Rust.
+//! Guide-level documentation is available in the [Book], which is a Rustified
+//! one-to-one translation of the original  [C documentation](https://lib.ghostty.org/vt).
+//! The API reference here will frequently link back to the book, so make sure
+//! to familiarize yourself with it. The [Getting Started] section is especially
+//! important for beginners.
+//!
+#![doc = concat!("[Book]: ", crate::book!())]
+#![doc = concat!("[Getting Started]: ", crate::book!("getting-started/index"))]
 //!
 //! # Rust version
 //!
@@ -155,3 +158,41 @@ pub(crate) fn sys_set<T>(opt: ffi::SysOption::Type, val: *const T) -> error::Res
     let result = unsafe { ffi::ghostty_sys_set(opt, val.cast()) };
     error::from_result(result)
 }
+
+/// Get the URL to a specific page in the book.
+macro_rules! book {
+    ($page:expr, $section:expr) => {
+        concat!(crate::book!($page), "#", $section)
+    };
+    ($page:expr) => {
+        concat!(crate::book!(), "/", $page, ".html")
+    };
+    () => {
+        env!("LIBGHOSTTY_BOOK_URL")
+    };
+}
+use book;
+
+/// Form a Markdown link reference to the guide.
+macro_rules! guide_ref {
+    ($name:expr, $id:expr, $section:expr) => {
+        concat!(
+            "[",
+            $name,
+            "]: ",
+            crate::book!(
+                concat!("guides/", $id),
+                concat!("guide-", $id, "-", $section)
+            ),
+        )
+    };
+    ($name:expr, $id:expr) => {
+        concat!(
+            "[",
+            $name,
+            "]: ",
+            crate::book!(concat!("guides/", $id), concat!("guide-", $id)),
+        )
+    };
+}
+use guide_ref;

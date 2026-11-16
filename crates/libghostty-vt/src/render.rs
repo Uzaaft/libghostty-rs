@@ -9,7 +9,7 @@ use crate::{
     ffi,
     screen::{Cell, Row},
     style::Style,
-    terminal::Terminal,
+    terminal::{CursorStyle, Terminal},
 };
 
 pub use ffi::RenderStateRowSelection as RowSelection;
@@ -959,7 +959,7 @@ impl Snapshot<'_, '_> {
     }
 
     /// Get the visual style of the cursor.
-    pub fn cursor_visual_style(&self) -> Result<CursorVisualStyle> {
+    pub fn cursor_visual_style(&self) -> Result<CursorStyle> {
         self.get::<ffi::CursorStyle::Type>(ffi::RenderStateData::CURSOR_VISUAL_STYLE)
             .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
@@ -1919,7 +1919,7 @@ pub struct Cursor {
     /// Whether the cursor is at a password input field.
     pub password_input: bool,
     /// The visual style of the cursor.
-    pub visual_style: CursorVisualStyle,
+    pub visual_style: CursorStyle,
 }
 
 /// The [identity](RenderState#row-identity) of a row across render state
@@ -1954,21 +1954,6 @@ pub enum Dirty {
     Partial = ffi::RenderStateDirty::PARTIAL,
     /// Global state changed; renderer should redraw everything.
     Full = ffi::RenderStateDirty::FULL,
-}
-
-/// Visual style of the cursor.
-#[repr(i32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[non_exhaustive]
-pub enum CursorVisualStyle {
-    /// Bar cursor (DECSCUSR 5, 6).
-    Bar = ffi::CursorStyle::BAR,
-    /// Block cursor (DECSCUSR 1, 2).
-    Block = ffi::CursorStyle::BLOCK,
-    /// Underline cursor (DECSCUSR 3, 4).
-    Underline = ffi::CursorStyle::UNDERLINE,
-    /// Hollow block cursor.
-    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 /// The image protocols that a terminal supports.
@@ -2116,7 +2101,7 @@ mod tests {
         let cursor = snapshot.cursor().unwrap();
         assert_eq!(cursor, cursor_from_getters(&snapshot));
         assert!(!cursor.visible);
-        assert_eq!(cursor.visual_style, CursorVisualStyle::Bar);
+        assert_eq!(cursor.visual_style, CursorStyle::Bar);
         assert_eq!(
             cursor.viewport,
             Some(CursorViewport {
