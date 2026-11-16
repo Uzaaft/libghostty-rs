@@ -1,24 +1,47 @@
-//! Query compile-time build configuration of libghostty-vt.
+//! Find out how this copy of the library was built and which features it has.
 //!
-//! These values reflect the options the library was built with and are constant for the lifetime of the process.
+//! Build info is what this copy of the library knows about how it was compiled:
+//! its version, its optimization mode, and which features it has.
+//!
+//! You need this when your program has to adapt to the library it loaded, such
+//! as checking for Kitty graphics before you offer images. You don't need a
+//! terminal. These values are constant for the lifetime of the process, so you
+//! only have to read them once.
+//!
+//! To choose what a build contains, see [Optional Features].
+//!
+#![doc = crate::book_ref!("Optional Features", "features")]
 //!
 //! # Example
 //! ```rust
-//! use libghostty_vt::{Error, build_info::*};
+//! use libghostty_vt::{build_info, error::Error};
 //!
-//! fn print_build_info() -> Result<(), Error> {
-//!     println!(
-//!         "SIMD: {}",
-//!         if supports_simd().unwrap_or(false) { "enabled" } else { "disabled" }
-//!     );
-//!     println!(
-//!         "Kitty graphics: {}",
-//!         if supports_kitty_graphics().unwrap_or(false) { "enabled" } else { "disabled" }
-//!     );
+//! fn query_build_info() -> Result<(), Error> {
+//!     println!("SIMD: {}", build_info::supports_simd()?);
+//!     println!("Kitty graphics: {}", build_info::supports_kitty_graphics()?);
 //!     println!(
 //!         "Tmux control mode: {}",
-//!         if supports_tmux_control_mode().unwrap_or(false) { "enabled" } else { "disabled" }
+//!         build_info::supports_tmux_control_mode()?
 //!     );
+//!
+//!     println!("Version: {:?}", build_info::version_string());
+//!     println!("Version major: {}", build_info::major_version()?);
+//!     println!("Version minor: {}", build_info::minor_version()?);
+//!     println!("Version patch: {}", build_info::patch_version()?);
+//!
+//!     let pre_version = build_info::pre_version()?;
+//!     if !pre_version.is_empty() {
+//!         println!("Version pre  : {}", pre_version.escape_ascii());
+//!     } else {
+//!         println!("Version pre  : (none)");
+//!     }
+//!
+//!     let build_version = build_info::build_version()?;
+//!     if !build_version.is_empty() {
+//!         println!("Version build: {}", build_version.escape_ascii());
+//!     } else {
+//!         println!("Version build: (none)");
+//!     }
 //!     Ok(())
 //! }
 //! ```
@@ -35,7 +58,13 @@ pub fn supports_simd() -> Result<bool> {
     build_info(Info::SIMD)
 }
 
-/// Whether Kitty graphics protocol support is available.
+/// Whether this build includes the `kitty-graphics` feature, which provides
+/// the Kitty graphics protocol and the [`crate::kitty::graphics`] module.
+///
+/// It is always false on targets without an operating system, such as
+/// `wasm32-freestanding`. See [Optional Features].
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_kitty_graphics() -> Result<bool> {
     build_info(Info::KITTY_GRAPHICS)
 }
@@ -50,42 +79,81 @@ pub fn supports_snapshot() -> Result<bool> {
     build_info(Info::FEATURE_SNAPSHOT)
 }
 
-/// Whether terminal content formatting is available.
+/// Whether this build includes the `formatter` feature, which provides the
+/// [`crate::fmt`] module.
+///
+/// See [Optional Features].
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_formatter() -> Result<bool> {
     build_info(Info::FEATURE_FORMATTER)
 }
 
-/// Whether selections and selection gestures are available.
+/// Whether this build includes the `selection` feature, which provides the
+/// `Terminal::select_*` methods and the [`crate::selection`] module.
+///
+/// See [Optional Features].
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_selection() -> Result<bool> {
     build_info(Info::FEATURE_SELECTION)
 }
 
-/// Whether terminal content search is available.
+/// Whether this build includes the `search` feature, which provides the
+/// [`crate::search`] module.
+///
+/// See [Optional Features].
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_search() -> Result<bool> {
     build_info(Info::FEATURE_SEARCH)
 }
 
-/// Whether render state snapshots are available.
+/// Whether this build includes the `render-state` feature, which provides
+/// the [`crate::render`] module.
+///
+/// See [Optional Features].
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_render_state() -> Result<bool> {
     build_info(Info::FEATURE_RENDER_STATE)
 }
 
-/// Whether key, mouse, focus and paste encoding are available.
+/// Whether this build includes the `input_encode` feature, which provides the
+/// key, mouse, focus and paste encoding functions.
+///
+/// See [Optional Features] for the full list.
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_input_encode() -> Result<bool> {
     build_info(Info::FEATURE_INPUT_ENCODE)
 }
 
-/// Whether color parsing and palette functions are available.
+/// Whether this build includes the `color` feature, which provides the
+/// [`crate::color`] module.
+///
+/// See [Optional Features].
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_color() -> Result<bool> {
     build_info(Info::FEATURE_COLOR)
 }
 
 /// Whether grid references, cells and rows can be inspected.
+///
+/// See [Optional Features].
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_grid_introspection() -> Result<bool> {
     build_info(Info::FEATURE_GRID_INTROSPECTION)
 }
 
-/// Whether applications can register custom glyphs with the glyph protocol.
+/// Whether this build includes the `glyph-protocol` feature, which lets
+/// applications register custom glyphs with Ghostty's glyph protocol.
+///
+/// It has no functions of its own. See [Optional Features].
+///
+#[doc = crate::book_ref!("Optional Features", "features")]
 pub fn supports_glyph_protocol() -> Result<bool> {
     build_info(Info::FEATURE_GLYPH_PROTOCOL)
 }

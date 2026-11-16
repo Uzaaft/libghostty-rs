@@ -9,8 +9,8 @@
 //! to familiarize yourself with it. The [Getting Started] section is especially
 //! important for beginners.
 //!
-#![doc = concat!("[Book]: ", crate::book!())]
-#![doc = concat!("[Getting Started]: ", crate::book!("getting-started/index"))]
+#![doc = crate::book_ref!("Book")]
+#![doc = crate::book_ref!("Getting Started", "getting-started/index")]
 //!
 //! # Rust version
 //!
@@ -173,26 +173,25 @@ macro_rules! book {
 }
 use book;
 
+/// Form a Markdown link reference to any book page.
+macro_rules! book_ref {
+    ($name:expr$(, $id:expr$(, $section:expr)?)?) => {
+        concat!("[", $name, "]: ", crate::book!($($id$(, $section)?)?),)
+    };
+}
+use book_ref;
+
 /// Form a Markdown link reference to the guide.
 macro_rules! guide_ref {
     ($name:expr, $id:expr, $section:expr) => {
-        concat!(
-            "[",
+        crate::book_ref!(
             $name,
-            "]: ",
-            crate::book!(
-                concat!("guides/", $id),
-                concat!("guide-", $id, "-", $section)
-            ),
+            concat!("guides/", $id),
+            concat!("guide-", $id, "-", $section)
         )
     };
     ($name:expr, $id:expr) => {
-        concat!(
-            "[",
-            $name,
-            "]: ",
-            crate::book!(concat!("guides/", $id), concat!("guide-", $id)),
-        )
+        crate::book_ref!($name, concat!("guides/", $id), concat!("guide-", $id))
     };
 }
 use guide_ref;

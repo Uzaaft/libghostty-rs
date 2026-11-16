@@ -1,15 +1,23 @@
 //! Parse colors, generate palettes, and look up X11 color names.
 //!
-//! These are Ghostty's own color rules, so you don't have to write them again: the color strings its config and theme files accept, the 256-color palette the terminal uses, and the X11 color names.
+//! These are Ghostty's own color rules, so you don't have to write them again:
+//! the color strings its config and theme files accept, the 256-color palette
+//! the terminal uses, and the X11 color names.
 //!
-//! Use them when your application has to agree with Ghostty about what a color means, or to make UI decisions from luminance and contrast values. You don't need a terminal.
+//! Use them when your application has to agree with Ghostty about what a color
+//! means, or to make UI decisions from luminance and contrast values.
+//! You don't need a terminal.
+//!
+//! See the [Colors guide] for parsing, palettes, and how a terminal's colors work.
+//!
+#![doc = crate::guide_ref!("Colors guide", "colors")]
 //!
 //! # Example
+//!
 //! ```
 //! use libghostty_vt::color::Rgb;
 //! let color: Rgb = "#abc".parse().unwrap();
 //! ```
-// FIXME: link to transcluded examples and guide
 use std::{ffi::CStr, mem::MaybeUninit, slice};
 
 use crate::{Terminal, error::Result, ffi};
@@ -196,7 +204,7 @@ impl From<Rgb> for ffi::ColorRgb {
 pub struct Palette(pub [Rgb; 256]);
 
 // Saves a bit of typing
-pub(crate) type RawPalette = [ffi::ColorRgb; 256];
+type RawPalette = [ffi::ColorRgb; 256];
 
 impl From<RawPalette> for Palette {
     fn from(v: RawPalette) -> Self {

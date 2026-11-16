@@ -1,5 +1,40 @@
-//! Handling OSC (Operating System Command) escape sequences.
-
+//! Parse OSC sequences into commands.
+//!
+//! The OSC parser turns one OSC (Operating System Command) sequence into a
+//! command you can read.
+//!
+//! A terminal parses these by itself, so you only need this for OSC sequences
+//! outside of one. You feed it the bytes between `ESC ]` and the terminator, one
+//! at a time. A sequence can arrive in pieces across many reads, and you don't
+//! have to buffer it.
+//!
+//! To handle sequences in a terminal, see the [Custom Sequences] guide.
+//!
+//! # Example
+//!
+//! ```rust
+//! # use libghostty_vt::error::Error;
+//! use libghostty_vt::osc;
+//!
+//! # fn main() -> Result<(), Error> {
+//! let mut parser = osc::Parser::new()?;
+//!
+//! for &b in b"0;hello" {
+//!     parser.next_byte(b);
+//! }
+//!
+//! // This sequence ended with BEL (0x07).
+//! let command = parser.end(0x07);
+//! if let osc::CommandType::ChangeWindowTitle { title } = command.command_type() {
+//!     println!("Title: {}", title.escape_ascii());
+//! }
+//!
+//! // Reset before the next sequence.
+//! parser.reset();
+//! # Ok(()) }
+//! ```
+//!
+#![doc = crate::guide_ref!("Custom Sequences", "custom-sequences")]
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 use crate::{
@@ -8,12 +43,10 @@ use crate::{
     ffi,
 };
 
-/// OSC (Operating System Command) sequence parser and command handling.
+/// Opaque handle to an OSC parser instance.
 ///
-/// The parser operates in a streaming fashion, processing input byte-by-byte
-/// to handle OSC sequences that may arrive in fragments across multiple reads.
-/// This interface makes it easy to integrate into most environments and avoids
-/// over-allocating buffers.
+/// This handle represents an OSC (Operating System Command) parser that can be
+/// used to parse the contents of OSC sequences.
 #[derive(Debug)]
 pub struct Parser<'alloc>(Object<'alloc, ffi::OscParserImpl>);
 
@@ -52,6 +85,10 @@ impl<'alloc> Parser<'alloc> {
     /// Set the most bytes to keep from each OSC sequence whose number the
     /// parser does not implement.
     ///
+    /// Every OSC sequence starts with a number that says what it is, such as
+    /// 2 for the window title or 8 for a hyperlink. Set this to implement a
+    /// sequence yourself, and read its raw bytes with [`CommandType::Unknown`].
+    ///
     /// Zero, the default, discards these sequences and they produce
     /// [`CommandType::Invalid`]. Any other value makes them produce
     /// [`CommandType::Unknown`].
@@ -63,11 +100,38 @@ impl<'alloc> Parser<'alloc> {
     /// allocate memory. Larger limits allocate memory from the parser's
     /// allocator for each unknown sequence.
     ///
-    /// Options stay set across [`Parser::reset`]. You can change an option
+    /// Only numbers the parser does not implement are reported this way.
+    /// A sequence with a number the parser does implement stays
+    /// [`CommandType::Invalid`] when its contents are malformed.
+    ///
+    /// Options stay set across [`Parser::reset()`]. You can change an option
     /// at any time, but a sequence that is already being parsed may keep the
     /// old setting. It is simplest to set options before the first sequence.
     ///
-    /// See [`CommandType::Unknown`] for an example.
+    /// # Example
+    ///
+    /// ```rust
+    /// use libghostty_vt::osc;
+    ///
+    /// let mut parser = osc::Parser::new().unwrap();
+    ///
+    /// // Keep up to 1 KiB of each unknown sequence.
+    /// parser.set_unknown_max_bytes(1024);
+    ///
+    /// // Feed the bytes between ESC ] and the terminator. OSC 7400 is made up
+    /// // for this example, so the parser does not implement it.
+    /// for &b in b"7400;status=busy" {
+    ///     parser.next_byte(b);
+    /// }
+    ///
+    /// // This sequence ended with BEL (0x07).
+    /// let command = parser.end(0x07);
+    ///
+    /// if let osc::CommandType::Unknown { content, .. } = command.command_type() {
+    ///     // content now holds "7400;status=busy".
+    ///     assert_eq!(content, b"7400;status=busy");
+    /// }
+    /// ```
     pub fn set_unknown_max_bytes(&mut self, max_bytes: usize) -> Result<&mut Self> {
         // Zero is also what the NULL "restore the default" value sets, so
         // always passing a pointer covers both.
@@ -98,9 +162,7 @@ impl<'alloc> Parser<'alloc> {
     ///
     /// Call this after feeding every byte of the sequence to
     /// [`Parser::next_byte`], except the byte that ended it. Pass that byte
-    /// here as the terminator: 0x07 for BEL, 0x5C for ST, or 0x18 (CAN) or
-    /// 0x1A (SUB) if it was cancelled.
-    /// Call [`Parser::reset`] before parsing the next sequence.
+    /// here as the terminator.
     ///
     /// If the sequence is not a valid command, the command has type
     /// [`CommandType::Invalid`].
@@ -149,8 +211,9 @@ impl Drop for Parser<'_> {
     }
 }
 
-/// A parsed OSC (Operating System Command) command.
+/// Opaque handle to a single OSC command.
 ///
+/// This handle represents a parsed OSC (Operating System Command) command.
 /// The command can be queried for its type and associated data.
 #[derive(Debug)]
 pub struct Command<'p, 'alloc> {
@@ -355,77 +418,11 @@ pub enum CommandType<'p> {
     KittyDndProtocol,
     HierarchicalContext,
     KittyDesktopNotification,
+
     /// An OSC sequence whose number the parser does not implement.
     ///
     /// Only produced when the limit set with [`Parser::set_unknown_max_bytes`] is nonzero.
     /// Otherwise these sequences are [`CommandType::Invalid`].
-    ///
-    /// Only numbers the parser does not implement are reported this way. A
-    /// sequence with a number the parser does implement stays
-    /// [`CommandType::Invalid`] when its contents are malformed.
-    ///
-    /// ```rust
-    /// use libghostty_vt::osc::{CommandType, Parser, Terminator};
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut parser = Parser::new()?;
-    ///
-    /// // By default, a sequence with a number the parser does not implement
-    /// // is discarded. OSC 7400 is made up for this example.
-    /// for byte in *b"7400;status=busy" {
-    ///     parser.next_byte(byte);
-    /// }
-    /// let command = parser.end(0x07);
-    /// assert!(matches!(command.command_type(), CommandType::Invalid));
-    ///
-    /// // Keep up to 8 bytes of each unknown sequence.
-    /// parser.set_unknown_max_bytes(8)?.reset();
-    /// for byte in *b"7400;abc" {
-    ///     parser.next_byte(byte);
-    /// }
-    /// // This sequence ended with BEL (0x07).
-    /// let command = parser.end(0x07);
-    /// let CommandType::Unknown { content, truncated, terminator } = command.command_type() else {
-    ///     panic!("expected an unknown command");
-    /// };
-    /// assert_eq!(content, b"7400;abc");
-    /// assert!(!truncated);
-    /// // If you reply to the sequence, end the reply with BEL too.
-    /// assert_eq!(terminator, Terminator::Bel);
-    ///
-    /// // A sequence longer than the limit is still reported, but only its
-    /// // first 8 bytes are kept.
-    /// parser.reset();
-    /// for byte in *b"7400;abcdef" {
-    ///     parser.next_byte(byte);
-    /// }
-    /// // This one ended with ST (`ESC \`).
-    /// let command = parser.end(0x5C);
-    /// let CommandType::Unknown { content, truncated, terminator } = command.command_type() else {
-    ///     panic!("expected an unknown command");
-    /// };
-    /// assert_eq!(content, b"7400;abc");
-    /// assert!(truncated);
-    /// assert_eq!(terminator, Terminator::St);
-    ///
-    /// // A known number with malformed contents is not reported as unknown.
-    /// parser.reset();
-    /// for byte in *b"7501;state=sleeping" {
-    ///     parser.next_byte(byte);
-    /// }
-    /// let command = parser.end(0x07);
-    /// assert!(matches!(command.command_type(), CommandType::Invalid));
-    ///
-    /// // A limit of zero discards unknown sequences again.
-    /// parser.set_unknown_max_bytes(0)?.reset();
-    /// for byte in *b"7400;abc" {
-    ///     parser.next_byte(byte);
-    /// }
-    /// let command = parser.end(0x07);
-    /// assert!(matches!(command.command_type(), CommandType::Invalid));
-    /// # Ok(())
-    /// # }
-    /// ```
     Unknown {
         /// The raw bytes of an unknown sequence: everything that was passed to
         /// [`Parser::next_byte`], including the number at the start. For
@@ -447,41 +444,13 @@ pub enum CommandType<'p> {
         /// [`Terminator`]).
         terminator: Terminator,
     },
+
     /// A program status report or support query (OSC 7501), which a program
     /// sends to say what it is doing, such as working or waiting on the user.
     ///
     /// The OSC parser only identifies this command. To receive the report's
     /// contents, use a terminal with [`Terminal::on_program_status`] instead
     /// (see [`ProgramStatus`]).
-    ///
-    /// ```rust
-    /// use libghostty_vt::osc::{CommandType, Parser};
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut parser = Parser::new()?;
-    ///
-    /// // Both a report and a support query (a body of just `?`) are
-    /// // identified as program status commands.
-    /// for body in [&b"7501;state=working:app=cargo:progress=40"[..], b"7501;?"] {
-    ///     parser.reset();
-    ///     for &byte in body {
-    ///         parser.next_byte(byte);
-    ///     }
-    ///     let command = parser.end(0x5C);
-    ///     assert!(matches!(command.command_type(), CommandType::ProgramStatus));
-    /// }
-    ///
-    /// // A report the specification rejects, here one with an unknown
-    /// // state, is discarded as a whole.
-    /// parser.reset();
-    /// for byte in *b"7501;state=sleeping" {
-    ///     parser.next_byte(byte);
-    /// }
-    /// let command = parser.end(0x5C);
-    /// assert!(matches!(command.command_type(), CommandType::Invalid));
-    /// # Ok(())
-    /// # }
-    /// ```
     ///
     /// [`Terminal::on_program_status`]: crate::Terminal::on_program_status
     /// [`ProgramStatus`]: crate::effect::ProgramStatus

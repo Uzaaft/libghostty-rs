@@ -18,6 +18,23 @@ fn basic_example() -> Result<(), Error> {
     }
     Ok(())
 }
+fn basic_example() -> Result<(), Error> {
+    // Create parser
+    let mut parser = sgr::Parser::new()?;
+
+    // Parse "bold, red foreground" sequence: ESC[1;31m
+    parser.set_params(&[1, 31], None)?;
+
+    // Iterate through attributes
+    while let Some(attr) = parser.next()? {
+        match attr {
+            sgr::Attribute::Bold => println!("Bold enabled"),
+            sgr::Attribute::Fg8(color) => println!("Foreground color: {color:?}"),
+            _ => {}
+        }
+    }
+    Ok(())
+}
 // ANCHOR_END: sgr-basic
 
 fn advanced_example() -> Result<(), Error> {
