@@ -4,7 +4,7 @@
 //! [MIT licensed](https://github.com/ghostty-org/ghostty/blob/main/LICENSE).
 //!
 //! Guide-level documentation is available in the [Book], which is a Rustified
-//! one-to-one translation of the original  [C documentation](https://lib.ghostty.org/vt).
+//! one-to-one translation of the original [C documentation](https://lib.ghostty.org/vt).
 //! The API reference here will frequently link back to the book, so make sure
 //! to familiarize yourself with it. The [Getting Started] section is especially
 //! important for beginners.

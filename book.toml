@@ -7,6 +7,8 @@ src = "book-src"
 [output.html]
 git-repository-url = "https://github.com/Uzaaft/libghostty-rs"
 
+[output.markdown]
+
 [preprocessor.rustdoc-links]
 after = ["links"]
 build.preludes = [
