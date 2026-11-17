@@ -292,7 +292,7 @@ impl Terminal<'_, '_> {
     /// - [`Error::InvalidValue`](crate::Error::InvalidValue) if no pty write callback is installed.
     /// - [`Error::IoError`](crate::Error::IoError) if the reader failed, or if there is no secure
     ///   entropy source to mint a paste event password (see
-    ///   [`set_secure_random_source`](crate::sys::set_secure_random_source)).
+    ///   [crate::sys::SECURE_RANDOM_SOURCE]).
     /// - [`Error::OutOfMemory`](crate::Error::OutOfMemory), including when the
     ///   writer refused a write, which only happens when it can't allocate.
     pub fn paste<F>(
@@ -541,7 +541,7 @@ mod tests {
         let capped = crate::alloc::testing::Capped::new(1024 * 1024);
         let alloc = capped.allocator();
         let output = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new_with_alloc(&alloc, 80, 24).unwrap();
+        let mut terminal = Terminal::new_in(&alloc, 80, 24).unwrap();
         terminal
             .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
             .unwrap();

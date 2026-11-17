@@ -90,7 +90,7 @@ use crate::{
 use libghostty_vt::{Terminal, alloc::Allocator, search::Search};
 let arena = std::alloc::Global;
 let alloc = Allocator::from(&arena);
-let mut terminal = Terminal::new_with_alloc(&alloc, 8, 2).unwrap();
+let mut terminal = Terminal::new_in(&alloc, 8, 2).unwrap();
 let mut search = Search::new(&mut terminal).unwrap();
 std::mem::forget(terminal);
 drop(alloc); // Would free the terminal's memory under the search.
@@ -108,7 +108,7 @@ use libghostty_vt::{Terminal, alloc::Allocator, search::Search};
 let arena = std::alloc::Global;
 let alloc = Allocator::from(&arena);
 let mut terminal = Terminal::new(8, 2).unwrap();
-let search = Search::new_with_alloc(&alloc, &mut terminal).unwrap();
+let search = Search::new_in(&alloc, &mut terminal).unwrap();
 std::mem::forget(search);
 drop(alloc); // Would free the search's memory before the terminal detaches it.
 drop(terminal);
@@ -172,7 +172,7 @@ impl<'alloc> Search<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(
+    pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         terminal: &Terminal<'_, '_>,
     ) -> Result<Self> {
@@ -800,7 +800,7 @@ mod tests {
         // Make sure the search really has history to tick through. Without
         // it, ticking would complete without touching anything, instead of
         // blocking on the next history feed.
-        let mut terminal = Terminal::new_with_alloc(&alloc, 10, 3).unwrap();
+        let mut terminal = Terminal::new_in(&alloc, 10, 3).unwrap();
         let mut search = history_search(&mut terminal);
         assert_eq!(search.tick().unwrap(), Status::FeedRequired);
         drop(search);
@@ -808,7 +808,7 @@ mod tests {
 
         // Ticking the history search reads a pin tracked by the terminal, so
         // it must not happen once the terminal is gone.
-        let mut terminal = Terminal::new_with_alloc(&alloc, 10, 3).unwrap();
+        let mut terminal = Terminal::new_in(&alloc, 10, 3).unwrap();
         let mut search = history_search(&mut terminal);
         drop(terminal);
         assert!(matches!(search.tick(), Err(Error::InvalidValue)));
@@ -822,7 +822,7 @@ mod tests {
     fn search_can_be_dropped_from_an_effect_callback() {
         let alloc = crate::alloc::testing::Guard::allocator();
         let slot = std::cell::RefCell::new(None);
-        let mut terminal = Terminal::new_with_alloc(&alloc, 10, 3).unwrap();
+        let mut terminal = Terminal::new_in(&alloc, 10, 3).unwrap();
         terminal
             .on_bell(|_| drop(slot.borrow_mut().take()))
             .unwrap();

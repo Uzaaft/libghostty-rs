@@ -45,20 +45,20 @@ one with [`Terminal::kitty_graphics()`]. The handle is borrowed, so see
 We don't ship a PNG decoder. You bring your own, so use whatever library you
 already have. Without one, PNG images are rejected.
 
-Install it with [`kitty::graphics::set_png_decoder()`]. This is a process-global
+Install it with `sys::PNG_DECODER.install()`. This is a process-global
 setting, not a terminal one. Set it at startup, before you use anything that
 depends on it. This isn't thread-safe, so call it before any other thread uses
 the library, and never while one does. Passing `None` clears the decoder and
 turns PNG support off again.
 
-The callback gets the PNG bytes and fills in a [`kitty::graphics::DecodedImage`].
+The callback gets the PNG bytes and fills in a [`sys::DecodedImage`].
 Pixels are 8-bit RGBA, row by row from the top-left, with no padding, so a complete
-image is `width * height * 4` bytes. Allocate them with [`Bytes::new_zeroed_with_alloc()`]
+image is `width * height * 4` bytes. Allocate them with [`Bytes::new_zeroed_in()`]
 and the allocator we pass you, and return it. We own the buffer after that.
 
-That allocator limits how much memory one image can use, so `Bytes::new_zeroed_with_alloc()`
+That allocator limits how much memory one image can use, so [`Bytes::new_zeroed_in()`]
 can return `None` for a very large image. Treat that as a failure: free anything you
-allocated and return `None`, and the image is rejected. [`kitty::graphics::DecodePng`]
+allocated and return `None`, and the image is rejected. [`sys::DecodePng`]
 has the rest of the contract.
 
 This example shows the shape of a decoder, but it doesn't actually decode

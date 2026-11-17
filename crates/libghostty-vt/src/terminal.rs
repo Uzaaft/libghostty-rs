@@ -77,7 +77,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(
+    pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         cols: u16,
         rows: u16,
@@ -1255,7 +1255,7 @@ mod tests {
     use crate::RenderState;
     use crate::grid_ref::TrackedGridRef;
     use crate::point::{self, Point};
-    use crate::render::CursorVisualStyle;
+    use crate::terminal::CursorStyle;
     use std::cell::RefCell;
 
     #[test]
@@ -1698,7 +1698,7 @@ mod tests {
             snapshot
                 .cursor_visual_style()
                 .expect("cursor style should be readable"),
-            CursorVisualStyle::Underline
+            CursorStyle::Underline
         );
         assert!(
             snapshot

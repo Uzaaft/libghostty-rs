@@ -129,7 +129,6 @@ pub mod grid_ref;
 pub(crate) mod io;
 pub mod key;
 pub mod kitty;
-pub mod log;
 pub mod mode;
 pub mod mouse;
 pub mod osc;
@@ -147,17 +146,7 @@ pub mod sys;
 pub mod unicode;
 
 #[doc(inline)]
-pub use crate::{
-    error::Error,
-    log::{Logger, set_logger},
-    render::RenderState,
-    terminal::Terminal,
-};
-
-pub(crate) fn sys_set<T>(opt: ffi::SysOption::Type, val: *const T) -> error::Result<()> {
-    let result = unsafe { ffi::ghostty_sys_set(opt, val.cast()) };
-    error::from_result(result)
-}
+pub use crate::{error::Error, render::RenderState, terminal::Terminal};
 
 /// Get the URL to a specific page in the book.
 macro_rules! book {

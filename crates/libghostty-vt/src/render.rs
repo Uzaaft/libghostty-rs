@@ -764,7 +764,7 @@ impl<'alloc> RenderState<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -1086,7 +1086,7 @@ impl<'alloc> RowIterator<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -1301,7 +1301,7 @@ impl<'alloc> CellIterator<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -1580,7 +1580,7 @@ impl<'alloc> ImageIterator<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -2771,7 +2771,7 @@ mod tests {
         // refuses everything makes creating it fail.
         let capped = crate::alloc::testing::Capped::new(0);
         assert!(matches!(
-            ImageIterator::new_with_alloc(&capped.allocator()),
+            ImageIterator::new_in(&capped.allocator()),
             Err(Error::OutOfMemory)
         ));
     }
@@ -2787,7 +2787,7 @@ mod tests {
         terminal.vt_write(b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;////\x1b\\");
 
         let mut state = RenderState::new().unwrap();
-        let mut images = ImageIterator::new_with_alloc(&alloc).unwrap();
+        let mut images = ImageIterator::new_in(&alloc).unwrap();
         let snapshot = state.update(&terminal).unwrap();
         let found = placements(&mut images, &snapshot);
         assert_eq!(found.len(), 1);

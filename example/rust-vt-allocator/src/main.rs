@@ -37,7 +37,7 @@ fn main() -> Result<(), Error> {
 
     // The terminal keeps a pointer to the allocator,
     // so `allocator` must outlive it.
-    let mut terminal = Terminal::new_with_alloc(&allocator, 80, 24)?;
+    let mut terminal = Terminal::new_in(&allocator, 80, 24)?;
     // ANCHOR_END: allocator-use
 
     // Write enough styled output to fill the scrollback,

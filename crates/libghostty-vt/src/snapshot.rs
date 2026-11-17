@@ -281,7 +281,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc, R: Read>(
+    pub fn new_in<'ctx: 'alloc, R: Read>(
         alloc: &'alloc Allocator<'ctx>,
         r: &'r mut R,
     ) -> Result<Self> {
@@ -979,7 +979,9 @@ mod tests {
             let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
             // The Cargo feature gates Rust APIs, not the linked library's
             // capabilities (e.g. when using pkg-config).
-            let kitty_graphics = crate::build_info::supports_kitty_graphics().unwrap();
+            let kitty_graphics = crate::build_info::Feature::KittyGraphics
+                .is_supported()
+                .unwrap();
             let primary_images = if kitty_graphics { 2 } else { 0 };
             let alternate_images = u32::from(kitty_graphics);
             // Primary: 2x1 RGBA + 1x1 RGBA. Alternate: 1x1 RGBA.
@@ -1031,7 +1033,7 @@ mod tests {
             let graphics = incremental.terminal().kitty_graphics().unwrap();
             let image = graphics.image(7).unwrap();
             assert_eq!(image.data().unwrap(), None);
-            assert_eq!(image.data_len().unwrap(), 8);
+            assert_eq!(image.expected_len().unwrap(), 8);
         }
         let mut images = Vec::new();
         let mut pages = 0;
@@ -1079,7 +1081,7 @@ mod tests {
 
         let original = std::mem::replace(
             incremental.terminal_mut(),
-            Terminal::new_with_alloc(&alloc, 80, 24).unwrap(),
+            Terminal::new_in(&alloc, 80, 24).unwrap(),
         );
         drop(original);
 

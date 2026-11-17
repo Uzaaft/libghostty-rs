@@ -39,8 +39,8 @@ API for you to dig into. For example: [`Terminal`].
 
 A handle you create is yours. Most come from a `new` function, such as
 [`Terminal::new()`]. If you need to, you can also explicitly pass an allocator
-when allocating memory for the object with the `new_with_alloc` functions,
-such as [`Terminal::new_with_alloc()`]. See [Memory](memory.md).
+when allocating memory for the object with the `new_in` functions,
+such as [`Terminal::new_in()`]. See [Memory](memory.md).
 
 A borrowed handle belongs to something else, so you don't free it. It also
 doesn't last. The [`kitty::Graphics`] handle you get from

@@ -3,7 +3,7 @@
 libghostty-vt may allocate memory and fully supports custom allocators.
 
 Most programs never need to think about this. Any function that allocates
-either has variants with or without allocators (e.g. `new` vs `new_with_alloc`),
+either has variants with or without allocators (e.g. `new` vs `new_in`),
 or takes an `Option<alloc::Allocator<'a>>` (`None` selects the default allocator).
 Pass your own when you want memory to come from a specific place, such as an
 arena, a pool, a tracking allocator, or a platform without a C library.
@@ -27,11 +27,12 @@ The default allocator uses:
 
 Rust users have two ways to obtain a custom libghostty [`Allocator`](alloc::Allocator):
 
-- [`Allocator::GLOBAL`](alloc::Allocator::GLOBAL), which uses Rust's own
-  [global allocator](std::alloc::GlobalAlloc);
-- Adapting a custom allocator via the soon-to-be stable (at the time of writing)
-  [Allocator API](std::alloc::Allocator). We offer a `From` implementation that
-  converts an Allocator API-compliant allocator into a libghostty allocator.
+- You can use [`Allocator::GLOBAL`](alloc::Allocator::GLOBAL), which uses
+  Rust's own [global allocator](std::alloc::GlobalAlloc);
+- If the `allocator-api` feature is enabled and Rust version is at least 1.100.0,
+  you can adapt a custom allocator via the [Allocator API](std::alloc::Allocator).
+  We offer a `From` implementation that converts a Rust allocator into a
+  libghostty-vt allocator.
 
 > [!NOTE]
 >
@@ -69,8 +70,8 @@ byte count. The address you return must be a multiple of `1 << alignment` bytes.
 Use them when:
 
 - You need a buffer to hand to a libghostty-vt function, such as returning a
-  [image](kitty::graphics::DecodedImage) decoded by the installed Kitty graphics
-  [PNG decoder](kitty::graphics::DecodePng).
+  [image](sys::DecodedImage) decoded by the installed Kitty graphics
+  [PNG decoder](sys::DecodePng).
 - You want libghostty to handle allocation for you while still having ownership
   over the returned data, such as in the case of [`Formatter::format_alloc()`].
 
@@ -83,7 +84,6 @@ this will never happen normally through our `Drop` implementations.
 ## Allocators Passed to Callbacks {#memory-callbacks}
 
 Some callbacks receive an allocator from the library, such as the PNG decoder
-set with [`kitty::graphics::set_png_decoder`]. Use that allocator only through
-allocating functions, such as [`Bytes::new_zeroed_with_alloc()`].
-Its inner workings are implementation details that may silently change in future
-releases.
+set with [`sys::PNG_DECODER`]. Use that allocator only through allocating
+functions, such as [`Bytes::new_zeroed_in()`]. Its inner workings are
+implementation details that may silently change in future releases.

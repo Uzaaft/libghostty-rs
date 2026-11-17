@@ -32,7 +32,7 @@ impl<'alloc> Encoder<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -236,7 +236,7 @@ impl<'alloc> Event<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }

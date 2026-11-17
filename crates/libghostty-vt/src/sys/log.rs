@@ -1,7 +1,5 @@
 //! Logging functionality.
-use std::sync::{PoisonError, RwLock};
-
-use crate::{error::Result, ffi};
+use crate::ffi;
 
 /// Callback type for logging.
 ///
@@ -11,15 +9,9 @@ use crate::{error::Result, ffi};
 ///
 /// When the log is unscoped (default scope), scope has zero length.
 ///
-/// The callback must be safe to call from any thread.
-///
-/// See [`set_logger`] for more details.
-pub trait Logger: Send + Sync + 'static {
+/// See [`sys::LOGGER`](LOGGER) for more details.
+pub trait Logger: Sync + 'static {
     /// Log a message with the given level and scope.
-    ///
-    /// The installed logger stays read-locked while this runs, so this
-    /// method must not synchronously make libghostty log, or call
-    /// [`set_logger`], as doing so may deadlock or abort the process.
     fn log(&self, level: Level, scope: &str, message: &str);
 }
 
@@ -27,12 +19,11 @@ pub trait Logger: Send + Sync + 'static {
 ///
 /// Formats each message as `[level](scope): message\n`.
 ///
-/// Can be passed directly to [`set_logger`]:
+/// Can be passed directly to `sys::LOGGER.install()`:
 ///
 /// ```
-/// use libghostty_vt::log;
-/// // SAFETY: No other thread uses libghostty yet.
-/// unsafe { log::set_logger(Some(Box::new(log::LogStderr))) }.unwrap();
+/// use libghostty_vt::sys;
+/// sys::LOGGER.install(&sys::LogStderr).unwrap();
 /// ```
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct LogStderr;
@@ -121,13 +112,11 @@ pub enum Level {
     Debug = ffi::SysLogLevel::DEBUG,
 }
 
-static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
-
-/// Set the log callback.
+/// The log callback.
 ///
-/// When set, internal library log messages are delivered to this
-/// callback. When cleared (set to `None`), log messages are silently
-/// discarded.
+/// When installed, internal library log messages are delivered to this
+/// callback. Otherwise, log messages are silently discarded. Log messages
+/// with a non-UTF-8 scope or message are also discarded.
 ///
 /// Which log levels are emitted depends on the build mode of the library and
 /// is not configurable at runtime. Debug builds emit all levels (debug and
@@ -137,20 +126,14 @@ static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
 /// This is a process-global setting. It is simplest to set it once at
 /// startup, before using any terminal functionality that depends on it.
 ///
-/// # Safety
-///
-/// libghostty does not synchronize this setting, so this must not be called
-/// while any other thread may be inside a libghostty call.
-///
 /// # Examples
 ///
 /// Use [`LogStderr`] as a simple way to write formatted logs to stderr:
 ///
 /// ```
-/// use libghostty_vt::{set_logger, log::LogStderr};
-/// # fn main() -> Result<(), Box<dyn std::error::Error>>{
-/// // SAFETY: No other thread uses libghostty yet.
-/// unsafe { set_logger(Some(Box::new(LogStderr))) }?;
+/// use libghostty_vt::sys;
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// sys::LOGGER.install(&sys::LogStderr)?;
 /// # Ok(())}
 /// ```
 ///
@@ -158,10 +141,10 @@ static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
 /// `tracing` events with `TracingLogger`:
 ///
 /// ```ignore
+/// use libghostty_vt::sys;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>>{
 /// tracing_subscriber::fmt().init();
-/// // SAFETY: No other thread uses libghostty yet.
-/// unsafe { libghostty_vt::set_logger(Some(Box::new(libghostty_vt::log::TracingLogger))) }?;
+/// sys::LOGGER.install(&sys::TracingLogger)?;
 /// # Ok(())}
 /// ```
 ///
@@ -169,57 +152,49 @@ static LOGGER: RwLock<Option<Box<dyn Logger>>> = RwLock::new(None);
 /// to any `log`-compatible logger, including the one currently used globally:
 ///
 /// ```ignore
+/// use libghostty_vt::sys;
 /// # fn main() -> Result<(), Box<dyn std::error::Error>>{
 /// // Any logger will do, though usually you want to use the global logger
-/// // SAFETY: No other thread uses libghostty yet.
-/// unsafe { libghostty_vt::set_logger(Some(Box::new(log::logger()))) }?;
+/// sys::LOGGER.install(log::logger())?;
 /// # Ok(())}
 /// ```
-pub unsafe fn set_logger(f: Option<Box<dyn Logger>>) -> Result<()> {
-    unsafe extern "C" fn callback(
-        _userdata: *mut std::ffi::c_void,
-        level: ffi::SysLogLevel::Type,
-        scope: *const u8,
-        scope_len: usize,
-        message: *const u8,
-        message_len: usize,
-    ) {
-        let scope = unsafe { std::slice::from_raw_parts(scope, scope_len) };
-        let Ok(scope) = std::str::from_utf8(scope) else {
-            return;
-        };
-        let message = unsafe { std::slice::from_raw_parts(message, message_len) };
-        let Ok(message) = std::str::from_utf8(message) else {
-            return;
-        };
-        let Ok(level) = Level::try_from(level) else {
-            return;
-        };
+pub static LOGGER: super::SysFunc<dyn Logger> = super::SysFunc::new(
+    ffi::SysOption::LOG,
+    trampoline as Trampoline as *const std::ffi::c_void,
+);
 
-        // See `set_logger` for why the lock can't be poisoned.
-        let log = LOGGER.read().unwrap_or_else(PoisonError::into_inner);
-        let Some(log) = log.as_deref() else {
-            return;
-        };
-        log.log(level, scope, message);
-    }
+type Trampoline = unsafe extern "C" fn(
+    _userdata: *mut std::ffi::c_void,
+    level: ffi::SysLogLevel::Type,
+    scope: *const u8,
+    scope_len: usize,
+    message: *const u8,
+    message_len: usize,
+);
 
-    // Write out the matches here to coerce function items into function
-    // pointers, and trait impls into boxed trait objects. Yes, this is
-    // the simplest way to do so.
-    let ptr: ffi::SysLogFn = match f {
-        None => None,
-        Some(_) => Some(callback),
+unsafe extern "C" fn trampoline(
+    _userdata: *mut std::ffi::c_void,
+    level: ffi::SysLogLevel::Type,
+    scope: *const u8,
+    scope_len: usize,
+    message: *const u8,
+    message_len: usize,
+) {
+    let Some(log) = LOGGER.get() else {
+        return;
     };
-    // Keep the old logger alive until function exit: its destructor may make
-    // libghostty log, so it must run after unlocking and updating the hook.
-    // User code never runs under the write lock, so it can't be poisoned.
-    let _old = std::mem::replace(
-        &mut *LOGGER.write().unwrap_or_else(PoisonError::into_inner),
-        f,
-    );
-    crate::sys_set(
-        ffi::SysOption::LOG,
-        ptr.map_or(std::ptr::null(), |p| p as *const std::ffi::c_void),
-    )
+
+    let scope = unsafe { std::slice::from_raw_parts(scope, scope_len) };
+    let Ok(scope) = std::str::from_utf8(scope) else {
+        return;
+    };
+    let message = unsafe { std::slice::from_raw_parts(message, message_len) };
+    let Ok(message) = std::str::from_utf8(message) else {
+        return;
+    };
+    let Ok(level) = Level::try_from(level) else {
+        return;
+    };
+
+    log.log(level, scope, message);
 }

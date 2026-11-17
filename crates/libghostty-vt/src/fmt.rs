@@ -82,7 +82,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(
+    pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         terminal: &'t Terminal<'alloc, 'cb>,
     ) -> Result<Self> {
@@ -453,7 +453,7 @@ mod tests {
         terminal.set_selection(Some(selection)).unwrap();
 
         let mut formatter = Formatter::new(&terminal).unwrap();
-        let mut allocated = Formatter::new_with_alloc(&Allocator::GLOBAL, &terminal).unwrap();
+        let mut allocated = Formatter::new_in(&Allocator::GLOBAL, &terminal).unwrap();
 
         allocated.set_selection(Some(selection)).unwrap();
 

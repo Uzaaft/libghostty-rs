@@ -20,7 +20,7 @@ We'll walk through [rust-vt-stream](/example/rust-vt-stream/src/main.rs).
 Full code: [rust-vt-stream/src/main.rs](/example/rust-vt-stream/src/main.rs).
 
 [`Terminal::new()`] takes the size in columns and rows. If you want to use a
-custom allocator, use [`Terminal::new_with_alloc()`]. See [Memory](../memory.md).
+custom allocator, use [`Terminal::new_in()`]. See [Memory](../memory.md).
 
 libghostty-vt functions never crash your program by design, given valid use of
 the API. All failure scenarios including allocation failures are handled and

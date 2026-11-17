@@ -1,14 +1,11 @@
 use libghostty_vt::{
     alloc::{Allocator, Bytes},
     error::Error,
-    kitty::graphics::{self, Graphics},
+    kitty::graphics::Graphics,
     render::{ImageIterator, ImageProtocol, RenderState, Snapshot},
-    Terminal,
+    sys, Terminal,
 };
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 // ANCHOR: kitty-graphics-decode-png
 /// Minimal PNG decoder callback for the sys interface.
@@ -20,26 +17,26 @@ use std::sync::{
 /// WARNING: This is only an example for providing a callback, it DOES NOT
 /// actually decode the PNG it is passed. It hardcodes a response.
 struct StubPngDecoder {
-    decode_count: Arc<AtomicUsize>,
+    decode_count: AtomicUsize,
 }
 
-impl graphics::DecodePng for StubPngDecoder {
+impl sys::DecodePng for StubPngDecoder {
     fn decode_png<'alloc>(
-        &mut self,
+        &self,
         alloc: &'alloc Allocator<'_>,
         data: &[u8],
-    ) -> Option<graphics::DecodedImage<'alloc>> {
+    ) -> Option<sys::DecodedImage<'alloc>> {
         _ = self.decode_count.fetch_add(1, Ordering::SeqCst);
         let count = self.decode_count.load(Ordering::SeqCst);
 
         println!("  decode_png called (size={}, call #{count})", data.len());
 
         // Allocate RGBA pixel data through the provided allocator.
-        let mut data = Bytes::new_zeroed_with_alloc(alloc, 4).ok()?;
+        let mut data = Bytes::new_zeroed_in(alloc, 4).ok()?;
 
         // Fill with red (R=255, G=0, B=0, A=255).
         data.copy_from_slice(&[255, 0, 0, 255]);
-        Some(graphics::DecodedImage {
+        Some(sys::DecodedImage {
             width: 1,
             height: 1,
             data,
@@ -206,7 +203,7 @@ fn draw_images<'alloc>(
             image.width()?,
             image.height()?,
             image.format()?,
-            image.data_len()?,
+            image.expected_len()?,
             image.generation()?,
         );
     }
@@ -260,12 +257,10 @@ fn run_frames(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
 // ANCHOR: kitty-graphics-main
 fn main() -> Result<(), Error> {
     // Install the PNG decoder.
-    let decode_count = Arc::new(AtomicUsize::new(0));
-    unsafe {
-        graphics::set_png_decoder(Some(Box::new(StubPngDecoder {
-            decode_count: Arc::clone(&decode_count),
-        })))?;
-    }
+    static DECODER: StubPngDecoder = StubPngDecoder {
+        decode_count: AtomicUsize::new(0),
+    };
+    sys::PNG_DECODER.install(&DECODER)?;
 
     // Create a terminal with Kitty graphics enabled.
     let mut terminal = Terminal::new(80, 24)?;
@@ -302,7 +297,10 @@ fn main() -> Result<(), Error> {
     terminal.vt_write(b"DUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==");
     terminal.vt_write(b"\x1b\\");
 
-    println!("PNG decode calls: {}", decode_count.load(Ordering::SeqCst));
+    println!(
+        "PNG decode calls: {}",
+        DECODER.decode_count.load(Ordering::SeqCst)
+    );
 
     // Show a second image with placeholder cells. First send a green 1x1
     // image with ID 3 and give it a virtual placement 2 columns wide and

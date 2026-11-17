@@ -52,7 +52,7 @@ impl<'alloc> Gesture<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -238,7 +238,7 @@ impl<'alloc> PressEvent<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -352,7 +352,7 @@ impl<'alloc> ReleaseEvent<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -400,7 +400,7 @@ impl<'alloc> DragEvent<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -480,7 +480,7 @@ impl<'alloc> AutoscrollTickEvent<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -563,7 +563,7 @@ impl<'alloc> DeepPressEvent<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
