@@ -19,11 +19,11 @@ given feature, then the function does nothing and returns [`Error::Unsupported`]
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `color`              | All types and functions within [`color`]                                                                                                                                                       |
 | `formatter`          | All types and functions within [`fmt`]                                                                                                                                                   |
-| `glyph-protocol`     | None. It lets applications register custom glyphs with Ghostty's glyph protocol.                                                                                        |
-| `grid-introspection` | All types and functions within [`grid_ref`], as well as [`screen::Cell`], [`screen::Row`], [`Terminal::track_grid_ref`]                                           |
-| `input-encode`       | All types and functions within [`key`], [`mouse`], [`focus`] and [`paste`], as well as [`Terminal::paste`] |
-| `kitty-graphics`     | All types and functions within [`kitty::graphics`], and the Kitty setters and getters on [`Terminal`]                                                         |
-| `render-state`       | All types and functions within [`render`]                                                                                                                                                |
+| `glyph_protocol`     | None. It lets applications register custom glyphs with Ghostty's glyph protocol.                                                                                        |
+| `grid_introspection` | All types and functions within [`grid_ref`], as well as [`screen::Cell`], [`screen::Row`], [`Terminal::track_grid_ref`]                                           |
+| `input_encode`       | All types and functions within [`key`], [`mouse`], [`focus`] and [`paste`], as well as [`Terminal::paste`] |
+| `kitty_graphics`     | All types and functions within [`kitty::graphics`], and the Kitty setters and getters on [`Terminal`]                                                         |
+| `render_state`       | All types and functions within [`render`]                                                                                                                                                |
 | `search`             | All types and functions within [`search`]                                                                                                                                                      |
 | `selection`          | All types and functions within [`selection`], and all `select_*` methods on [`Terminal`]                                                                             |
 | `snapshot`           | All types and functions within [`snapshot`]                                                                                                                                                    |

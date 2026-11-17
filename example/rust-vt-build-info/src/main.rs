@@ -1,9 +1,12 @@
-use libghostty_vt::{build_info, error::Error};
+use libghostty_vt::{
+    build_info::{self, Feature},
+    error::Error,
+};
 
 // ANCHOR: build-info-query
 fn query_build_info() -> Result<(), Error> {
     println!("SIMD: {}", build_info::supports_simd()?);
-    println!("Kitty graphics: {}", build_info::supports_kitty_graphics()?);
+    println!("Kitty graphics: {}", Feature::KittyGraphics.is_supported()?);
     println!(
         "Tmux control mode: {}",
         build_info::supports_tmux_control_mode()?
