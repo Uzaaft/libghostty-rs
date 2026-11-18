@@ -25,7 +25,7 @@ use crate::{
     terminal::Terminal,
 };
 
-/// Snapshot-related methods.
+/// Methods related to [snapshots](crate::snapshot).
 impl Terminal<'_, '_> {
     /// Encode a complete terminal snapshot to a writer.
     ///
@@ -112,6 +112,141 @@ impl Terminal<'_, '_> {
 
         from_optional_result_with_len(result, written)
     }
+
+    /// The configured maximum retained VT continuation size in bytes.
+    ///
+    /// A value of zero means continuation tracking is disabled. This reports
+    /// the configured limit even when a current unfinished continuation is
+    /// temporarily unavailable.
+    pub fn continuation_max_bytes(&self) -> Result<usize> {
+        self.get(ffi::TerminalData::CONTINUATION_MAX_BYTES)
+    }
+
+    /// Set the maximum number of replay-safe VT continuation bytes retained.
+    ///
+    /// Continuation bytes reconstruct an escape sequence or UTF-8 codepoint
+    /// which was unfinished at the end of the most recent [`Terminal::vt_write`]
+    /// call. They are used automatically by terminal snapshots and may also be
+    /// exported directly with the continuation APIs.
+    ///
+    /// Tracking is disabled by default. A nonzero value enables tracking and
+    /// sets its byte limit. Passing zero disables tracking. Lowering the limit
+    /// below an already-retained continuation, or enabling tracking while the
+    /// parser is already unfinished, makes the current continuation unavailable
+    /// because earlier bytes cannot be reconstructed. Tracking recovers
+    /// automatically after a later write reaches the ground state or contains
+    /// a fresh replay start.
+    pub fn set_continuation_max_bytes(&mut self, v: usize) -> Result<&mut Self> {
+        self.set(ffi::TerminalOption::CONTINUATION_MAX_BYTES, &v)?;
+        Ok(self)
+    }
+
+    /// Write the terminal's replay-safe VT continuation to a callback writer.
+    ///
+    /// The continuation is the exact byte suffix needed to reconstruct
+    /// unfinished VT parser or UTF-8 decoder state in an equivalent terminal.
+    /// It is empty when the stream is at ground. The callback is invoked
+    /// synchronously and may be called more than once. It must not call
+    /// terminal APIs with the same terminal handle.
+    ///
+    /// Continuation tracking must have been enabled by calling
+    /// [`Terminal::set_continuation_max_bytes`] with a nonzero value before
+    /// the input that produced the continuation was written.    
+    ///
+    /// # Errors
+    ///
+    /// This function returns [`Error::IoError`] if the callback rejects a
+    /// write, [`Error::LimitExceeded`] if output accounting overflows, or
+    /// [`Error::InvalidValue`] if an argument is invalid, tracking is disabled,
+    /// or the current continuation is unavailable.
+    pub fn continuation_write<W: Write>(&mut self, writer: &mut W) -> Result<()> {
+        let writer = crate::io::to_writer(writer);
+        let result =
+            unsafe { ffi::ghostty_terminal_continuation_write(self.inner.as_raw(), writer) };
+        from_result(result)
+    }
+
+    /// Return an allocated copy of the terminal's replay-safe VT continuation.
+    ///
+    /// The returned bytes are allocated with allocator, or the default allocator
+    /// when allocator is `None`. An empty continuation is a successful result
+    /// with empty [`Bytes`]; libghostty does not allocate for it.
+    /// Continuation tracking must have been enabled by calling
+    /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
+    /// input that produced the continuation was written.
+    ///
+    /// The caller must serialize this operation with all other access to the same
+    /// terminal.
+    ///
+    /// # Errors
+    ///
+    /// This function returns [`Error::OutOfMemory`] on allocation failure, or
+    /// [`Error::InvalidValue`] if an argument is invalid, tracking is disabled,
+    /// or the current continuation is unavailable.
+    pub fn continuation_alloc<'a, 'ctx: 'a>(
+        &self,
+        alloc: Option<&'a Allocator<'ctx>>,
+    ) -> Result<Option<Bytes<'a>>> {
+        let mut out = std::ptr::null_mut();
+        let mut out_len = 0usize;
+        let alloc = alloc.map_or(std::ptr::null(), super::alloc::Allocator::to_raw);
+
+        let result = unsafe {
+            ffi::ghostty_terminal_continuation_alloc(
+                self.inner.as_raw(),
+                alloc,
+                &raw mut out,
+                &raw mut out_len,
+            )
+        };
+
+        let out = from_optional_result(result, out)?;
+        // SAFETY: On success, libghostty hands over `out_len` bytes allocated
+        // with `alloc`, or NULL for empty output.
+        Ok(out.map(|ptr| unsafe { Bytes::from_raw_parts(ptr, out_len, alloc) }))
+    }
+
+    /// Copy the terminal's replay-safe VT continuation into a caller buffer.
+    ///
+    /// Pass an empty `buf` to query the required size. A size query returns
+    /// [`Error::OutOfSpace`] with the required size, including zero when the
+    /// stream is at ground. If a non-empty buffer is too small, the function
+    /// has the same result and reports the full required size.
+    ///
+    /// Continuation tracking must have been enabled by calling
+    /// [`Terminal::set_continuation_max_bytes`] to a nonzero value before the
+    /// input that produced the continuation was written.
+    ///
+    /// The caller must serialize this operation with all other access to the same
+    /// terminal.
+    ///
+    /// # Errors
+    ///
+    /// This function returns [`Error::OutOfSpace`] for a size query or
+    /// insufficient buffer, or [`Error::InvalidValue`] if an argument is invalid,
+    /// tracking is disabled, or the current continuation is unavailable.
+    pub fn continuation_buf(&self, buf: &mut [u8]) -> Result<Option<usize>> {
+        let mut written = 0usize;
+        // The C API uses a NULL pointer to distinguish an explicit size query
+        // from a zero-capacity destination. Rust empty slices have a non-NULL
+        // dangling pointer, so translate that representation at this boundary.
+        let buf_ptr = if buf.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            buf.as_mut_ptr()
+        };
+
+        let result = unsafe {
+            ffi::ghostty_terminal_continuation_buf(
+                self.inner.as_raw(),
+                buf_ptr,
+                buf.len(),
+                &raw mut written,
+            )
+        };
+
+        from_optional_result_with_len(result, written)
+    }
 }
 
 /// Opaque handle to a terminal snapshot decoder.
@@ -146,7 +281,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc, R: Read>(
+    pub fn new_in<'ctx: 'alloc, R: Read>(
         alloc: &'alloc Allocator<'ctx>,
         r: &'r mut R,
     ) -> Result<Self> {
@@ -186,10 +321,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_buf_with_alloc<'ctx: 'alloc>(
-        alloc: &'alloc Allocator<'ctx>,
-        buf: &'r [u8],
-    ) -> Result<Self> {
+    pub fn new_buf_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>, buf: &'r [u8]) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_buf_inner(alloc.to_raw(), buf) }
     }
@@ -844,7 +976,9 @@ mod tests {
             let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
             // The Cargo feature gates Rust APIs, not the linked library's
             // capabilities (e.g. when using pkg-config).
-            let kitty_graphics = crate::build_info::supports_kitty_graphics().unwrap();
+            let kitty_graphics = crate::build_info::Feature::KittyGraphics
+                .is_supported()
+                .unwrap();
             let primary_images = if kitty_graphics { 2 } else { 0 };
             let alternate_images = u32::from(kitty_graphics);
             // Primary: 2x1 RGBA + 1x1 RGBA. Alternate: 1x1 RGBA.
@@ -893,14 +1027,10 @@ mod tests {
         let mut incremental = Decoder::new_buf(&bytes).unwrap().ready().unwrap();
         // READY restores image metadata before `next` attaches the pixels.
         {
-            let graphics = incremental
-                .terminal()
-                .kitty_graphics()
-                .unwrap()
-                .expect("kitty graphics enabled");
+            let graphics = incremental.terminal().kitty_graphics().unwrap();
             let image = graphics.image(7).unwrap();
             assert_eq!(image.data().unwrap(), None);
-            assert_eq!(image.data_len().unwrap(), 8);
+            assert_eq!(image.expected_len().unwrap(), 8);
         }
         let mut images = Vec::new();
         let mut pages = 0;
@@ -926,11 +1056,7 @@ mod tests {
         );
 
         // The reported bytes are the pixels that were attached to the image.
-        let graphics = incremental
-            .terminal()
-            .kitty_graphics()
-            .unwrap()
-            .expect("kitty graphics enabled");
+        let graphics = incremental.terminal().kitty_graphics().unwrap();
         let image = graphics.image(7).unwrap();
         assert_eq!(
             image.data().unwrap(),
@@ -947,12 +1073,12 @@ mod tests {
         let bytes = snapshot_with_history();
         let alloc = crate::alloc::testing::Guard::allocator();
 
-        let decoder = Decoder::new_buf_with_alloc(&alloc, &bytes).unwrap();
+        let decoder = Decoder::new_buf_in(&alloc, &bytes).unwrap();
         let mut incremental = decoder.ready().unwrap();
 
         let original = std::mem::replace(
             incremental.terminal_mut(),
-            Terminal::new_with_alloc(&alloc, 80, 24).unwrap(),
+            Terminal::new_in(&alloc, 80, 24).unwrap(),
         );
         drop(original);
 
@@ -1149,8 +1275,7 @@ mod tests {
         let default = Terminal::new(8, 2)
             .unwrap()
             .kitty_image_storage_limit()
-            .unwrap()
-            .expect("kitty graphics enabled");
+            .unwrap();
         let bytes = unfinished_snapshot();
 
         let mut decoder = Decoder::new_buf(&bytes).unwrap();
@@ -1162,7 +1287,7 @@ mod tests {
         assert_eq!(decoder.kitty_image_storage_limit().unwrap(), limit);
 
         let restored = decoder.decode().unwrap();
-        assert_eq!(restored.kitty_image_storage_limit().unwrap(), Some(limit));
+        assert_eq!(restored.kitty_image_storage_limit().unwrap(), limit);
     }
 
     /// Images are restored oldest first, so when they don't all fit within
@@ -1195,10 +1320,7 @@ mod tests {
         // not, so the absence below is down to the limit and not the
         // snapshot.
         let kept = Decoder::new_buf(&bytes).unwrap().decode().unwrap();
-        let graphics = kept
-            .kitty_graphics()
-            .unwrap()
-            .expect("kitty graphics enabled");
+        let graphics = kept.kitty_graphics().unwrap();
         assert!(graphics.image(7).is_some());
         assert!(graphics.image(8).is_some());
 
@@ -1208,10 +1330,7 @@ mod tests {
         let mut decoder = Decoder::new_buf(&bytes).unwrap();
         decoder.set_kitty_image_storage_limit(8).unwrap();
         let restored = decoder.decode().unwrap();
-        let graphics = restored
-            .kitty_graphics()
-            .unwrap()
-            .expect("kitty graphics enabled");
+        let graphics = restored.kitty_graphics().unwrap();
         assert!(graphics.image(7).is_none());
         assert!(graphics.image(8).is_some());
     }

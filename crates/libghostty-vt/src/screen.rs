@@ -150,7 +150,7 @@ pub mod cell {
 
     keys! {
         /// The codepoint of the cell (0 if empty or bg-color-only).
-        Codepoint: CODEPOINT, u32 => u32, Ok;
+        Codepoint: CODEPOINT, u32 => char, |v| char::from_u32(v).ok_or(Error::InvalidValue);
         /// The content tag describing what kind of content is in the cell.
         ContentTag: CONTENT_TAG, ffi::CellContentTag::Type => CellContentTag,
             |v: ffi::CellContentTag::Type| v.try_into().map_err(|_| Error::Unsupported);
@@ -250,11 +250,14 @@ impl Cell {
     /// ```
     /// use libghostty_vt::{Terminal, screen::cell, point::{Point, Coordinate}};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///
     /// let mut terminal = Terminal::new(80, 24)?;
     /// terminal.vt_write(b"A");
+    ///
     /// let cell = terminal.grid_ref(Point::Viewport(Coordinate { x: 0, y: 0 }))?.cell()?;
     /// let (codepoint, has_text) = cell.get_multi((cell::Codepoint, cell::HasText))?;
-    /// assert_eq!(codepoint, u32::from('A'));
+    ///
+    /// assert_eq!(codepoint, 'A');
     /// assert!(has_text);
     /// # Ok(()) }
     /// ```
@@ -263,7 +266,7 @@ impl Cell {
     }
 
     /// The codepoint of the cell (0 if empty or bg-color-only).
-    pub fn codepoint(self) -> Result<u32> {
+    pub fn codepoint(self) -> Result<char> {
         self.get(cell::Codepoint)
     }
     /// The content tag describing what kind of content is in the cell.

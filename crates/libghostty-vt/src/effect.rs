@@ -16,6 +16,11 @@
 //! # let mut terminal = Terminal::new(80, 24).unwrap();
 //! terminal.on_bell(|_term| println!("Bell rang!"));
 //! ```
+//!
+//! See the [Effects] guide for how to register them, the rules for callbacks,
+//! the list of effects, and examples.
+//!
+#![doc = crate::guide_ref!("Effects", "effects")]
 use std::{marker::PhantomData, num::NonZeroU16};
 
 use crate::{
@@ -24,8 +29,7 @@ use crate::{
     report::{ColorScheme, SizeReportSize},
 };
 
-// Only referenced in docs.
-#[allow(unused)]
+#[expect(unused, reason = "only referenced in docs")]
 use crate::{Terminal, mode::Mode};
 
 /// You might be wondering just what the heck this is.
@@ -81,7 +85,9 @@ macro_rules! handlers {
         impl<'alloc, 'cb> $crate::terminal::Terminal<'alloc, 'cb> {$(
             $(#[$fmeta])*
             ///
-            /// See [#Effects](Terminal#effects) for more details.
+            /// See [Effects] for more details.
+            ///
+            #[doc = crate::guide_ref!("Effects", "effects")]
             $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
                 unsafe extern "C" fn callback(
                     t: $crate::ffi::Terminal,
@@ -242,150 +248,33 @@ handlers! {
     }
 
     /// Call the given function when the running program asks the terminal to
-    /// stop updating the screen, and again when it lets the screen update
-    /// again. We call the time in between a "render hold".
+    /// stop updating the screen, and again when it lets the screen update again.
+    /// We call the time in between a "render hold". See [Render holds] for what
+    /// to do about one.
     ///
-    /// Programs use a hold to avoid flicker. A full-screen program usually
-    /// redraws in several steps: clear, draw the text, move the cursor. If
-    /// the screen is drawn halfway through, the user sees a broken frame. To
-    /// prevent that, the program starts a hold, draws everything, and then
-    /// releases the hold. The screen should keep showing the last finished
-    /// frame the whole time and then switch to the new one all at once.
+    #[doc = crate::guide_ref!("Render holds", "rendering", "holds")]
     ///
-    /// Today the only way a program can start a hold is synchronized output
-    /// ([`Mode::SYNC_OUTPUT`], DEC private mode 2026). The callback is named
-    /// for what the embedder should do rather than for that mode so that
-    /// other sources of holds can be added later.
+    /// `held` is true when the program sets mode 2026 ([`Mode::SYNC_OUTPUT`]),
+    /// which is the only way to start a hold today.
     ///
-    /// # When it is called
+    /// `held` is false when the hold ends, which happens when:
     ///
-    /// With `held` set to `true` when the program sets mode 2026.
-    ///
-    /// With `held` set to `false` when the hold ends, which happens when:
-    ///
-    /// - the program resets mode 2026
-    /// - the terminal is fully reset, by the program (RIS) or by
-    ///   [`Terminal::reset`]
-    /// - the terminal is resized with [`Terminal::resize`]
+    ///   - the program resets mode 2026
+    ///   - the terminal is fully reset, by the program (RIS) or by [`Terminal::reset()`]
+    ///   - the terminal is resized with [`Terminal::resize()`]
     ///
     /// The two calls always come in pairs. Setting the mode while a hold is
     /// already active does nothing, and neither does resetting it when there
-    /// is no hold. Changing the mode yourself with [`Terminal::set_mode`]
+    /// is no hold. Changing the mode yourself with [`Terminal::set_mode()`]
     /// never invokes the callback.
     ///
-    /// # What to do
+    /// # Safety
     ///
-    /// When a hold begins, the terminal contains exactly the frame the
-    /// program wants left on screen. Nothing after the start of the hold has
-    /// been processed yet, even if more bytes follow in the same
-    /// [`Terminal::vt_write`] call. Capture that frame by calling
-    /// [`RenderState::update`](crate::RenderState::update) from within the
-    /// callback, then stop updating the render state until the hold ends. You
-    /// can keep drawing the render state in the meantime. It won't change.
+    /// Please carefully read the [Safety] section of the render hold guide.
+    /// Particularly worth noting is the fact that the callback is **not**
+    /// panic-safe. Any panic will terminate the entire process.
     ///
-    /// <div class="warning">
-    ///
-    /// The callback runs inside an `extern "C"` function, so a panic in it
-    /// aborts the process. If the callback updates the render state, don't
-    /// keep the render state borrowed (e.g. through a
-    /// [`Snapshot`](crate::render::Snapshot) or a
-    /// [`RefMut`](std::cell::RefMut)) across [`Terminal::vt_write`],
-    /// [`Terminal::reset`] or [`Terminal::resize`], since any of them can
-    /// invoke the callback. Use a non-panicking borrow such as
-    /// [`RefCell::try_borrow_mut`](std::cell::RefCell::try_borrow_mut)
-    /// inside the callback.
-    ///
-    /// </div>
-    ///
-    /// ```rust
-    /// use std::cell::{Cell, RefCell};
-    /// use std::time::{Duration, Instant};
-    /// use libghostty_vt::{RenderState, Terminal, mode::Mode};
-    ///
-    /// struct Renderer {
-    ///     render_state: RefCell<RenderState<'static>>,
-    ///     held: Cell<bool>,
-    ///     hold_started: Cell<Instant>,
-    /// }
-    ///
-    /// fn draw(r: &Renderer, terminal: &mut Terminal<'static, '_>) -> libghostty_vt::error::Result<()> {
-    ///     // Give up on a program that holds the screen for too long.
-    ///     if r.held.get() && r.hold_started.get().elapsed() >= Duration::from_secs(1) {
-    ///         terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
-    ///         r.held.set(false);
-    ///     }
-    ///
-    ///     // During a hold, skip the update and draw the captured frame.
-    ///     if !r.held.get() {
-    ///         r.render_state.borrow_mut().update(terminal)?;
-    ///     }
-    ///     // draw_render_state(&r.render_state);
-    ///     Ok(())
-    /// }
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let renderer = Renderer {
-    ///     render_state: RefCell::new(RenderState::new()?),
-    ///     held: Cell::new(false),
-    ///     hold_started: Cell::new(Instant::now()),
-    /// };
-    ///
-    /// let mut terminal = Terminal::new(80, 24)?;
-    /// terminal.on_render_hold(|term, held| {
-    ///     if held {
-    ///         // Capture the frame the program wants left on screen. Don't
-    ///         // panic if that fails, e.g. because the render state is
-    ///         // borrowed elsewhere; keep drawing the previous frame instead.
-    ///         let _ = renderer
-    ///             .render_state
-    ///             .try_borrow_mut()
-    ///             .map(|mut state| state.update(term).map(|_| ()));
-    ///         renderer.hold_started.set(Instant::now());
-    ///     }
-    ///     renderer.held.set(held);
-    /// })?;
-    ///
-    /// terminal.vt_write(b"\x1b[?2026h");
-    /// assert!(renderer.held.get());
-    /// draw(&renderer, &mut terminal)?;
-    ///
-    /// terminal.vt_write(b"\x1b[?2026l");
-    /// assert!(!renderer.held.get());
-    /// draw(&renderer, &mut terminal)?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Timeouts
-    ///
-    /// The terminal has no clock, so it never ends a hold on its own. A
-    /// program that crashes or forgets to release its hold would freeze the
-    /// screen forever, so you need a timeout like the one above. One second
-    /// is a common choice. When it expires, reset the mode yourself and go
-    /// back to updating normally. Because setting the mode again during a
-    /// hold does nothing, a program can't keep pushing your deadline back.
-    ///
-    /// # Why a callback
-    ///
-    /// You could instead check [`Mode::SYNC_OUTPUT`] before each draw and
-    /// skip the update when it is set. That is simpler, but it has two
-    /// problems. First, the frame left on screen is whatever you happened to
-    /// draw last, which can be older than what the program intended or even
-    /// a half-drawn frame. Second, if the program releases a hold and starts
-    /// the next one between two of your draws, you never see the mode turn
-    /// off and the finished frame in between is lost. A program that draws
-    /// continuously can then appear frozen. Capturing the frame when each
-    /// hold begins avoids both.
-    ///
-    /// # Other notes
-    ///
-    /// You are free to ignore a hold whenever showing live content matters
-    /// more, such as when the user scrolls or starts a selection.
-    ///
-    /// Like every callback, this runs on the thread that called
-    /// [`Terminal::vt_write`], [`Terminal::reset`] or [`Terminal::resize`].
-    /// Since neither a terminal nor a render state can be sent to another
-    /// thread, the update in the callback needs no locking.
+    #[doc = crate::guide_ref!("Safety", "rendering", "holds-safety")]
     pub fn on_render_hold(
         &mut self,
         tag = RENDER_HOLD,
@@ -397,32 +286,35 @@ handlers! {
 
     /// Call the given function when the terminal receives
     /// an ENQ character (0x05).
+    ///
+    /// Return `None` to report nothing.
     pub fn on_enquiry(
         &mut self,
         tag = ENQUIRY,
         from = TerminalEnquiryFn() -> ffi::String,
         to = <'t>EnquiryFn() -> Option<&'t str>,
     ) |term, func| {
-        func(term).unwrap_or("").into()
+        func(term).unwrap_or("").as_bytes().into()
     }
 
     /// Call the given function when the terminal receives an XTVERSION
     /// query (CSI > q), and respond with the resulting version string
     /// (e.g. "myterm 1.0").
+    ///
+    /// Return `None` to report the default "libghostty" version.
     pub fn on_xtversion(
         &mut self,
         tag = XTVERSION,
         from = TerminalXtversionFn() -> ffi::String,
         to = <'t>XtversionFn() -> Option<&'t str>,
     ) |term, func| {
-        func(term).unwrap_or("").into()
+        func(term).unwrap_or("").as_bytes().into()
     }
 
     /// Call the given function when the terminal title changes
     /// via escape sequences (e.g. OSC 0 or OSC 2).
     ///
-    /// The new title can be queried from the terminal after
-    /// the callback returns.
+    /// Use [`Terminal::title()`] inside the callback to read the new value.
     pub fn on_title_changed(
         &mut self,
         tag = TITLE_CHANGED,
@@ -432,11 +324,18 @@ handlers! {
         func(term);
     }
 
-    /// Call the given function when the terminal current working directory
-    /// changes via escape sequences (e.g. OSC 7, OSC 9, or OSC 1337).
+    /// Call the given function when the terminal pwd (current working
+    /// directory) changes via escape sequences: OSC 7 (file:// URI),
+    /// OSC 9 (ConEmu CurrentDir), or OSC 1337 CurrentDir (iTerm2).
+    /// Use [`Terminal::pwd()`] inside the callback to read the new value.
     ///
-    /// The new working directory can be queried from the terminal after
-    /// the callback returns.
+    /// The terminal stores whatever bytes the shell emitted, without parsing.
+    /// That means for OSC 7 the value is the raw URI (typically file://...);
+    /// for OSC 9/OSC 1337 it is typically a bare path. You are responsible
+    /// for decoding any URI scheme or host if it cares about them.
+    ///
+    /// The callback also fires when the shell clears the pwd (e.g. an empty
+    /// OSC 7). In that case [`Terminal::pwd()`] returns a zero-length slice.
     pub fn on_pwd_changed(
         &mut self,
         tag = PWD_CHANGED,
@@ -446,10 +345,15 @@ handlers! {
         func(term);
     }
 
-    /// Call the given function in response to XTWINOPS size queries
-    /// (CSI 14/16/18 t) and when VT input enables in-band size reports (mode
-    /// 2048). Return the current terminal geometry, or `None` to suppress the
-    /// report.
+
+    /// Call this given function in response to XTWINOPS size queries (CSI
+    /// 14/16/18/19 t) and when VT input enables in-band size reports (mode
+    /// 2048). Return `Some` with the current terminal geometry, or return
+    /// `None` to suppress the report.
+    ///
+    /// [`SizeReportSize`] is frozen. If a later version of libghostty-vt needs
+    /// more fields, it adds a new callback, and keeps calling this callback
+    /// forever. A callback keeps working with every later version of the library.
     pub fn on_size(
         &mut self,
         tag = SIZE,
@@ -465,11 +369,13 @@ handlers! {
         }
     }
 
-    /// Call the given function in response to a color scheme
-    /// device status report query (CSI ? 996 n).
+
+
+    /// Call this given function for color scheme queries (CSI ? 996 n).
     ///
-    /// Return `Some` to report the current color scheme,
-    /// or return `None` to silently ignore.
+    /// Called when the terminal receives a color scheme device status report
+    /// query. Return `Some` with the current color scheme, or return false to
+    /// silently ignore the query.
     pub fn on_color_scheme(
         &mut self,
         tag = COLOR_SCHEME,
@@ -485,11 +391,48 @@ handlers! {
         }
     }
 
-    /// Call the given function in response to a device attributes query
-    /// (CSI c, CSI > c, or CSI = c).
+
+    /// Call this given function for device attributes queries (DA1/DA2/DA3).
     ///
-    /// Return `Some` with the response data,
-    /// or return `None` to silently ignore.
+    /// Called when the terminal receives a device attributes query (CSI c,
+    /// CSI > c, or CSI = c). Return `Some` with the response data, or return
+    /// `None` to answer with the library's default attributes (a VT220 with
+    /// ANSI color). The default replies are CSI ? 62 ; 22 c to CSI c,
+    /// CSI > 1 ; 0 ; 0 c to CSI > c, and DCS ! | 00000000 ST to CSI = c.
+    ///
+    /// The terminal uses whichever sub-struct (primary, secondary, tertiary)
+    /// matches the request type, but all three should be filled for simplicity.
+    ///
+    ///This callback reports a VT220 with color and clipboard support, and
+    /// leaves the tertiary unit ID at zero:
+    ///
+    /// ```rust
+    /// # use libghostty_vt::{error::Error, Terminal};
+    /// use libghostty_vt::effect::*;
+    ///
+    /// # fn main() -> Result<(), Error> {
+    /// # let mut terminal = Terminal::new(80, 24)?;
+    /// terminal.on_device_attributes(|_term| {
+    ///     const FEATURES: [DeviceAttributeFeature; 2] = [
+    ///         DeviceAttributeFeature::ANSI_COLOR,
+    ///         DeviceAttributeFeature::CLIPBOARD,
+    ///     ];
+    ///     Some(DeviceAttributes {
+    ///         primary: PrimaryDeviceAttributes::new(ConformanceLevel::VT220, &FEATURES),
+    ///         secondary: SecondaryDeviceAttributes {
+    ///             device_type: DeviceType::VT220,
+    ///             firmware_version: 0,
+    ///             rom_cartridge: 0,
+    ///         },
+    ///         tertiary: TertiaryDeviceAttributes::default(),
+    ///     })
+    /// })?;
+    /// # Ok(()) }
+    /// ```
+    ///
+    /// [`DeviceAttributes`] is frozen. If a later version of libghostty-vt needs
+    /// more fields, it adds a new callback, and keeps calling this callback
+    /// forever. A callback keeps working with every later version of the library.
     pub fn on_device_attributes(
         &mut self,
         tag = DEVICE_ATTRIBUTES,
@@ -507,28 +450,24 @@ handlers! {
 
     /// Call the given function when the running program performs a clipboard write.
     ///
-    /// Protocol details such as OSC 52 selectors, base64 encoding, multipart
-    /// chunks, aliases, and terminators are normalized before this callback is
-    /// invoked. OSC 52, iTerm2 OSC 1337 Copy, and Kitty clipboard (OSC 5522)
-    /// writes therefore use the same callback shape. Without this callback,
-    /// clipboard writes are ignored and Kitty clipboard writes are refused
-    /// with ENOSYS.
+    /// OSC 52, iTerm2 OSC 1337 Copy, and Kitty clipboard (OSC 5522) writes
+    /// are normalized to an atomic set of decoded MIME representations.
     ///
-    /// The embedder may ask for permission to write or perform the write
-    /// async, but the callback itself is synchronous and
-    /// [`ClipboardWrite::reply`] must be called before it returns. While this
-    /// callback is active the VT stream is paused. Returning without a reply
-    /// denies the write.
+    /// You may ask for permission to write or perform the write async, but the
+    /// callback itself is synchronous and the reply function must be called
+    /// during the lifetime of this function. While this callback is active the
+    /// VT stream is paused.
+    ///
+    /// Answer by calling `write.reply()` before returning. See [`ClipboardWrite`]
+    /// for the full contract.
     ///
     /// The request may carry an optional program name requesting the write
-    /// and the state of prior permission granted. If
-    /// [`ClipboardWrite::can_remember`] is set the reply may set `remember`,
-    /// and future requests from this same program will be
-    /// [granted](ClipboardWrite::granted) so the embedder can skip permission
-    /// requests.
+    /// and the state of prior permission granted. If `can_remember` is set the
+    /// response may set the remember flag and future requests from this same
+    /// program will be "granted" and you can skip permission requests.
     ///
-    /// Clipboard read requests (OSC 52 `?` and OSC 5522 reads) are delivered
-    /// to [`Self::on_clipboard_read`] instead.
+    /// Clipboard read requests (OSC 52 `"?"` and OSC 5522 reads) are delivered to
+    /// [`Terminal::on_clipboard_read`] instead.
     pub fn on_clipboard_write(
         &mut self,
         tag = CLIPBOARD_WRITE,
@@ -543,34 +482,31 @@ handlers! {
     }
 
     /// Call the given function when the running program requests clipboard
-    /// contents via OSC 52 with a `?` payload or a Kitty clipboard (OSC 5522)
-    /// read.
-    ///
-    /// Answering lets the program read the user's clipboard, so the embedder
-    /// is expected to mediate consent. Because the read is synchronous, an
-    /// embedder that needs to ask the user must block (for example by running
-    /// a modal prompt) until it has an answer; the VT stream waits until the
+    /// contents via OSC 52 with a "?" payload or a Kitty clipboard (OSC 5522)
+    /// read. The read is synchronous and must be answered before the
     /// callback returns.
     ///
-    /// Answer by calling [`ClipboardRead::reply`] before returning. See
-    /// [`ClipboardRead`] for the full contract.
+    /// Answering lets the program read the clipboard of the person using your
+    /// terminal, so you are expected to mediate consent. Because the read is
+    /// synchronous, an embedder that needs to ask them must block (for example
+    /// by running a modal prompt) until it has an answer; the VT stream waits
+    /// until the callback returns.
+    ///
+    /// Answer by calling `read.reply()` before returning. See [`ClipboardRead`]
+    /// for the full contract.
     ///
     /// OSC 5522 requests carry the program's MIME list, name, and password
     /// grant state; a reply that sets `remember` records a session grant so
-    /// later requests with the same password arrive with
-    /// [`granted`](ClipboardRead::granted) set. Kitty itself serves a request
-    /// for only the targets listing ([`list`](ClipboardRead::list) with no
-    /// [`mimes`](ClipboardRead::mimes)) without prompting, and embedders are
-    /// expected to do the same; the terminal never consults grants for such
-    /// requests (`granted` is false and one-time passwords are not consumed).
-    ///
-    /// Without this callback, OSC 52 read requests are ignored and OSC 5522
-    /// reads are refused with EPERM.
+    /// later requests with the same password arrive with granted set. Kitty
+    /// itself serves a request for only the targets listing (`list` with no
+    /// `mimes`) without prompting, and embedders are expected to do the same;
+    /// the terminal never consults grants for such requests (`granted` is
+    /// false and one-time passwords are not consumed).
     ///
     /// Installing this callback also enables Kitty paste events (mode 5522):
-    /// [`Terminal::paste`] sends the program an event instead of the text, and
-    /// the program's follow-up read arrives here with `granted` set since the
-    /// user already pasted.
+    /// [`Terminal::paste`] sends the program an event instead of the text,
+    /// and the program's follow-up read arrives here with granted set since
+    /// the user already pasted. See [`Terminal::paste`].
     pub fn on_clipboard_read(
         &mut self,
         tag = CLIPBOARD_READ,
@@ -582,7 +518,7 @@ handlers! {
         func(term, unsafe { ClipboardRead::from_raw(read) });
     }
 
-    /// Callback invoked when the running program requests a desktop
+    /// Call the given function when the running program requests a desktop
     /// notification via OSC 9 or OSC 777.
     pub fn on_desktop_notification(
         &mut self,
@@ -610,9 +546,6 @@ handlers! {
 
     /// Call the given function when the running program sends a program
     /// status report via OSC 7501.
-    ///
-    /// Called synchronously each time the running program sends a valid
-    /// report. See [`ProgramStatus`] for what a report contains.
     ///
     /// The terminal doesn't store reports, so your application keeps them.
     /// To follow the specification, keep one record per id. A report with an
@@ -763,53 +696,20 @@ handlers! {
         func(term, unsafe { ProgramStatus::from_raw(report) });
     }
 
-    /// Call the given function when the shell reports a step of a command:
-    /// a prompt starts, input starts, output starts, or the command ends.
+    /// Call the given function when the shell reports a step of a command.
     ///
-    /// Each command goes through four steps, in this order: the prompt
-    /// starts, input starts, output starts, and the command ends. Then the
-    /// next prompt starts. See [`SemanticPromptKind`].
+    /// Each command goes through four steps, in this order: the prompt starts,
+    /// input starts, output starts, and the command ends. Then the next
+    /// prompt starts.
     ///
-    /// Shells differ in what they report. Many don't send the command line
-    /// or the exit code, and some skip steps, so handle each event on its
-    /// own instead of expecting a strict order. A shell may also start the
-    /// same prompt more than once, for example when it redraws the prompt
-    /// after a resize, so treat a repeated
-    /// [`SemanticPromptKind::PromptStart`] as harmless.
+    /// Shells differ in what they report. Many don't send the command line or
+    /// the exit code, and some skip steps, so handle each event on its own
+    /// instead of expecting a strict order. A shell may also start the same
+    /// prompt more than once, for example when it redraws the prompt after a
+    /// resize, so treat a repeated [`SemanticPromptKind::PromptStart`] as harmless.
     ///
-    /// The terminal has already updated its screen when this is called. A
-    /// sequence the terminal rejects as malformed is never reported.
-    ///
-    /// The event and its strings are only valid during the call.
-    ///
-    /// Example, logging each command's result:
-    ///
-    /// ```rust
-    /// use std::cell::RefCell;
-    /// use libghostty_vt::{Terminal, effect::SemanticPromptKind};
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let results = RefCell::new(Vec::new());
-    ///
-    /// let mut terminal = Terminal::new(80, 24)?;
-    /// terminal.on_semantic_prompt(|_term, event| {
-    ///     // A panic in the callback aborts the process, so ignore a kind
-    ///     // these bindings don't know instead of unwrapping.
-    ///     if let Ok(SemanticPromptKind::CommandEnd) = event.kind() {
-    ///         // Many shells don't report the exit code, so this may be
-    ///         // `None` even for a command that ran.
-    ///         results.borrow_mut().push(event.exit_code());
-    ///     }
-    /// })?;
-    ///
-    /// // The shell reports a command that exited with 1, then one that
-    /// // didn't say how it went.
-    /// terminal.vt_write(b"\x1b]133;D;1\x07");
-    /// terminal.vt_write(b"\x1b]133;D\x07");
-    /// assert_eq!(*results.borrow(), [Some(1), None]);
-    /// # Ok(())
-    /// # }
-    /// ```
+    /// The terminal has already updated its screen when this is called.
+    /// A sequence the terminal rejects as malformed is never reported.
     pub fn on_semantic_prompt(
         &mut self,
         tag = SEMANTIC_PROMPT,
@@ -920,17 +820,13 @@ handlers! {
     /// implement. Match on [`UnknownSequence`] first, because more kinds of
     /// sequences may be reported in later versions.
     ///
-    /// Sequences of a kind these bindings don't know, and OSC sequences with
-    /// an [`osc::Terminator`] these bindings don't know, are not passed to the
-    /// closure.
-    ///
     /// These are not reported:
     ///
     /// - Sequences cut short before their terminator, either cancelled by CAN
     ///   or SUB or aborted by another 8-bit control byte.
     /// - Sequences libghostty-vt implements, even when their contents are
     ///   malformed.
-    /// - Supported protocols that the embedder turned off.
+    /// - Supported protocols that you turned off.
     ///
     /// The callback runs during [`Self::vt_write`]. It may write a reply to
     /// the pty, and that reply stays in order with the terminal's own
@@ -939,66 +835,13 @@ handlers! {
     /// Nothing is reported until [`Self::set_unknown_max_bytes`] is also set
     /// to a nonzero value. Installing the callback by itself keeps no sequence
     /// data and allocates no sequence-capture buffers.
-    ///
-    /// For OSC, the content is everything between `ESC ]` and the terminator,
-    /// including the number that identifies the sequence. As an example,
-    /// suppose your application invents its own OSC 7400 so that programs can
-    /// report their status. If a program writes `ESC ] 7400;status=busy BEL`,
-    /// the callback receives the content `7400;status=busy` and the
-    /// terminator [`osc::Terminator::Bel`]. Match on the number followed by
-    /// `;`, so that `7400;` does not also match an unrelated `74000;`
-    /// sequence.
-    ///
-    /// Only numbers libghostty-vt does not recognize are reported. A sequence
-    /// that uses a number it does implement, such as OSC 2 for the window
-    /// title, is never reported, even when its contents are malformed.
-    ///
-    /// Use the terminator from the request in your reply, since that is what
-    /// the program expects.
-    ///
-    /// ```rust
-    /// use std::cell::RefCell;
-    /// use libghostty_vt::{Terminal, effect::UnknownSequence};
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let statuses = RefCell::new(Vec::new());
-    ///
-    /// let mut terminal = Terminal::new(80, 24)?;
-    /// terminal
-    ///     .on_unknown_sequence(|_term, sequence| {
-    ///         let UnknownSequence::Osc { content, truncated, .. } = sequence else {
-    ///             return;
-    ///         };
-    ///         // This protocol needs the whole sequence, so skip cut-off ones.
-    ///         if truncated {
-    ///             return;
-    ///         }
-    ///         // Only handle OSC 7400. Everything else is ignored.
-    ///         if let Some(status) = content.strip_prefix(b"7400;") {
-    ///             // The content is only valid during this call. Copy it if you need it
-    ///             // later.
-    ///             statuses.borrow_mut().push(status.to_vec());
-    ///         }
-    ///     })?
-    ///     // Keep up to 4 KiB of each unknown sequence and report them.
-    ///     .set_unknown_max_bytes(4096)?;
-    ///
-    /// terminal.vt_write(b"\x1b]7400;status=busy\x07");
-    /// assert_eq!(*statuses.borrow(), [b"status=busy".to_vec()]);
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn on_unknown_sequence(
         &mut self,
         tag = UNKNOWN_SEQUENCE,
         from = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence),
         to = <'t>UnknownSequenceFn(UnknownSequence<'t>),
     ) |term, func| {
-        // SAFETY: libghostty passes a valid, aligned sequence for the
-        // callback duration, with the tag and the union field it names
-        // written (`lib.TaggedUnion.cval`). Upstream documents the content
-        // as valid only for the callback duration; the higher-ranked `'t` on
-        // `UnknownSequenceFn` stops the closure from keeping it.
+        // SAFETY: Sequence data only lasts as long as the callback.
         if let Some(sequence) = unsafe { UnknownSequence::from_raw(sequence) } {
             func(term, sequence);
         }
@@ -1018,7 +861,6 @@ handlers! {
 /// The write is answered by calling [`reply`](Self::reply). This must happen
 /// within the clipboard write request callback. Returning without replying
 /// denies the write.
-///
 #[derive(Debug)]
 pub struct ClipboardWrite<'t> {
     ptr: *const ffi::ClipboardWrite,
@@ -1061,6 +903,7 @@ impl<'t> ClipboardWrite<'t> {
     /// `remember` records a session grant so future requests from the same
     /// program skip the permission prompt. It is only honored on success when
     /// [`can_remember`](Self::can_remember) is set.
+    // FIXME: Reinstate reply object, make it resilient to breakages
     pub fn reply(self, result: std::result::Result<(), ClipboardWriteError>, remember: bool) {
         let reply = ffi::ClipboardWriteReply {
             result: result.map_or_else(Into::into, |()| ffi::ClipboardWriteResult::SUCCESS),
@@ -1261,7 +1104,6 @@ impl<'t> ClipboardRead<'t> {
     ///
     /// The values come straight from the program, so they are exposed as
     /// raw bytes.
-    #[must_use]
     pub fn mimes(&self) -> impl ExactSizeIterator<Item = &'t [u8]> + use<'t> {
         // SAFETY: The request lives for the callback duration.
         let (ptr, len) = unsafe { ((*self.ptr).mimes, (*self.ptr).mimes_len) };
@@ -1346,6 +1188,7 @@ impl<'t> ClipboardRead<'t> {
     /// both callbacks share state through a [`RefCell`](std::cell::RefCell),
     /// don't keep it borrowed across `reply`: the pty write callback's borrow
     /// would panic, and a panic in a callback aborts the process.
+    // FIXME: Reinstate reply object, make it resilient to breakages
     pub fn reply(
         self,
         result: std::result::Result<&[ClipboardReplyContent<'_>], ClipboardReadError>,

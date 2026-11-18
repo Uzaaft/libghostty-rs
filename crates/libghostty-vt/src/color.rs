@@ -1,18 +1,105 @@
 //! Parse colors, generate palettes, and look up X11 color names.
 //!
-//! These are Ghostty's own color rules, so you don't have to write them again: the color strings its config and theme files accept, the 256-color palette the terminal uses, and the X11 color names.
+//! These are Ghostty's own color rules, so you don't have to write them again:
+//! the color strings its config and theme files accept, the 256-color palette
+//! the terminal uses, and the X11 color names.
 //!
-//! Use them when your application has to agree with Ghostty about what a color means, or to make UI decisions from luminance and contrast values. You don't need a terminal.
+//! Use them when your application has to agree with Ghostty about what a color
+//! means, or to make UI decisions from luminance and contrast values.
+//! You don't need a terminal.
+//!
+//! See the [Colors guide] for parsing, palettes, and how a terminal's colors work.
+//!
+#![doc = crate::guide_ref!("Colors guide", "colors")]
 //!
 //! # Example
+//!
 //! ```
 //! use libghostty_vt::color::Rgb;
 //! let color: Rgb = "#abc".parse().unwrap();
 //! ```
-// FIXME: link to transcluded examples and guide
 use std::{ffi::CStr, mem::MaybeUninit, slice};
 
-use crate::{error::Result, ffi};
+use crate::{Terminal, error::Result, ffi};
+
+/// Methods related to [colors](crate::color).
+impl Terminal<'_, '_> {
+    /// The effective foreground color (override or default).
+    pub fn fg_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_FOREGROUND)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default foreground color (ignoring any OSC override).
+    pub fn default_fg_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_FOREGROUND_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default foreground color.
+    pub fn set_default_fg_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::COLOR_FOREGROUND,
+            v.map(ffi::ColorRgb::from).as_ref(),
+        )?;
+        Ok(self)
+    }
+
+    /// The effective background color (override or default).
+    pub fn bg_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_BACKGROUND)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default background color (ignoring any OSC override).
+    pub fn default_bg_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_BACKGROUND_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default background color.
+    pub fn set_default_bg_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::COLOR_BACKGROUND,
+            v.map(ffi::ColorRgb::from).as_ref(),
+        )?;
+        Ok(self)
+    }
+
+    /// The effective cursor color (override or default).
+    pub fn cursor_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_CURSOR)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default cursor color (ignoring any OSC override).
+    pub fn default_cursor_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_CURSOR_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default cursor color.
+    pub fn set_default_cursor_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::COLOR_CURSOR,
+            v.map(ffi::ColorRgb::from).as_ref(),
+        )?;
+        Ok(self)
+    }
+
+    /// The current 256-color palette.
+    pub fn color_palette(&self) -> Result<Palette> {
+        self.get::<RawPalette>(ffi::TerminalData::COLOR_PALETTE)
+            .map(Palette::from)
+    }
+    /// The default 256-color palette (ignoring any OSC overrides).
+    pub fn default_color_palette(&self) -> Result<Palette> {
+        self.get::<RawPalette>(ffi::TerminalData::COLOR_PALETTE_DEFAULT)
+            .map(Palette::from)
+    }
+    /// Set the default 256-color palette.
+    pub fn set_default_color_palette(&mut self, v: Option<Palette>) -> Result<&mut Self> {
+        self.set_optional::<RawPalette>(
+            ffi::TerminalOption::COLOR_PALETTE,
+            v.map(std::convert::Into::into).as_ref(),
+        )?;
+        Ok(self)
+    }
+}
 
 /// RGB color value.
 #[repr(C)]
@@ -117,7 +204,7 @@ impl From<Rgb> for ffi::ColorRgb {
 pub struct Palette(pub [Rgb; 256]);
 
 // Saves a bit of typing
-pub(crate) type RawPalette = [ffi::ColorRgb; 256];
+type RawPalette = [ffi::ColorRgb; 256];
 
 impl From<RawPalette> for Palette {
     fn from(v: RawPalette) -> Self {

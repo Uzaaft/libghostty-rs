@@ -13,25 +13,33 @@ use libghostty_vt::{
     Error, Terminal,
     effect::{ClipboardMime, ClipboardReadError},
     paste::Options,
-    sys::set_secure_random_source,
+    sys,
 };
 
 static CALLS: AtomicUsize = AtomicUsize::new(0);
 static ALWAYS_ZEROED: AtomicBool = AtomicBool::new(true);
 
-fn no_entropy(_: &mut [u8]) -> bool {
-    CALLS.fetch_add(1, Ordering::Relaxed);
-    false
+struct NoEntropy;
+
+impl sys::SecureRandomSource for NoEntropy {
+    fn fill(&self, _: &mut [u8]) -> bool {
+        CALLS.fetch_add(1, Ordering::Relaxed);
+        false
+    }
 }
 
 // Not a CSPRNG: only for checking that the registered source is used.
-fn counting(buf: &mut [u8]) -> bool {
-    let call = CALLS.fetch_add(1, Ordering::Relaxed);
-    if buf.iter().any(|&b| b != 0) {
-        ALWAYS_ZEROED.store(false, Ordering::Relaxed);
+struct Counting;
+
+impl sys::SecureRandomSource for Counting {
+    fn fill(&self, buf: &mut [u8]) -> bool {
+        let call = CALLS.fetch_add(1, Ordering::Relaxed);
+        if buf.iter().any(|&b| b != 0) {
+            ALWAYS_ZEROED.store(false, Ordering::Relaxed);
+        }
+        buf.fill(call as u8);
+        true
     }
-    buf.fill(call as u8);
-    true
 }
 
 /// Paste into a terminal whose program asked for Kitty paste events, which
@@ -63,9 +71,7 @@ fn registered_source_replaces_the_platform_default() {
     assert!(platform.starts_with(b"\x1b]5522;type=read:status=OK:pw="));
 
     // A source without entropy fails the paste event and writes nothing.
-    // SAFETY: This is the only test in this binary, so nothing else uses
-    // libghostty concurrently.
-    unsafe { set_secure_random_source(Some(no_entropy)) }.unwrap();
+    sys::SECURE_RANDOM_SOURCE.install(&NoEntropy).unwrap();
     let (result, output) = paste_event();
     assert!(matches!(result, Err(Error::IoError)));
     assert!(output.is_empty());
@@ -74,8 +80,9 @@ fn registered_source_replaces_the_platform_default() {
     // A working source is used for the password, and always gets a zeroed
     // buffer.
     CALLS.store(0, Ordering::Relaxed);
-    // SAFETY: Ditto
-    unsafe { set_secure_random_source(Some(counting)) }.unwrap();
+    // SAFETY: Everything is singlethreaded and nothing is currently
+    // calling the random source.
+    unsafe { sys::SECURE_RANDOM_SOURCE.install_unsafe(&Counting) }.unwrap();
     let (result, first) = paste_event();
     assert!(result.unwrap());
     assert!(CALLS.load(Ordering::Relaxed) > 0);
@@ -85,7 +92,7 @@ fn registered_source_replaces_the_platform_default() {
 
     // Clearing the source restores the platform default.
     // SAFETY: Ditto
-    unsafe { set_secure_random_source(None) }.unwrap();
+    unsafe { sys::SECURE_RANDOM_SOURCE.uninstall() }.unwrap();
     CALLS.store(0, Ordering::Relaxed);
     let (result, _) = paste_event();
     assert!(result.unwrap());

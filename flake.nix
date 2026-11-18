@@ -344,6 +344,7 @@
             pkgs.openssl
             pkgs.cmake
             pkgs.ninja
+            pkgs.mdbook
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
             pkgs.libx11
             pkgs.libxcursor

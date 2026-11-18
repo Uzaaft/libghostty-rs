@@ -37,7 +37,7 @@ pub extern "C" fn run() {
     for custom_allocator in [false, true] {
         let response = RefCell::new(Vec::new());
         let mut terminal = if custom_allocator {
-            Terminal::new_with_alloc(&Allocator::GLOBAL, 13, 7)
+            Terminal::new_in(&Allocator::GLOBAL, 13, 7)
         } else {
             Terminal::new(13, 7)
         }

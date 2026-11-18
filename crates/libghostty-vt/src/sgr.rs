@@ -1,4 +1,38 @@
-//! Handling SGR (Select Graphic Rendition) escape sequences.
+//! Parse SGR sequences into text attributes.
+//!
+//! The SGR parser turns the parameters of a Select Graphic Rendition sequence
+//! into text attributes, one at a time.
+//!
+//! SGR is how programs set bold, italic, underline and colors. In `ESC[1;31m`,
+//! `1;31` is the attribute list. A terminal parses these by itself, so you only
+//! need this for SGR sequences outside of one. It accepts semicolons and colons,
+//! even mixed. Colors come back as [color](crate::color) types.
+//!
+//! To read the styles of a terminal's cells, see the [Style](crate::style) module.
+//!
+//! # Example
+//!
+//! ```rust
+//! use libghostty_vt::{error::Error, sgr};
+//!
+//! fn basic_example() -> Result<(), Error> {
+//!     // Create parser
+//!     let mut parser = sgr::Parser::new()?;
+//!
+//!     // Parse "bold, red foreground" sequence: ESC[1;31m
+//!     parser.set_params(&[1, 31], None)?;
+//!
+//!     // Iterate through attributes
+//!     while let Some(attr) = parser.next()? {
+//!         match attr {
+//!             sgr::Attribute::Bold => println!("Bold enabled"),
+//!             sgr::Attribute::Fg8(color) => println!("Foreground color: {color:?}"),
+//!             _ => {}
+//!         }
+//!     }
+//!     Ok(())
+//! }
+//! ```
 
 use crate::{
     alloc::{Allocator, Object},
@@ -8,34 +42,10 @@ use crate::{
     style::Underline,
 };
 
-/// SGR (Select Graphic Rendition) attribute parser.
+/// Opaque handle to an SGR parser instance.
 ///
-/// SGR sequences are the syntax used to set styling attributes such as bold,
-/// italic, underline, and colors for text in terminal emulators. For example,
-/// you may be familiar with sequences like `ESC[1;31m`. The 1;31 is the SGR
-/// attribute list.
-///
-/// The parser processes SGR parameters from CSI sequences (e.g., `ESC[1;31m`)
-/// and returns individual text attributes like bold, italic, colors, etc. It
-/// supports both semicolon (`;`) and colon (`:`) separators, possibly mixed,
-/// and handles various color formats including 8-color, 16-color, 256-color,
-/// X11 named colors, and RGB in multiple formats.
-///
-/// # Example
-/// ```rust
-/// use libghostty_vt::sgr::{Parser, Attribute};
-///
-/// let mut parser = Parser::new().unwrap();
-/// parser.set_params(&[1, 31], None).unwrap();
-///
-/// while let Some(attr) = parser.next().unwrap() {
-///     match attr {
-///         Attribute::Bold => println!("Bold enabled"),
-///         Attribute::Fg8(color) => println!("Foreground color: {color:?}"),
-///         _ => {},
-///     }
-/// }
-/// ```
+/// This handle represents an SGR (Select Graphic Rendition) parser that can be
+/// used to parse SGR sequences and extract individual text attributes.
 #[derive(Debug)]
 pub struct Parser<'alloc>(Object<'alloc, ffi::SgrParserImpl>);
 
@@ -50,7 +60,7 @@ impl<'alloc> Parser<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -64,22 +74,25 @@ impl<'alloc> Parser<'alloc> {
 
     /// Set SGR parameters for parsing.
     ///
-    /// Parameters are the numeric values from a CSI SGR sequence (e.g., for `ESC[1;31m`, params
-    /// would be `[1, 31]`).
+    /// Parameters are the numeric values from a CSI SGR sequence (e.g., for
+    /// `ESC[1;31m`, params would be `[1, 31]`).
     ///
-    /// The `separators` slice optionally specifies the separator type for each parameter position.
-    /// Each byte should be either `b';'` for semicolon or `b':'` for colon.
-    /// This is needed for certain color formats that use colon separators (e.g., `ESC[4:3m`
-    /// for curly underline). Any invalid separator values are treated as semicolons.
+    /// The `separators` slice optionally specifies the separator type for each
+    /// parameter position. Each byte should be either `b';'` for semicolon or
+    /// `b':'` for colon. This is needed for certain color formats that use
+    /// colon separators (e.g., `ESC[4:3m` for curly underline). Any invalid
+    /// separator values are treated as semicolons.
     ///
-    /// If `separators` is `None`, all parameters are assumed to be semicolon-separated.
+    /// If `separators` is `None`, all parameters are assumed to be
+    /// semicolon-separated.
     ///
-    /// After calling this function, the parser is automatically reset and ready to iterate from
-    /// the beginning.
+    /// After calling this function, the parser is automatically reset and ready
+    /// to iterate from the beginning.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// **Panics** if `separators` is not `None` and is not the same length as `params`.
+    /// Returns `Err(Error::InvalidValue)` if `separators` is not `None` and is
+    /// not the same length as `params`.
     pub fn set_params(&mut self, params: &[u16], separators: Option<&[u8]>) -> Result<()> {
         let sep = match separators {
             Some(seps) => {
@@ -102,9 +115,6 @@ impl<'alloc> Parser<'alloc> {
     /// Parses and returns the next attribute from the parameter list.
     /// Call this function repeatedly until it returns `None` to process all
     /// attributes in the sequence.
-    ///
-    /// This cannot be expressed as a regular iterator since the returned
-    /// attribute borrows memory from the parser directly.
     #[expect(
         clippy::should_implement_trait,
         reason = "lending `next` cannot implement trait"
@@ -232,6 +242,9 @@ impl Attribute<'_> {
 }
 
 /// Unknown SGR attribute data.
+///
+/// Contains the full parameter list and the partial list where parsing
+/// encountered an unknown or invalid sequence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Unknown<'p> {
     /// Full parameter list.
@@ -241,17 +254,9 @@ pub struct Unknown<'p> {
 }
 
 impl Unknown<'_> {
-    /// Borrow the parameter lists of an unknown attribute.
-    ///
-    /// Not a `From` impl on purpose: `ffi::SgrUnknown` is a plain public
-    /// struct (its `Default` even has NULL pointers), and the output lifetime
-    /// is picked by the caller, so a safe conversion would let safe code
-    /// conjure slices out of arbitrary pointers. Only libghostty's own output
-    /// is valid input.
-    ///
     /// # Safety
     ///
-    /// Both pointer/length pairs must describe valid, aligned `u16` slices
+    /// Both pointer/length pairs must describe valid `u16` slices
     /// that stay alive and unmodified for the chosen lifetime.
     unsafe fn from_raw(value: ffi::SgrUnknown) -> Self {
         // SAFETY: Upheld by caller.

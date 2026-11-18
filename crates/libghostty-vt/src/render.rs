@@ -9,7 +9,7 @@ use crate::{
     ffi,
     screen::{Cell, Row},
     style::Style,
-    terminal::Terminal,
+    terminal::{CursorStyle, Terminal},
 };
 
 pub use ffi::RenderStateRowSelection as RowSelection;
@@ -764,7 +764,7 @@ impl<'alloc> RenderState<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -959,7 +959,7 @@ impl Snapshot<'_, '_> {
     }
 
     /// Get the visual style of the cursor.
-    pub fn cursor_visual_style(&self) -> Result<CursorVisualStyle> {
+    pub fn cursor_visual_style(&self) -> Result<CursorStyle> {
         self.get::<ffi::CursorStyle::Type>(ffi::RenderStateData::CURSOR_VISUAL_STYLE)
             .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
@@ -1086,7 +1086,7 @@ impl<'alloc> RowIterator<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -1301,7 +1301,7 @@ impl<'alloc> CellIterator<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -1580,7 +1580,7 @@ impl<'alloc> ImageIterator<'alloc> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -1919,7 +1919,7 @@ pub struct Cursor {
     /// Whether the cursor is at a password input field.
     pub password_input: bool,
     /// The visual style of the cursor.
-    pub visual_style: CursorVisualStyle,
+    pub visual_style: CursorStyle,
 }
 
 /// The [identity](RenderState#row-identity) of a row across render state
@@ -1954,21 +1954,6 @@ pub enum Dirty {
     Partial = ffi::RenderStateDirty::PARTIAL,
     /// Global state changed; renderer should redraw everything.
     Full = ffi::RenderStateDirty::FULL,
-}
-
-/// Visual style of the cursor.
-#[repr(i32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[non_exhaustive]
-pub enum CursorVisualStyle {
-    /// Bar cursor (DECSCUSR 5, 6).
-    Bar = ffi::CursorStyle::BAR,
-    /// Block cursor (DECSCUSR 1, 2).
-    Block = ffi::CursorStyle::BLOCK,
-    /// Underline cursor (DECSCUSR 3, 4).
-    Underline = ffi::CursorStyle::UNDERLINE,
-    /// Hollow block cursor.
-    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 /// The image protocols that a terminal supports.
@@ -2116,7 +2101,7 @@ mod tests {
         let cursor = snapshot.cursor().unwrap();
         assert_eq!(cursor, cursor_from_getters(&snapshot));
         assert!(!cursor.visible);
-        assert_eq!(cursor.visual_style, CursorVisualStyle::Bar);
+        assert_eq!(cursor.visual_style, CursorStyle::Bar);
         assert_eq!(
             cursor.viewport,
             Some(CursorViewport {
@@ -2128,7 +2113,9 @@ mod tests {
 
         // Scrolling the cursor out of the viewport leaves no position.
         terminal.vt_write(b"\r\n\r\n\r\n");
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Top)
+            .unwrap();
         let snapshot = state.update(&terminal).unwrap();
         let cursor = snapshot.cursor().unwrap();
         assert_eq!(cursor, cursor_from_getters(&snapshot));
@@ -2235,7 +2222,9 @@ mod tests {
         );
 
         // At the top, there is nothing above it.
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Top)
+            .unwrap();
         let snapshot = state.update(&terminal).unwrap();
         assert_eq!(sides(snapshot.overscan().unwrap()), (0, 1));
         assert_eq!(
@@ -2275,7 +2264,9 @@ mod tests {
         );
 
         // Scrolling up by one moves each row one position down, keeping its id.
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Delta(-1));
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Delta(-1))
+            .unwrap();
         let after = row_ids(&mut rows, &state.update(&terminal).unwrap());
         assert_eq!(after[1..], before[..2]);
         assert!(!before.contains(&after[0]));
@@ -2311,12 +2302,13 @@ mod tests {
         let second_row = iteration.next().unwrap().cells_raw().unwrap();
         let first_row: Vec<_> = first_row.collect();
         assert_eq!(first_row, expected);
-        let codepoints =
-            |cells: &[Cell]| -> Vec<u32> { cells.iter().map(|c| c.codepoint().unwrap()).collect() };
-        assert_eq!(codepoints(&first_row), [0x61, 0x62, 0, 0]);
+        let codepoints = |cells: &[Cell]| -> Vec<char> {
+            cells.iter().map(|c| c.codepoint().unwrap()).collect()
+        };
+        assert_eq!(codepoints(&first_row), ['a', 'b', '\0', '\0']);
         assert_eq!(
             codepoints(&second_row.collect::<Vec<_>>()),
-            [0x63, 0x64, 0, 0]
+            ['c', 'd', '\0', '\0']
         );
     }
 
@@ -2387,16 +2379,7 @@ mod tests {
                 .iter()
                 .map(|c| c.codepoint().unwrap())
                 .collect::<Vec<_>>(),
-            [
-                u32::from('a'),
-                u32::from('B'),
-                u32::from('c'),
-                u32::from('界'),
-                0,
-                u32::from('e'),
-                u32::from('P'),
-                0
-            ]
+            ['a', 'B', 'c', '界', '\0', 'e', 'P', '\0']
         );
         assert!(cells[1].has_styling().unwrap());
         assert!(!cells[1].has_hyperlink().unwrap());
@@ -2560,18 +2543,13 @@ mod tests {
 
         // A 1x1 RGB image displayed at the cursor, but no cell size yet.
         terminal.vt_write(b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;////\x1b\\");
+
         // The image was stored, so an empty list is due to the cell size.
         // Only the check needs the `kitty` wrappers; libghostty stores the
         // image either way.
         #[cfg(feature = "kitty-graphics")]
-        assert!(
-            terminal
-                .kitty_graphics()
-                .unwrap()
-                .expect("kitty graphics enabled")
-                .image(1)
-                .is_some()
-        );
+        assert!(terminal.kitty_graphics().unwrap().image(1).is_some());
+
         let snapshot = state.update(&terminal).unwrap();
         let generation = snapshot.image_placements_generation().unwrap();
         {
@@ -2650,12 +2628,8 @@ mod tests {
         // only the `kitty` wrappers can read.
         #[cfg(feature = "kitty-graphics")]
         {
-            let image = terminal
-                .kitty_graphics()
-                .unwrap()
-                .expect("kitty graphics enabled")
-                .image(7)
-                .unwrap();
+            let graphics = terminal.kitty_graphics().unwrap();
+            let image = graphics.image(7).unwrap();
             assert_eq!(found[0].1, image.generation().unwrap());
         }
 
@@ -2797,7 +2771,7 @@ mod tests {
         // refuses everything makes creating it fail.
         let capped = crate::alloc::testing::Capped::new(0);
         assert!(matches!(
-            ImageIterator::new_with_alloc(&capped.allocator()),
+            ImageIterator::new_in(&capped.allocator()),
             Err(Error::OutOfMemory)
         ));
     }
@@ -2813,7 +2787,7 @@ mod tests {
         terminal.vt_write(b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;////\x1b\\");
 
         let mut state = RenderState::new().unwrap();
-        let mut images = ImageIterator::new_with_alloc(&alloc).unwrap();
+        let mut images = ImageIterator::new_in(&alloc).unwrap();
         let snapshot = state.update(&terminal).unwrap();
         let found = placements(&mut images, &snapshot);
         assert_eq!(found.len(), 1);

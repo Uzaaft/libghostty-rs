@@ -113,8 +113,7 @@ use crate::{
     ffi,
 };
 
-// Ref'd in docs only
-#[expect(unused)]
+#[expect(unused, reason = "only referenced in docs")]
 use crate::mode::Mode;
 
 /// Check if paste data is safe to paste into the terminal.
@@ -247,7 +246,7 @@ impl Default for Options {
     }
 }
 
-/// Pasting.
+/// Methods related to [pasting](crate::paste).
 impl Terminal<'_, '_> {
     /// Paste into the terminal according to its current state: a Kitty
     /// clipboard protocol paste event if [`Mode::PASTE_EVENTS`] is enabled and
@@ -293,7 +292,7 @@ impl Terminal<'_, '_> {
     /// - [`Error::InvalidValue`](crate::Error::InvalidValue) if no pty write callback is installed.
     /// - [`Error::IoError`](crate::Error::IoError) if the reader failed, or if there is no secure
     ///   entropy source to mint a paste event password (see
-    ///   [`set_secure_random_source`](crate::sys::set_secure_random_source)).
+    ///   [crate::sys::SECURE_RANDOM_SOURCE]).
     /// - [`Error::OutOfMemory`](crate::Error::OutOfMemory), including when the
     ///   writer refused a write, which only happens when it can't allocate.
     pub fn paste<F>(
@@ -542,7 +541,7 @@ mod tests {
         let capped = crate::alloc::testing::Capped::new(1024 * 1024);
         let alloc = capped.allocator();
         let output = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new_with_alloc(&alloc, 80, 24).unwrap();
+        let mut terminal = Terminal::new_in(&alloc, 80, 24).unwrap();
         terminal
             .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
             .unwrap();

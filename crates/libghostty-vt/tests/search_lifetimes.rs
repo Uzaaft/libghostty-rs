@@ -5,16 +5,16 @@
 
 use libghostty_vt::{Error, Terminal, search::Search};
 
-fn fixture<'t>(terminal: &mut Terminal<'t, '_>) -> Search<'static, 't> {
+fn fixture(terminal: &mut Terminal<'_, '_>) -> Search<'static> {
     terminal.vt_write(b"fixture");
     let mut search = Search::new(terminal).unwrap();
     search.set_needle(terminal, b"fixture").unwrap();
     search.run(terminal).unwrap();
-    assert!(search.select_next(terminal).unwrap());
+    assert!(search.select_next(terminal).unwrap().is_some());
     search
 }
 
-fn rejects_wrong_terminal(search: &mut Search<'_, '_>, terminal: &mut Terminal<'_, '_>) {
+fn rejects_wrong_terminal(search: &mut Search<'_>, terminal: &mut Terminal<'_, '_>) {
     assert!(matches!(search.feed(terminal), Err(Error::InvalidValue)));
     assert!(matches!(search.run(terminal), Err(Error::InvalidValue)));
     assert!(matches!(
@@ -29,42 +29,24 @@ fn rejects_wrong_terminal(search: &mut Search<'_, '_>, terminal: &mut Terminal<'
         search.select_prev(terminal),
         Err(Error::InvalidValue)
     ));
-    assert!(matches!(
-        search.snapshot(terminal),
-        Err(Error::InvalidValue)
-    ));
 }
 
 #[test]
 fn search_can_be_dropped_before_terminal() {
     let mut terminal = Terminal::new(8, 2).unwrap();
     let mut search = fixture(&mut terminal);
-    let snapshot = search.snapshot(&mut terminal).unwrap();
-    snapshot
-        .selected_match()
+
+    search
+        .select_next(&terminal)
         .unwrap()
+        .unwrap()
+        .selection()
         .unwrap()
         .start()
         .cell()
         .unwrap();
     drop(search);
     terminal.vt_write(b"more");
-}
-
-#[test]
-fn swapping_terminals_preserves_identity_and_snapshot_owner() {
-    let mut terminal = Terminal::new(8, 2).unwrap();
-    let mut other = Terminal::new(8, 2).unwrap();
-    let mut search = fixture(&mut terminal);
-    std::mem::swap(&mut terminal, &mut other);
-    rejects_wrong_terminal(&mut search, &mut terminal);
-    let snapshot = search.snapshot(&mut other).unwrap();
-    let selected = snapshot.selected_match().unwrap().unwrap();
-    // This is the replacement, not the owner of selected's pages.
-    drop(terminal);
-    selected.start().cell().unwrap();
-    drop(search);
-    drop(other);
 }
 
 #[test]
@@ -87,11 +69,11 @@ fn replacing_and_freeing_original_rejects_new_terminal() {
 fn multiple_searches_share_identity_and_detach_on_terminal_drop() {
     let mut terminal = Terminal::new(8, 2).unwrap();
     let mut first = fixture(&mut terminal);
-    let mut second = Search::new(&mut terminal).unwrap();
+    let mut second = Search::new(&terminal).unwrap();
     second.set_needle(&mut terminal, b"fixture").unwrap();
     second.run(&mut terminal).unwrap();
-    assert!(second.select_next(&mut terminal).unwrap());
-    first.feed(&mut terminal).unwrap();
+    assert!(second.select_next(&terminal).unwrap().is_some());
+    first.feed(&terminal).unwrap();
     drop(terminal);
     // Ticking needs the terminal too, even though it doesn't borrow it.
     assert!(matches!(first.tick(), Err(Error::InvalidValue)));
@@ -107,32 +89,22 @@ fn match_storage_reuses_only_fresh_snapshots() {
     let mut terminal = Terminal::new(8, 2).unwrap();
     let mut search = fixture(&mut terminal);
     {
-        let snapshot = search.snapshot(&mut terminal).unwrap();
-        let mut matches = snapshot.matches(&mut storage).unwrap();
+        let mut matches = search.matches(&terminal, &mut storage).unwrap();
         assert_eq!(matches.len(), 1);
         matches.next_back().unwrap().start().cell().unwrap();
         assert!(matches.next().is_none());
         assert!(matches.next_back().is_none());
     }
     search.set_needle(&mut terminal, b"").unwrap();
-    assert_eq!(
-        search
-            .snapshot(&mut terminal)
-            .unwrap()
-            .matches(&mut storage)
-            .unwrap()
-            .len(),
-        0
-    );
+    assert_eq!(search.matches(&terminal, &mut storage).unwrap().len(), 0);
     drop(terminal);
     drop(search);
     // Storage still contains raw values from the old terminal. A new read must
     // overwrite them before handing out references bounded by this new owner.
     let mut terminal = Terminal::new(8, 2).unwrap();
-    let mut search = fixture(&mut terminal);
-    let snapshot = search.snapshot(&mut terminal).unwrap();
-    let selected = snapshot
-        .viewport_matches(&mut storage)
+    let search = fixture(&mut terminal);
+    let selected = search
+        .viewport_matches(&terminal, &mut storage)
         .unwrap()
         .next()
         .unwrap();
