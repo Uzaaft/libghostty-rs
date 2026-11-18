@@ -736,7 +736,7 @@ mod tests {
         for len in [0, 1, 4096] {
             for bytes in [
                 super::Bytes::new_zeroed(len).expect("allocation failed"),
-                super::Bytes::new_zeroed_with_alloc(&super::Allocator::GLOBAL, len)
+                super::Bytes::new_zeroed_in(&super::Allocator::GLOBAL, len)
                     .expect("allocation failed"),
             ] {
                 assert_eq!(bytes.len(), len);

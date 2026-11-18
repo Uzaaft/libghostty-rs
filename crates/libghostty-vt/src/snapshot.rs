@@ -321,10 +321,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     ///
     /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
     /// regarding custom memory management and lifetimes.
-    pub fn new_buf_with_alloc<'ctx: 'alloc>(
-        alloc: &'alloc Allocator<'ctx>,
-        buf: &'r [u8],
-    ) -> Result<Self> {
+    pub fn new_buf_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>, buf: &'r [u8]) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_buf_inner(alloc.to_raw(), buf) }
     }
@@ -1076,7 +1073,7 @@ mod tests {
         let bytes = snapshot_with_history();
         let alloc = crate::alloc::testing::Guard::allocator();
 
-        let decoder = Decoder::new_buf_with_alloc(&alloc, &bytes).unwrap();
+        let decoder = Decoder::new_buf_in(&alloc, &bytes).unwrap();
         let mut incremental = decoder.ready().unwrap();
 
         let original = std::mem::replace(

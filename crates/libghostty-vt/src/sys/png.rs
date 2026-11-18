@@ -159,7 +159,7 @@ impl DecodePng for RustPngDecoder {
         // and let a tiny PNG claim gigabytes. (The png crate's own row and
         // zlib buffers stay on the global heap, but they are bounded by the
         // row length and the compressed size, not the image size.)
-        let mut bytes = Bytes::new_zeroed_with_alloc(alloc, rgba_len).ok()?;
+        let mut bytes = Bytes::new_zeroed_in(alloc, rgba_len).ok()?;
 
         // `ALPHA` expands palettes and adds alpha, but keeps grayscale as two
         // channels, so the decoded output is either RGBA8 or GA8. Both fit in
