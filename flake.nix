@@ -199,6 +199,8 @@
             inherit cargoArtifacts;
           }
         );
+
+        mdbookkit = pkgs.callPackage ./nix/mdbookkit.nix { };
       in {
         packages.default = application;
 
@@ -345,6 +347,7 @@
             pkgs.cmake
             pkgs.ninja
             pkgs.mdbook
+            mdbookkit
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
             pkgs.libx11
             pkgs.libxcursor
