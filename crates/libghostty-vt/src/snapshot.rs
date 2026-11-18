@@ -50,6 +50,8 @@ impl Terminal<'_, '_> {
     /// [`Error::LimitExceeded`] if output accounting overflows, or another
     /// error code on failure.
     pub fn encode_snapshot<W: Write>(&mut self, writer: &mut W) -> Result<()> {
+        crate::sys::GATE.freeze();
+
         let writer = crate::io::to_writer(writer);
         let result = unsafe { ffi::ghostty_snapshot_encode(self.inner.as_raw(), writer) };
         from_result(result)
@@ -68,6 +70,8 @@ impl Terminal<'_, '_> {
         &self,
         alloc: Option<&'a Allocator<'ctx>>,
     ) -> Result<Option<Bytes<'a>>> {
+        crate::sys::GATE.freeze();
+
         let mut out = std::ptr::null_mut();
         let mut out_len = 0usize;
         let alloc = alloc.map_or(std::ptr::null(), super::alloc::Allocator::to_raw);
@@ -99,8 +103,9 @@ impl Terminal<'_, '_> {
     /// must have been enabled before the input that produced that state was
     /// written; otherwise this returns [`Error::InvalidValue`].
     pub fn encode_snapshot_buf(&self, buf: &mut [u8]) -> Result<Option<usize>> {
-        let mut written = 0usize;
+        crate::sys::GATE.freeze();
 
+        let mut written = 0usize;
         let result = unsafe {
             ffi::ghostty_snapshot_encode_buf(
                 self.inner.as_raw(),
@@ -160,6 +165,8 @@ impl Terminal<'_, '_> {
     /// [`Error::InvalidValue`] if an argument is invalid, tracking is disabled,
     /// or the current continuation is unavailable.
     pub fn continuation_write<W: Write>(&mut self, writer: &mut W) -> Result<()> {
+        crate::sys::GATE.freeze();
+
         let writer = crate::io::to_writer(writer);
         let result =
             unsafe { ffi::ghostty_terminal_continuation_write(self.inner.as_raw(), writer) };
@@ -187,6 +194,8 @@ impl Terminal<'_, '_> {
         &self,
         alloc: Option<&'a Allocator<'ctx>>,
     ) -> Result<Option<Bytes<'a>>> {
+        crate::sys::GATE.freeze();
+
         let mut out = std::ptr::null_mut();
         let mut out_len = 0usize;
         let alloc = alloc.map_or(std::ptr::null(), super::alloc::Allocator::to_raw);
@@ -226,6 +235,8 @@ impl Terminal<'_, '_> {
     /// insufficient buffer, or [`Error::InvalidValue`] if an argument is invalid,
     /// tracking is disabled, or the current continuation is unavailable.
     pub fn continuation_buf(&self, buf: &mut [u8]) -> Result<Option<usize>> {
+        crate::sys::GATE.freeze();
+
         let mut written = 0usize;
         // The C API uses a NULL pointer to distinguish an explicit size query
         // from a zero-capacity destination. Rust empty slices have a non-NULL
@@ -290,6 +301,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     }
 
     unsafe fn new_inner<R: Read>(alloc: *const ffi::Allocator, r: &'r mut R) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let reader = crate::io::to_reader(r);
         let mut raw: ffi::SnapshotDecoder = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_snapshot_decoder_new(alloc, &raw mut raw, reader) };
@@ -327,6 +340,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     }
 
     unsafe fn new_buf_inner(alloc: *const ffi::Allocator, buf: &[u8]) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::SnapshotDecoder = std::ptr::null_mut();
         let result = unsafe {
             ffi::ghostty_snapshot_decoder_new_buf(alloc, &raw mut raw, buf.as_ptr(), buf.len())
@@ -359,6 +374,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// argument or lifecycle error detected before the operation consumes
     /// input does not poison it.    
     pub fn decode<'cb>(self) -> Result<Terminal<'alloc, 'cb>> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::Terminal = std::ptr::null_mut();
         let result =
             unsafe { ffi::ghostty_snapshot_decoder_decode(self.inner.as_raw(), &raw mut raw) };
@@ -390,6 +407,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// argument or lifecycle error detected before the operation consumes
     /// input does not poison it.    
     pub fn ready<'cb>(self) -> Result<IncrementalDecoder<'alloc, 'r, 'cb>> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::Terminal = std::ptr::null_mut();
         let result =
             unsafe { ffi::ghostty_snapshot_decoder_ready(self.inner.as_raw(), &raw mut raw) };
@@ -404,6 +423,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     }
 
     fn get<T>(&self, tag: Data::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_snapshot_decoder_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
@@ -413,6 +434,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
         Ok(unsafe { value.assume_init() })
     }
     fn get_optional<T>(&self, tag: Data::Type) -> Result<Option<T>> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_snapshot_decoder_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
@@ -420,6 +443,8 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
         from_optional_result_uninit(result, value)
     }
     fn set<T>(&self, tag: Opt::Type, v: &T) -> Result<()> {
+        crate::sys::GATE.freeze();
+
         let result = unsafe {
             ffi::ghostty_snapshot_decoder_set(
                 self.inner.as_raw(),
@@ -580,6 +605,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
 
 impl Drop for Decoder<'_, '_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe {
             ffi::ghostty_snapshot_decoder_free(self.inner.as_raw());
         }
@@ -704,6 +730,8 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
     /// remains usable with its already-restored history, but the decoder can
     /// only be dropped.
     pub fn next<'d>(&'d mut self) -> Result<Option<Progress<'alloc, 'r, 'd>>> {
+        crate::sys::GATE.freeze();
+
         if self.finished {
             return Ok(None);
         }

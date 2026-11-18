@@ -32,6 +32,8 @@ pub struct Row(pub(crate) ffi::Row);
 
 impl Row {
     fn get<T>(&self, tag: ffi::RowData::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe { ffi::ghostty_row_get(self.0, tag, value.as_mut_ptr().cast()) };
         // Since we manually model every possible query, this should never fail.
@@ -196,6 +198,8 @@ pub mod cell {
                     $(let mut $rest = MaybeUninit::<$rest::Raw>::zeroed();)*
                     let keys = [$first::TAG, $($rest::TAG,)*];
                     let mut values = [$first.as_mut_ptr().cast(), $($rest.as_mut_ptr().cast(),)*];
+
+                    crate::sys::GATE.freeze();
                     // SAFETY: Sealed keys pair each tag with the documented
                     // raw type. Every output points to a distinct live slot.
                     from_result(unsafe {
@@ -227,6 +231,8 @@ impl Cell {
     /// returns a `u32`, while [`cell::HasText`] returns a `bool`.
     /// The named getters, such as [`Self::codepoint`], use the same keys.
     pub fn get<K: cell::Key>(self, _key: K) -> Result<K::Value> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<K::Raw>::zeroed();
         // SAFETY: The sealed key pairs its tag with the documented raw type.
         let result = unsafe { ffi::ghostty_cell_get(self.0, K::TAG, value.as_mut_ptr().cast()) };

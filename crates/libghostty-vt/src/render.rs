@@ -770,6 +770,8 @@ impl<'alloc> RenderState<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::RenderState = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_render_state_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -790,6 +792,8 @@ impl<'alloc> RenderState<'alloc> {
         &mut self,
         terminal: &Terminal<'alloc, 'cb>,
     ) -> Result<Snapshot<'alloc, '_>> {
+        crate::sys::GATE.freeze();
+
         let result =
             unsafe { ffi::ghostty_render_state_update(self.0.as_raw(), terminal.inner.as_raw()) };
         from_result(result)?;
@@ -819,6 +823,8 @@ impl<'alloc> RenderState<'alloc> {
         &mut self,
         terminal: &Terminal<'alloc, 'cb>,
     ) -> Result<Update<'alloc, '_>> {
+        crate::sys::GATE.freeze();
+
         let result = unsafe {
             ffi::ghostty_render_state_begin_update(self.0.as_raw(), terminal.inner.as_raw())
         };
@@ -827,6 +833,8 @@ impl<'alloc> RenderState<'alloc> {
     }
 
     fn get<T>(&self, tag: ffi::RenderStateData::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_render_state_get(self.0.as_raw(), tag, value.as_mut_ptr().cast())
@@ -838,6 +846,8 @@ impl<'alloc> RenderState<'alloc> {
     }
 
     fn set<T>(&self, tag: ffi::RenderStateOption::Type, value: &T) -> Result<()> {
+        crate::sys::GATE.freeze();
+
         let result = unsafe {
             ffi::ghostty_render_state_set(self.0.as_raw(), tag, std::ptr::from_ref(value).cast())
         };
@@ -866,6 +876,7 @@ impl<'alloc> RenderState<'alloc> {
 
 impl Drop for RenderState<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_render_state_free(self.0.as_raw()) }
     }
 }
@@ -880,6 +891,7 @@ impl<'alloc, 's> Update<'alloc, 's> {
         let Some(state) = self.state.take() else {
             return Err(Error::InvalidValue);
         };
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_render_state_end_update(state.0.as_raw()) };
         from_result(result)?;
         Ok(Snapshot(state))
@@ -889,6 +901,7 @@ impl<'alloc, 's> Update<'alloc, 's> {
 impl Drop for Update<'_, '_> {
     fn drop(&mut self) {
         if let Some(state) = self.state.take() {
+            crate::sys::GATE.freeze();
             let _ = unsafe { ffi::ghostty_render_state_end_update(state.0.as_raw()) };
         }
     }
@@ -983,6 +996,7 @@ impl Snapshot<'_, '_> {
     /// This is equivalent to the individual `cursor_*` getters, but needs a
     /// single query instead of one per property.
     pub fn cursor(&self) -> Result<Cursor> {
+        crate::sys::GATE.freeze();
         let mut raw = ffi::sized!(ffi::RenderStateCursor);
         from_result(unsafe {
             ffi::ghostty_render_state_get(
@@ -1020,11 +1034,13 @@ impl Snapshot<'_, '_> {
     /// consumers should use [`Self::set_dirty`] and [`RowIteration::set_dirty`]
     /// instead.
     pub fn clean(&self) -> Result<()> {
+        crate::sys::GATE.freeze();
         from_result(unsafe { ffi::ghostty_render_state_clean(self.0.0.as_raw()) })
     }
 
     /// Get the current color information from a render state.
     pub fn colors(&self) -> Result<Colors> {
+        crate::sys::GATE.freeze();
         let mut colors = ffi::sized!(ffi::RenderStateColors);
         let result = unsafe {
             ffi::ghostty_render_state_get(
@@ -1092,6 +1108,7 @@ impl<'alloc> RowIterator<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
         let mut raw: ffi::RenderStateRowIterator = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_render_state_row_iterator_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -1117,6 +1134,7 @@ impl<'alloc> RowIterator<'alloc> {
         &'s mut self,
         snapshot: &'s Snapshot<'alloc, '_>,
     ) -> Result<RowIteration<'alloc, 's>> {
+        crate::sys::GATE.freeze();
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -1135,6 +1153,7 @@ impl<'alloc> RowIterator<'alloc> {
 
 impl Drop for RowIterator<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_render_state_row_iterator_free(self.0.as_raw()) }
     }
 }
@@ -1194,6 +1213,7 @@ impl RowIteration<'_, '_> {
     /// y. With overscan, it counts from the highest captured row, so use
     /// [`Self::viewport_y`] to place the row.
     pub fn next_dirty(&mut self) -> Option<(u16, &Self)> {
+        crate::sys::GATE.freeze();
         let mut y = 0;
         // The receiver is evaluated before the arguments, so `y` is read only
         // after libghostty has written it.
@@ -1212,6 +1232,7 @@ impl RowIteration<'_, '_> {
         reason = "lending `next` cannot implement trait"
     )]
     pub fn next(&mut self) -> Option<&Self> {
+        crate::sys::GATE.freeze();
         if unsafe { ffi::ghostty_render_state_row_iterator_next(self.iter.0.as_raw()) } {
             Some(self)
         } else {
@@ -1222,6 +1243,7 @@ impl RowIteration<'_, '_> {
     fn get<T>(&self, tag: ffi::RenderStateRowData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_get(self.iter.0.as_raw(), tag, value.as_mut_ptr().cast())
         };
         // Since we manually model every possible query, this should never fail.
@@ -1232,6 +1254,7 @@ impl RowIteration<'_, '_> {
 
     fn set<T>(&self, tag: ffi::RenderStateRowOption::Type, value: &T) -> Result<()> {
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_set(
                 self.iter.0.as_raw(),
                 tag,
@@ -1278,6 +1301,7 @@ impl RowIteration<'_, '_> {
     pub fn selection(&self) -> Result<Option<RowSelection>> {
         let mut value = ffi::sized!(RowSelection);
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowData::SELECTION,
@@ -1308,6 +1332,7 @@ impl<'alloc> CellIterator<'alloc> {
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
         let mut raw: ffi::RenderStateRowCells = std::ptr::null_mut();
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_render_state_row_cells_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -1339,6 +1364,7 @@ impl<'alloc> CellIterator<'alloc> {
         row: &'s RowIteration<'alloc, '_>,
     ) -> Result<CellIteration<'alloc, 's>> {
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
                 ffi::RenderStateRowData::CELLS,
@@ -1356,6 +1382,7 @@ impl<'alloc> CellIterator<'alloc> {
 
 impl Drop for CellIterator<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_render_state_row_cells_free(self.0.as_raw()) }
     }
 }
@@ -1370,6 +1397,7 @@ impl CellIteration<'_, '_> {
         reason = "lending `next` cannot implement trait"
     )]
     pub fn next(&mut self) -> Option<&Self> {
+        crate::sys::GATE.freeze();
         if unsafe { ffi::ghostty_render_state_row_cells_next(self.iter.0.as_raw()) } {
             Some(self)
         } else {
@@ -1382,6 +1410,7 @@ impl CellIteration<'_, '_> {
     /// Positions the iteration at the given x (column) index so that
     /// subsequent reads return data for that cell.
     pub fn select(&mut self, x: u16) -> Result<()> {
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_render_state_row_cells_select(self.iter.0.as_raw(), x) };
         from_result(result)
     }
@@ -1398,6 +1427,7 @@ impl CellIteration<'_, '_> {
     fn get_optional<T>(&self, tag: ffi::RenderStateRowCellsData::Type) -> Result<Option<T>> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
                 tag,
@@ -1416,6 +1446,7 @@ impl CellIteration<'_, '_> {
     pub fn style(&self) -> Result<Style> {
         let mut value = ffi::Style::default();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowCellsData::STYLE,
@@ -1489,6 +1520,7 @@ impl CellIteration<'_, '_> {
         // grapheme codepoints are Unicode scalar values, and upstream
         // writes at most `cap` elements, including on OUT_OF_SPACE.
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowCellsData::GRAPHEMES_BUF,
@@ -1524,6 +1556,7 @@ impl CellIteration<'_, '_> {
                 len: 0,
             };
             let result = unsafe {
+                crate::sys::GATE.freeze();
                 ffi::ghostty_render_state_row_cells_get(
                     self.iter.0.as_raw(),
                     ffi::RenderStateRowCellsData::GRAPHEMES_UTF8,
@@ -1587,6 +1620,7 @@ impl<'alloc> ImageIterator<'alloc> {
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
         let mut raw: ffi::RenderStateImageIterator = std::ptr::null_mut();
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_render_state_image_iterator_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -1618,6 +1652,7 @@ impl<'alloc> ImageIterator<'alloc> {
         // Unlike most data keys, `out` points to an existing iterator handle,
         // which libghostty refills in place.
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
                 ffi::RenderStateData::IMAGE_ITERATOR,
@@ -1635,6 +1670,7 @@ impl<'alloc> ImageIterator<'alloc> {
 
 impl Drop for ImageIterator<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_render_state_image_iterator_free(self.0.as_raw()) }
     }
 }
@@ -1667,6 +1703,7 @@ impl ImageIteration<'_, '_> {
         reason = "lending `next` cannot implement trait"
     )]
     pub fn next(&mut self) -> Option<&Self> {
+        crate::sys::GATE.freeze();
         if unsafe { ffi::ghostty_render_state_image_iterator_next(self.iter.0.as_raw()) } {
             Some(self)
         } else {
@@ -1677,6 +1714,7 @@ impl ImageIteration<'_, '_> {
     fn get<T>(&self, tag: ffi::RenderStateImageData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_image_get(
                 self.iter.0.as_raw(),
                 tag,
@@ -1696,6 +1734,7 @@ impl ImageIteration<'_, '_> {
     fn get_optional<T>(&self, tag: ffi::RenderStateImageData::Type) -> Result<Option<T>> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_image_get(
                 self.iter.0.as_raw(),
                 tag,

@@ -138,6 +138,7 @@ pub fn is_safe(data: impl AsRef<[u8]>) -> bool {
     // Upstream only reads `len` bytes for this call. An empty slice may
     // carry a dangling (non-NULL) pointer; that's fine, since upstream
     // slices zero bytes from it.
+    crate::sys::GATE.freeze();
     unsafe { ffi::ghostty_paste_is_safe(data.as_ptr().cast(), data.len()) }
 }
 
@@ -161,6 +162,8 @@ pub fn is_safe(data: impl AsRef<[u8]>) -> bool {
 /// This is the encoder [`Terminal::paste`] uses for a text paste;
 /// use it directly when there is no terminal to paste into.
 pub fn encode(data: &mut [u8], bracketed: bool, buf: &mut [u8]) -> Result<usize> {
+    crate::sys::GATE.freeze();
+
     let mut written = 0usize;
     let result = unsafe {
         ffi::ghostty_paste_encode(
@@ -347,6 +350,8 @@ impl Terminal<'_, '_> {
             },
             ..options.inner
         };
+
+        crate::sys::GATE.freeze();
         let mut written = false;
         // SAFETY: The request, the MIME types and the reader all outlive this
         // synchronous call, and the exclusive terminal borrow serializes it.

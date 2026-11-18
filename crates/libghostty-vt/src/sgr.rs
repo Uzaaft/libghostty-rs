@@ -66,6 +66,8 @@ impl<'alloc> Parser<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::SgrParser = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_sgr_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -94,6 +96,8 @@ impl<'alloc> Parser<'alloc> {
     /// Returns `Err(Error::InvalidValue)` if `separators` is not `None` and is
     /// not the same length as `params`.
     pub fn set_params(&mut self, params: &[u16], separators: Option<&[u8]>) -> Result<()> {
+        crate::sys::GATE.freeze();
+
         let sep = match separators {
             Some(seps) => {
                 assert!(
@@ -120,6 +124,8 @@ impl<'alloc> Parser<'alloc> {
         reason = "lending `next` cannot implement trait"
     )]
     pub fn next(&mut self) -> Result<Option<Attribute<'_>>> {
+        crate::sys::GATE.freeze();
+
         let mut raw_attr = ffi::SgrAttribute::default();
         let has_next = unsafe { ffi::ghostty_sgr_next(self.0.as_raw(), &raw mut raw_attr) };
         if has_next {
@@ -143,12 +149,14 @@ impl<'alloc> Parser<'alloc> {
     /// After calling this, [`Parser::next`] will start from the beginning of the
     /// parameter list again.
     pub fn reset(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_sgr_reset(self.0.as_raw()) }
     }
 }
 
 impl Drop for Parser<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_sgr_free(self.0.as_raw()) }
     }
 }

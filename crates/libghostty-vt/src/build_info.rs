@@ -86,6 +86,7 @@ pub fn optimize_mode() -> Result<OptimizeMode> {
 pub fn version_string() -> &'static CStr {
     // SAFETY: libghostty promises to return a NUL-terminated string
     // that is always valid.
+    crate::sys::GATE.freeze();
     unsafe { CStr::from_ptr(ffi::ghostty_version()) }
 }
 /// The major version number.
@@ -129,6 +130,7 @@ fn build_string(tag: ffi::BuildInfo::Type) -> Result<&'static [u8]> {
 }
 
 fn build_info<T>(tag: ffi::BuildInfo::Type) -> Result<T> {
+    crate::sys::GATE.freeze();
     let mut value = MaybeUninit::zeroed();
     let result = unsafe { ffi::ghostty_build_info(tag, std::ptr::from_mut(&mut value).cast()) };
     from_result(result)?;

@@ -121,6 +121,7 @@ impl Rgb {
     pub fn parse_x11_color(name: impl AsRef<[u8]>) -> Result<Self> {
         // Ditto (see `Palette::parse_palette_entry`): upstream takes bytes.
         let name = name.as_ref();
+        crate::sys::GATE.freeze();
         let mut out = MaybeUninit::uninit();
         let result = unsafe {
             ffi::ghostty_color_parse_x11(name.as_ptr().cast(), name.len(), out.as_mut_ptr())
@@ -139,6 +140,7 @@ impl Rgb {
     pub fn parse(value: impl AsRef<[u8]>) -> Result<Self> {
         // Ditto (see `Palette::parse_palette_entry`): upstream takes bytes.
         let value = value.as_ref();
+        crate::sys::GATE.freeze();
         let mut out = MaybeUninit::uninit();
         let result = unsafe {
             ffi::ghostty_color_parse(value.as_ptr().cast(), value.len(), out.as_mut_ptr())
@@ -153,6 +155,7 @@ impl Rgb {
     /// <https://www.w3.org/TR/WCAG20/#relativeluminancedef>.
     #[must_use]
     pub fn luminance(self) -> f64 {
+        crate::sys::GATE.freeze();
         let this: ffi::ColorRgb = self.into();
         unsafe { ffi::ghostty_color_luminance(&raw const this) }
     }
@@ -164,6 +167,7 @@ impl Rgb {
     /// metric used internally by [`Palette::generate`], which uses CIELAB lightness.
     #[must_use]
     pub fn perceived_luminance(self) -> f64 {
+        crate::sys::GATE.freeze();
         let this: ffi::ColorRgb = self.into();
         unsafe { ffi::ghostty_color_perceived_luminance(&raw const this) }
     }
@@ -174,6 +178,7 @@ impl Rgb {
     /// 21.0 for black and white.
     #[must_use]
     pub fn contrast(self, other: Rgb) -> f64 {
+        crate::sys::GATE.freeze();
         let this: ffi::ColorRgb = self.into();
         let that: ffi::ColorRgb = other.into();
         unsafe { ffi::ghostty_color_contrast(&raw const this, &raw const that) }
@@ -223,6 +228,7 @@ impl Default for Palette {
     /// Returns Ghostty's base16 defaults, the xterm 6x6x6 color cube, and the
     /// grayscale ramp.
     fn default() -> Self {
+        crate::sys::GATE.freeze();
         let mut raw = [ffi::ColorRgb::default(); 256];
         unsafe { ffi::ghostty_color_palette_default(raw.as_mut_ptr()) };
         raw.into()
@@ -254,6 +260,7 @@ impl Palette {
         // a UTF-8 check first. Input that isn't valid syntax, non-ASCII
         // included, is rejected by upstream as `Error::InvalidValue`.
         let value = value.as_ref();
+        crate::sys::GATE.freeze();
         let mut index = MaybeUninit::uninit();
         let mut rgb = MaybeUninit::uninit();
         let result = unsafe {
@@ -302,6 +309,7 @@ impl Palette {
         let bg: ffi::ColorRgb = background.into();
         let fg: ffi::ColorRgb = foreground.into();
 
+        crate::sys::GATE.freeze();
         unsafe {
             ffi::ghostty_color_palette_generate(
                 base_ptr,
@@ -410,6 +418,7 @@ impl X11ColorNames {
     /// case-insensitively.
     #[must_use]
     pub fn new() -> Self {
+        crate::sys::GATE.freeze();
         let ptr = unsafe { ffi::ghostty_color_x11_names() };
         let len = unsafe { ffi::ghostty_color_x11_name_count() };
         let entries = unsafe { slice::from_raw_parts(ptr, len) };

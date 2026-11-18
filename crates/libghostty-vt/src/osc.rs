@@ -67,6 +67,8 @@ impl<'alloc> Parser<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::OscParser = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_osc_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -79,6 +81,7 @@ impl<'alloc> Parser<'alloc> {
     /// and returning the parser to its initial state. This is useful for
     /// reusing a parser instance or recovering from parse errors.
     pub fn reset(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_osc_reset(self.0.as_raw()) }
     }
 
@@ -133,6 +136,8 @@ impl<'alloc> Parser<'alloc> {
     /// }
     /// ```
     pub fn set_unknown_max_bytes(&mut self, max_bytes: usize) -> Result<&mut Self> {
+        crate::sys::GATE.freeze();
+
         // Zero is also what the NULL "restore the default" value sets, so
         // always passing a pointer covers both.
         let result = unsafe {
@@ -155,6 +160,7 @@ impl<'alloc> Parser<'alloc> {
     /// When finished pumping the parser with bytes, call [`Parser::end`] to
     /// get the final result.
     pub fn next_byte(&mut self, byte: u8) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_osc_next(self.0.as_raw(), byte) }
     }
 
@@ -195,6 +201,7 @@ impl<'alloc> Parser<'alloc> {
     /// # }
     /// ```
     pub fn end(&mut self, terminator: u8) -> Command<'_, 'alloc> {
+        crate::sys::GATE.freeze();
         Command {
             // NULL for an invalid or cancelled sequence.
             // `ghostty_osc_command_type` reports that as an invalid command,
@@ -207,6 +214,7 @@ impl<'alloc> Parser<'alloc> {
 
 impl Drop for Parser<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_osc_free(self.0.as_raw()) }
     }
 }
@@ -235,6 +243,7 @@ impl<'p> Command<'p, '_> {
         use ffi::OscCommandData as Data;
         use ffi::OscCommandType as Type;
 
+        crate::sys::GATE.freeze();
         let raw_type = unsafe { ffi::ghostty_osc_command_type(self.inner) };
         Some(match raw_type {
             Type::CHANGE_WINDOW_TITLE => {
@@ -303,6 +312,8 @@ impl<'p> Command<'p, '_> {
     }
 
     fn get<T>(&self, tag: ffi::OscCommandData::Type) -> Option<T> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<T>::zeroed();
         let result =
             unsafe { ffi::ghostty_osc_command_data(self.inner, tag, value.as_mut_ptr().cast()) };

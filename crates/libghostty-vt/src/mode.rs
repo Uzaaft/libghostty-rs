@@ -22,11 +22,12 @@ use crate::{
 impl Terminal<'_, '_> {
     /// Get the current value of a terminal mode.
     pub fn mode(&self, mode: Mode) -> Result<bool> {
+        crate::sys::GATE.freeze();
+
         let mut mode = ffi::TerminalModeConfig {
             mode: mode.into(),
             value: false,
         };
-
         let result = unsafe {
             ffi::ghostty_terminal_get(
                 self.inner.as_raw(),
@@ -42,11 +43,12 @@ impl Terminal<'_, '_> {
     ///
     /// This does not change the value restored by a full terminal reset (RIS).
     pub fn set_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
+        crate::sys::GATE.freeze();
+
         let mode = ffi::TerminalModeConfig {
             mode: mode.into(),
             value,
         };
-
         let result = unsafe {
             ffi::ghostty_terminal_set(
                 self.inner.as_raw(),
@@ -67,11 +69,12 @@ impl Terminal<'_, '_> {
     /// terminal state and cannot safely be configured as reset defaults.
     /// Those modes return [`Error::InvalidValue`](crate::Error::InvalidValue).
     pub fn set_default_mode(&mut self, mode: Mode, value: bool) -> Result<&mut Self> {
+        crate::sys::GATE.freeze();
+
         let mode = ffi::TerminalModeConfig {
             mode: mode.into(),
             value,
         };
-
         let result = unsafe {
             ffi::ghostty_terminal_set(
                 self.inner.as_raw(),
@@ -142,6 +145,8 @@ impl Mode {
     /// # }
     /// ```
     pub fn encode(self, state: ReportState, buf: &mut [u8]) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut written = 0;
         // SAFETY: The pointer and length describe `buf`, a valid writable
         // region, and upstream only writes within `buf_len`, even when it

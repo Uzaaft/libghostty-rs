@@ -79,6 +79,8 @@ impl SizeReport {
     /// # }
     /// ```
     pub fn encode(self, size: &SizeReportSize, buf: &mut [u8]) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut written = 0;
         // SAFETY: The pointer and length describe `buf`, a valid writable
         // region, and upstream only writes within `buf_len`, even when it
@@ -125,6 +127,8 @@ impl ColorScheme {
     /// required buffer size. The caller can then retry with a sufficiently
     /// sized buffer.
     pub fn encode(self, buf: &mut [u8]) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut written = 0;
         let result = unsafe {
             ffi::ghostty_color_scheme_report_encode(

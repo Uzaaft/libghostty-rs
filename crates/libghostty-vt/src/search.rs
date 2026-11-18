@@ -181,6 +181,8 @@ impl<'alloc> Search<'alloc> {
     }
 
     unsafe fn new_inner(terminal: &Terminal<'_, '_>, alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw = std::ptr::null_mut();
         // SAFETY: The exclusive terminal borrow serializes the registration
         // with all other access to the terminal.
@@ -215,6 +217,8 @@ impl<'alloc> Search<'alloc> {
         needle: impl AsRef<[u8]>,
     ) -> Result<&mut Self> {
         self.check_terminal(terminal)?;
+        crate::sys::GATE.freeze();
+
         let raw = ffi::String {
             ptr: needle.as_ref().as_ptr(),
             len: needle.as_ref().len(),
@@ -234,6 +238,8 @@ impl<'alloc> Search<'alloc> {
     /// The needle this search is looking for, or `None` when no needle is
     /// set.
     pub fn needle(&self) -> Result<Option<&[u8]>> {
+        crate::sys::GATE.freeze();
+
         let mut raw = ffi::String::default();
         // SAFETY: Reading only touches search-owned memory.
         let result = unsafe {
@@ -261,6 +267,7 @@ impl<'alloc> Search<'alloc> {
     /// Each call does a bounded amount of work.
     pub fn feed(&mut self, terminal: &Terminal<'_, '_>) -> Result<()> {
         self.check_terminal(terminal)?;
+        crate::sys::GATE.freeze();
         from_result(unsafe { ffi::ghostty_search_feed(self.inner.as_raw()) })
     }
 
@@ -273,6 +280,8 @@ impl<'alloc> Search<'alloc> {
     ///
     /// Returns [`Error::InvalidValue`] after the terminal was dropped.
     pub fn tick(&mut self) -> Result<Status> {
+        crate::sys::GATE.freeze();
+
         let mut status = ffi::SearchStatus::COMPLETE;
         // SAFETY: libghostty rejects ticking a search whose terminal was
         // freed, since ticking a scrollback search reads a pin the terminal
@@ -291,11 +300,13 @@ impl<'alloc> Search<'alloc> {
     /// [`Self::feed`] themselves.
     pub fn run(&mut self, terminal: &Terminal<'_, '_>) -> Result<()> {
         self.check_terminal(terminal)?;
+        crate::sys::GATE.freeze();
         from_result(unsafe { ffi::ghostty_search_run(self.inner.as_raw()) })
     }
 
     // Only the explicitly typed accessors below choose an output type.
     fn get<T: Default>(&self, key: ffi::SearchData::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
         let mut value = T::default();
         // SAFETY: Reading only touches search-owned memory, and `T` matches
         // the output type documented for `key`.
@@ -334,6 +345,7 @@ impl<'alloc> Search<'alloc> {
     /// Set the scroll policy applied by [`Self::select_next`] and
     /// [`Self::select_prev`]. The policy persists until changed.
     pub fn set_scroll(&mut self, scroll: Scroll) -> Result<&mut Self> {
+        crate::sys::GATE.freeze();
         let raw: ffi::SearchScroll::Type = scroll.into();
         // SAFETY: This only modifies search-owned state.
         from_result(unsafe {
@@ -360,6 +372,7 @@ impl<'alloc> Search<'alloc> {
     ) -> Result<Option<Match<'_, 't, 'alloc>>> {
         self.check_terminal(terminal)?;
         // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_search_select_next(self.inner.as_raw()) };
 
         from_optional_result(
@@ -380,6 +393,7 @@ impl<'alloc> Search<'alloc> {
     ) -> Result<Option<Match<'_, 't, 'alloc>>> {
         self.check_terminal(terminal)?;
         // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_search_select_prev(self.inner.as_raw()) };
 
         from_optional_result(
@@ -398,6 +412,7 @@ impl<'alloc> Search<'alloc> {
         key: ffi::SearchData::Type,
     ) -> Result<Matches<'t>> {
         self.check_terminal(terminal)?;
+        crate::sys::GATE.freeze();
 
         loop {
             let mut buffer = ffi::SelectionBuffer {
@@ -476,24 +491,7 @@ impl Drop for Search<'_> {
     fn drop(&mut self) {
         // SAFETY: libghostty releases tracked state within a live terminal,
         // or only search-owned memory once the terminal was freed.
-        //
-        // Releasing that state must be serialized with all other access to
-        // the terminal. The terminal is not shared across threads, so the
-        // only other access that can be in progress is a libghostty call that
-        // is running Rust code, when the search is dropped from inside one:
-        // an effect callback during a VT write, reset or resize, or the
-        // reader or writer of a streaming call such as snapshot encoding and
-        // decoding or continuation export. That is fine too: releasing only
-        // unregisters the search from the terminal and untracks its pins.
-        // Effect callbacks are invoked by the stream handler while it handles
-        // a sequence, never from within a page list operation, and streaming
-        // calls only hand bytes to their reader or writer, so the terminal
-        // isn't iterating its searches or tracked pins at any of these points,
-        // and it never holds on to the pins this search owns. Upstream likewise only forbids re-entering VT
-        // writes from callbacks, and expects other terminal calls, such as
-        // updating a render state, to be made from them. It doesn't document
-        // freeing a search from a callback, though, so this relies on how the
-        // pinned version is implemented.
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_search_free(self.inner.as_raw()) };
     }
 }

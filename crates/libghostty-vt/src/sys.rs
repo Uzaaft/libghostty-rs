@@ -16,7 +16,7 @@ use std::{
     sync::atomic::{AtomicBool, AtomicU8, Ordering},
 };
 
-static GATE: Gate = Gate(AtomicU8::new(Gate::OPEN));
+pub(crate) static GATE: Gate = Gate(AtomicU8::new(Gate::OPEN));
 
 pub(crate) struct Gate(AtomicU8);
 

@@ -160,6 +160,8 @@ macro_rules! handlers {
                     $($rfty),*
                 ) $(-> $rawrty)? = callback;
 
+                $crate::sys::GATE.freeze();
+
                 let result = unsafe {
                     $crate::ffi::ghostty_terminal_set(
                         self.inner.as_raw(),

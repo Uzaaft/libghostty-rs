@@ -210,6 +210,7 @@ impl Terminal<'_, '_> {
 impl Graphics<'_> {
     fn get<T>(&self, tag: ffi::KittyGraphicsData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
+        crate::sys::GATE.freeze();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
         };
@@ -222,6 +223,7 @@ impl Graphics<'_> {
     /// Returns `None` if no image with the given ID exists.
     #[must_use]
     pub fn image(&self, id: u32) -> Option<Image<'_>> {
+        crate::sys::GATE.freeze();
         let image = unsafe { ffi::ghostty_kitty_graphics_image(self.inner.as_raw(), id) };
 
         Some(Image {
@@ -281,6 +283,7 @@ impl Graphics<'_> {
     ///
     #[doc = crate::guide_ref!("Animation", "images", "animation")]
     pub fn tick_animation(&mut self, now_ms: u64) -> Result<Option<u64>> {
+        crate::sys::GATE.freeze();
         let mut next_ms = MaybeUninit::<u64>::zeroed();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_animation_tick(
@@ -295,6 +298,7 @@ impl Graphics<'_> {
 
 impl<'g> Image<'g> {
     fn get<T>(&self, tag: ffi::KittyGraphicsImageData::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_image_get(
@@ -313,6 +317,7 @@ impl<'g> Image<'g> {
     /// now" rather than a failure, so it becomes `Ok(None)`. Every other
     /// error, such as `INVALID_VALUE` for a bad handle, stays an `Err`.
     fn get_optional<T>(&self, tag: ffi::KittyGraphicsImageData::Type) -> Result<Option<T>> {
+        crate::sys::GATE.freeze();
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_image_get(
@@ -431,6 +436,7 @@ impl<'alloc> PlacementIterator<'alloc> {
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
         let mut inner: ffi::KittyGraphicsPlacementIterator = std::ptr::null_mut();
         let result =
             unsafe { ffi::ghostty_kitty_graphics_placement_iterator_new(alloc, &raw mut inner) };
@@ -459,6 +465,7 @@ impl<'alloc> PlacementIterator<'alloc> {
         &'t mut self,
         graphics: &'t Graphics<'_>,
     ) -> Result<PlacementIteration<'t, 'alloc>> {
+        crate::sys::GATE.freeze();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_get(
                 graphics.inner.as_raw(),
@@ -476,6 +483,7 @@ impl<'alloc> PlacementIterator<'alloc> {
 
 impl Drop for PlacementIterator<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe {
             ffi::ghostty_kitty_graphics_placement_iterator_free(self.inner.as_raw());
         }
@@ -492,6 +500,7 @@ impl<'t> PlacementIteration<'t, '_> {
         reason = "a lending iterator: each placement borrows the iteration"
     )]
     pub fn next(&mut self) -> Option<&Self> {
+        crate::sys::GATE.freeze();
         if unsafe { ffi::ghostty_kitty_graphics_placement_next(self.iterator.inner.as_raw()) } {
             Some(self)
         } else {
@@ -504,6 +513,7 @@ impl<'t> PlacementIteration<'t, '_> {
         tag: ffi::KittyGraphicsPlacementIteratorOption::Type,
         value: &T,
     ) -> Result<()> {
+        crate::sys::GATE.freeze();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_iterator_set(
                 self.iterator.inner.as_raw(),
@@ -514,6 +524,7 @@ impl<'t> PlacementIteration<'t, '_> {
         from_result(result)
     }
     fn get<T>(&self, tag: ffi::KittyGraphicsPlacementData::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_get(
@@ -550,6 +561,7 @@ impl<'t> PlacementIteration<'t, '_> {
         image: &Image<'t>,
         terminal: &'t Terminal<'_, '_>,
     ) -> Result<PixelSize> {
+        crate::sys::GATE.freeze();
         let mut size = PixelSize::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_pixel_size(
@@ -570,6 +582,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// columns/rows, and aspect ratio to calculate the final rendered pixel
     /// dimensions.
     pub fn grid_size(&self, image: &Image<'t>, terminal: &'t Terminal<'_, '_>) -> Result<GridSize> {
+        crate::sys::GATE.freeze();
         let mut size = GridSize::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_grid_size(
@@ -608,6 +621,7 @@ impl<'t> PlacementIteration<'t, '_> {
         image: &Image<'t>,
         terminal: &'t Terminal<'_, '_>,
     ) -> Result<Option<ViewportPos>> {
+        crate::sys::GATE.freeze();
         let mut pos = ViewportPos::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_viewport_pos(
@@ -628,6 +642,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// rectangle is clamped to the actual image bounds. The returned values
     /// are in pixels and are ready to use for texture sampling.
     pub fn source_rect(&self, image: &Image<'t>) -> Result<SourceRect> {
+        crate::sys::GATE.freeze();
         let mut rect = SourceRect::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_source_rect(
@@ -661,6 +676,7 @@ impl<'t> PlacementIteration<'t, '_> {
         if self.terminal != terminal.id {
             return Err(Error::InvalidValue);
         }
+        crate::sys::GATE.freeze();
         let mut sel = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_rect(
@@ -697,6 +713,7 @@ impl<'t> PlacementIteration<'t, '_> {
         image: &Image<'t>,
         terminal: &'t Terminal<'_, '_>,
     ) -> Result<PlacementRenderInfo> {
+        crate::sys::GATE.freeze();
         let mut info = ffi::sized!(PlacementRenderInfo);
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_render_info(

@@ -135,6 +135,7 @@ impl<'alloc> Bytes<'alloc> {
             return Ok(unsafe { Self::from_raw_parts(std::ptr::null_mut(), 0, alloc) });
         }
 
+        crate::sys::GATE.freeze();
         let raw = unsafe { ffi::ghostty_alloc(alloc, len) };
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         // Neither Zig allocators nor `std::alloc::alloc` initialize memory,
@@ -193,6 +194,7 @@ impl Drop for Bytes<'_> {
         // SAFETY: The lifetime dictates that the allocator must
         // remain valid through here. We retain ownership of the bytes
         // memory itself so it should not be freed beforehand.
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_free(self.alloc, self.ptr.as_ptr(), self.len) };
     }
 }

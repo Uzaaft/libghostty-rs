@@ -108,6 +108,8 @@ impl<'t> Selection<'t> {
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
     pub fn adjust(&mut self, adjustment: Adjustment) -> Result<()> {
+        crate::sys::GATE.freeze();
+
         let result = unsafe {
             ffi::ghostty_terminal_selection_adjust(
                 self.terminal,
@@ -125,6 +127,8 @@ impl<'t> Selection<'t> {
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
     pub fn contains(&self, point: Point) -> Result<bool> {
+        crate::sys::GATE.freeze();
+
         let mut contains = false;
         let result = unsafe {
             ffi::ghostty_terminal_selection_contains(
@@ -146,6 +150,8 @@ impl<'t> Selection<'t> {
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
     pub fn equals(&self, other: &Self) -> Result<bool> {
+        crate::sys::GATE.freeze();
+
         let mut equal = false;
         let result = unsafe {
             ffi::ghostty_terminal_selection_equal(
@@ -163,6 +169,7 @@ impl<'t> Selection<'t> {
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
     pub fn order(&self) -> Result<Order> {
+        crate::sys::GATE.freeze();
         let mut order = ffi::SelectionOrder::FORWARD;
 
         let result = unsafe {
@@ -186,6 +193,8 @@ impl<'t> Selection<'t> {
     ///
     /// See [#Preconditions](#preconditions) for the necessary preconditions.
     pub fn to_ordered(&self, desired: Order) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut selection = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_terminal_selection_ordered(
@@ -261,6 +270,8 @@ impl Terminal<'_, '_> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn select_all(&self) -> Result<Option<Selection<'_>>> {
+        crate::sys::GATE.freeze();
+
         let mut value = ffi::Selection::default();
         let result =
             unsafe { ffi::ghostty_terminal_select_all(self.inner.as_raw(), &raw mut value) };
@@ -283,8 +294,9 @@ impl Terminal<'_, '_> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn select_output<'t>(&'t self, grid_ref: GridRef<'t>) -> Result<Option<Selection<'t>>> {
-        let mut value = ffi::Selection::default();
+        crate::sys::GATE.freeze();
 
+        let mut value = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_terminal_select_output(
                 self.inner.as_raw(),
@@ -420,8 +432,9 @@ impl<'t> SelectLine<'t> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn finish(self) -> Result<Option<Selection<'t>>> {
-        let mut value = ffi::Selection::default();
+        crate::sys::GATE.freeze();
 
+        let mut value = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_terminal_select_line(self.terminal, &raw const self.inner, &raw mut value)
         };
@@ -471,8 +484,9 @@ impl<'t> SelectWord<'t> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn finish(self) -> Result<Option<Selection<'t>>> {
-        let mut value = ffi::Selection::default();
+        crate::sys::GATE.freeze();
 
+        let mut value = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_terminal_select_word(self.terminal, &raw const self.inner, &raw mut value)
         };
@@ -523,6 +537,7 @@ impl<'t> SelectWordBetween<'t> {
     ///
     /// The returned selection is not installed as the terminal's current selection.
     pub fn finish(self) -> Result<Option<Selection<'t>>> {
+        crate::sys::GATE.freeze();
         let mut value = ffi::Selection::default();
 
         let result = unsafe {

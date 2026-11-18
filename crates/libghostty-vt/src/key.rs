@@ -38,6 +38,8 @@ impl<'alloc> Encoder<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::KeyEncoder = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_key_encoder_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -49,6 +51,7 @@ impl<'alloc> Encoder<'alloc> {
         option: ffi::KeyEncoderOption::Type,
         value: *const std::ffi::c_void,
     ) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_key_encoder_set(self.0.as_raw(), option, value) };
     }
 
@@ -105,6 +108,8 @@ impl<'alloc> Encoder<'alloc> {
         event: &Event,
         buf: &mut [MaybeUninit<u8>],
     ) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut written: usize = 0;
         let result = unsafe {
             ffi::ghostty_key_encoder_encode(
@@ -129,6 +134,7 @@ impl<'alloc> Encoder<'alloc> {
     /// terminal state and is reset to [`OptionAsAlt::False`] by this call.
     /// Use [`Encoder::set_macos_option_as_alt`] to set it afterward if needed.
     pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> &mut Self {
+        crate::sys::GATE.freeze();
         unsafe {
             ffi::ghostty_key_encoder_set_from_terminal(self.0.as_raw(), terminal.inner.as_raw());
         }
@@ -213,6 +219,7 @@ impl<'alloc> Encoder<'alloc> {
 
 impl Drop for Encoder<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_key_encoder_free(self.0.as_raw()) }
     }
 }
@@ -242,6 +249,8 @@ impl<'alloc> Event<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::KeyEvent = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_key_event_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -253,6 +262,8 @@ impl<'alloc> Event<'alloc> {
 
     /// Set the key action (press, release, repeat).
     pub fn set_action(&mut self, action: Action) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_key_event_set_action(self.inner.as_raw(), action.into()) };
         self
     }
@@ -260,12 +271,16 @@ impl<'alloc> Event<'alloc> {
     /// Get the key action (press, release, repeat).
     #[must_use]
     pub fn action(&self) -> Action {
+        crate::sys::GATE.freeze();
+
         Action::try_from(unsafe { ffi::ghostty_key_event_get_action(self.inner.as_raw()) })
             .unwrap_or(Action::Press)
     }
 
     /// Set the physical key code.
     pub fn set_key(&mut self, key: Key) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_key_event_set_key(self.inner.as_raw(), key.into()) };
         self
     }
@@ -273,12 +288,16 @@ impl<'alloc> Event<'alloc> {
     /// Get the physical key code.
     #[must_use]
     pub fn key(&self) -> Key {
+        crate::sys::GATE.freeze();
+
         Key::try_from(unsafe { ffi::ghostty_key_event_get_key(self.inner.as_raw()) })
             .unwrap_or(Key::Unidentified)
     }
 
     /// Set the modifier keys bitmask.
     pub fn set_mods(&mut self, mods: Mods) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_key_event_set_mods(self.inner.as_raw(), mods.bits()) };
         self
     }
@@ -286,11 +305,15 @@ impl<'alloc> Event<'alloc> {
     /// Get the modifier keys bitmask.
     #[must_use]
     pub fn mods(&self) -> Mods {
+        crate::sys::GATE.freeze();
+
         Mods::from_bits_retain(unsafe { ffi::ghostty_key_event_get_mods(self.inner.as_raw()) })
     }
 
     /// Set the consumed modifiers bitmask.
     pub fn set_consumed_mods(&mut self, mods: Mods) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_key_event_set_consumed_mods(self.inner.as_raw(), mods.bits()) };
         self
     }
@@ -299,12 +322,15 @@ impl<'alloc> Event<'alloc> {
     #[must_use]
     pub fn consumed_mods(&self) -> Mods {
         Mods::from_bits_retain(unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_key_event_get_consumed_mods(self.inner.as_raw())
         })
     }
 
     /// Set whether the key event is part of a composition sequence.
     pub fn set_composing(&mut self, composing: bool) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_key_event_set_composing(self.inner.as_raw(), composing) };
         self
     }
@@ -312,6 +338,8 @@ impl<'alloc> Event<'alloc> {
     /// Get whether the key event is part of a composition sequence.
     #[must_use]
     pub fn is_composing(&self) -> bool {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_key_event_get_composing(self.inner.as_raw()) }
     }
 
@@ -328,6 +356,7 @@ impl<'alloc> Event<'alloc> {
     pub fn set_utf8<S: Into<String>>(&mut self, text: Option<S>) -> &mut Self {
         self.text = text.map(Into::into);
 
+        crate::sys::GATE.freeze();
         match &self.text {
             Some(text) => unsafe {
                 ffi::ghostty_key_event_set_utf8(
@@ -351,6 +380,7 @@ impl<'alloc> Event<'alloc> {
 
     /// Set the unshifted Unicode codepoint.
     pub fn set_unshifted_codepoint(&mut self, codepoint: char) -> &mut Self {
+        crate::sys::GATE.freeze();
         unsafe {
             ffi::ghostty_key_event_set_unshifted_codepoint(self.inner.as_raw(), codepoint.into());
         }
@@ -360,6 +390,7 @@ impl<'alloc> Event<'alloc> {
     /// Get the unshifted Unicode codepoint.
     #[must_use]
     pub fn unshifted_codepoint(&self) -> char {
+        crate::sys::GATE.freeze();
         unsafe {
             char::from_u32_unchecked(ffi::ghostty_key_event_get_unshifted_codepoint(
                 self.inner.as_raw(),
@@ -370,6 +401,7 @@ impl<'alloc> Event<'alloc> {
 
 impl Drop for Event<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_key_event_free(self.inner.as_raw()) }
     }
 }

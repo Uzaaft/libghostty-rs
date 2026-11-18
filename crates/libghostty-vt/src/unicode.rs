@@ -41,6 +41,7 @@ use crate::ffi;
 /// This function is pure, allocates nothing, and is thread-safe.
 #[must_use]
 pub fn codepoint_width(codepoint: char) -> u8 {
+    crate::sys::GATE.freeze();
     unsafe { ffi::ghostty_unicode_codepoint_width(u32::from(codepoint)) }
 }
 
@@ -90,6 +91,8 @@ pub fn codepoint_width(codepoint: char) -> u8 {
 /// each character instead.
 #[must_use]
 pub fn grapheme_width(chars: &[char]) -> (usize, u8) {
+    crate::sys::GATE.freeze();
+
     let mut width = 0;
     let consumed = unsafe {
         // Note that it is always safe to cast &[char] to &[u32], as long

@@ -97,8 +97,9 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         alloc: *const ffi::Allocator,
         terminal: &'t Terminal<'alloc, 'cb>,
     ) -> Result<Self> {
-        let mut raw: ffi::Formatter = std::ptr::null_mut();
+        crate::sys::GATE.freeze();
 
+        let mut raw: ffi::Formatter = std::ptr::null_mut();
         let result = unsafe {
             ffi::ghostty_formatter_terminal_new(alloc, &raw mut raw, terminal.inner.as_raw())
         };
@@ -111,6 +112,8 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     }
 
     fn get_optional<T>(&self, tag: Opt::Type) -> Result<Option<T>> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_formatter_get(self.inner.as_raw(), tag, value.as_mut_ptr().cast())
@@ -123,6 +126,8 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     }
 
     fn set_optional<T>(&mut self, tag: Opt::Type, value: Option<&T>) -> Result<&mut Self> {
+        crate::sys::GATE.freeze();
+
         let value = value.map_or(std::ptr::null(), |v| std::ptr::from_ref(v).cast());
         from_result(unsafe { ffi::ghostty_formatter_set(self.inner.as_raw(), tag, value) })?;
         Ok(self)
@@ -227,6 +232,8 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// Returns [`Error::IoError`] if the writer rejects output, and
     /// [`Error::LimitExceeded`] if output accounting overflows.
     pub unsafe fn format_write<W: std::io::Write>(&mut self, writer: &mut W) -> Result<()> {
+        crate::sys::GATE.freeze();
+
         let writer = crate::io::to_writer(writer);
         // SAFETY: The writer outlives this synchronous call, and the caller
         // promises it doesn't reach this formatter or its terminal.
@@ -242,6 +249,8 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
         &mut self,
         alloc: Option<&'a Allocator<'ctx>>,
     ) -> Result<Bytes<'a>> {
+        crate::sys::GATE.freeze();
+
         let alloc = if let Some(alloc) = alloc {
             alloc.to_raw()
         } else {
@@ -271,6 +280,8 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// returns `Err(Error::OutOfSpace { required })` where `required` is the
     /// required size. The caller can then retry with a larger buffer.
     pub fn format_buf(&mut self, buf: &mut [u8]) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut len = 0usize;
         let result = unsafe {
             ffi::ghostty_formatter_format_buf(
@@ -290,6 +301,8 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// The result can be used to create a sufficiently large buffer
     /// for [`Formatter::format_buf`].
     pub fn format_len(&mut self) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut len = 0usize;
         let result = unsafe {
             ffi::ghostty_formatter_format_buf(
@@ -309,6 +322,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
 
 impl Drop for Formatter<'_, '_, '_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_formatter_free(self.inner.as_raw()) }
     }
 }

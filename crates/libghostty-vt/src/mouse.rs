@@ -48,6 +48,8 @@ impl<'alloc> Encoder<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::MouseEncoder = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_mouse_encoder_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -59,6 +61,8 @@ impl<'alloc> Encoder<'alloc> {
         option: ffi::MouseEncoderOption::Type,
         value: *const std::ffi::c_void,
     ) -> ffi::Result::Type {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_mouse_encoder_set(self.0.as_raw(), option, value) }
     }
 
@@ -108,6 +112,8 @@ impl<'alloc> Encoder<'alloc> {
         event: &Event,
         buf: &mut [MaybeUninit<u8>],
     ) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut written: usize = 0;
         let result = unsafe {
             ffi::ghostty_mouse_encoder_encode(
@@ -126,6 +132,8 @@ impl<'alloc> Encoder<'alloc> {
     /// This sets tracking mode and output format from terminal state.
     /// It does not modify size or any-button state.
     pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe {
             ffi::ghostty_mouse_encoder_set_from_terminal(self.0.as_raw(), terminal.inner.as_raw());
         }
@@ -173,12 +181,14 @@ impl<'alloc> Encoder<'alloc> {
     ///
     /// This clears motion deduplication state (last tracked cell).
     pub fn reset(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_mouse_encoder_reset(self.0.as_raw()) };
     }
 }
 
 impl Drop for Encoder<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_mouse_encoder_free(self.0.as_raw()) }
     }
 }
@@ -205,6 +215,8 @@ impl<'alloc> Event<'alloc> {
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::MouseEvent = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_mouse_event_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -213,6 +225,8 @@ impl<'alloc> Event<'alloc> {
 
     /// Set the event action.
     pub fn set_action(&mut self, action: Action) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe {
             ffi::ghostty_mouse_event_set_action(self.0.as_raw(), action as ffi::MouseAction::Type);
         }
@@ -222,6 +236,8 @@ impl<'alloc> Event<'alloc> {
     /// Get the event action.
     #[must_use]
     pub fn action(&self) -> Action {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_mouse_event_get_action(self.0.as_raw()) }
             .try_into()
             .unwrap_or(Action::Press)
@@ -229,6 +245,8 @@ impl<'alloc> Event<'alloc> {
 
     /// Set the event button.
     pub fn set_button(&mut self, button: Option<Button>) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         if let Some(button) = button {
             unsafe {
                 ffi::ghostty_mouse_event_set_button(
@@ -245,6 +263,8 @@ impl<'alloc> Event<'alloc> {
     /// Get the event button.
     #[must_use]
     pub fn button(&self) -> Option<Button> {
+        crate::sys::GATE.freeze();
+
         let mut button = ffi::MouseButton::UNKNOWN;
         let has_button =
             unsafe { ffi::ghostty_mouse_event_get_button(self.0.as_raw(), &raw mut button) };
@@ -257,6 +277,8 @@ impl<'alloc> Event<'alloc> {
 
     /// Set keyboard modifiers held during the event.
     pub fn set_mods(&mut self, mods: key::Mods) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_mouse_event_set_mods(self.0.as_raw(), mods.bits()) };
         self
     }
@@ -264,11 +286,15 @@ impl<'alloc> Event<'alloc> {
     /// Get keyboard modifiers held during the event.
     #[must_use]
     pub fn mods(&self) -> key::Mods {
+        crate::sys::GATE.freeze();
+
         key::Mods::from_bits_retain(unsafe { ffi::ghostty_mouse_event_get_mods(self.0.as_raw()) })
     }
 
     /// Set the event position in surface-space pixels.
     pub fn set_position(&mut self, pos: Position) -> &mut Self {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_mouse_event_set_position(self.0.as_raw(), pos) };
         self
     }
@@ -276,12 +302,16 @@ impl<'alloc> Event<'alloc> {
     /// Get the event position in surface-space pixels.
     #[must_use]
     pub fn position(&self) -> Position {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_mouse_event_get_position(self.0.as_raw()) }
     }
 }
 
 impl Drop for Event<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
+
         unsafe { ffi::ghostty_mouse_event_free(self.0.as_raw()) }
     }
 }

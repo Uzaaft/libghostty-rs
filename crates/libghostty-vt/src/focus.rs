@@ -41,6 +41,8 @@ impl Event {
     /// `Err(Error::OutOfSpace { required })` where `required` is the required size.
     /// The caller can then retry with a sufficiently sized buffer.
     pub fn encode(self, buf: &mut [u8]) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut written: usize = 0;
         let result = unsafe {
             ffi::ghostty_focus_encode(
