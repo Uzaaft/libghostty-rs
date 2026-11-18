@@ -242,6 +242,7 @@ impl Graphics<'_> {
     /// image list again. For that, use
     /// [`Snapshot::image_placements_generation`](crate::render::Snapshot::image_placements_generation).
     /// See [Knowing what changed].
+    ///
     #[doc = crate::guide_ref!("Knowing what changed", "images", "changes")]
     ///
     /// A value is never reused, not even by another screen, after a reset, or
@@ -591,6 +592,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// It positions every image on screen, including virtual placements and
     /// placements relative to them, and covers overscan rows. If you draw
     /// from both, images are drawn twice. See [Drawing images].
+    ///
     #[doc = crate::guide_ref!("Drawing images", "images", "drawing")]
     ///
     /// The row is negative when the top of the placement scrolled above the

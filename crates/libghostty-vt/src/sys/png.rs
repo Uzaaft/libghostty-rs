@@ -19,13 +19,13 @@ pub trait DecodePng: Sync + 'static {
     ///
     /// # On success
     ///
-    /// Allocate the pixel buffer with [`Bytes::new_zeroed_with_alloc`] and `alloc`,
+    /// Allocate the pixel buffer with [`Bytes::new_zeroed_in`] and `alloc`,
     /// write the decoded pixels into it, and return it in a [`DecodedImage`].
     /// The library then owns the buffer and frees it with the same allocator.
     /// See [`DecodedImage`] for the expected pixel layout.
     ///
     /// The allocator limits how much memory a single image may use, so
-    /// [`Bytes::new_zeroed_with_alloc`] can fail for very large images. Treat that as
+    /// [`Bytes::new_zeroed_in`] can fail for very large images. Treat that as
     /// a failure.
     ///
     /// # On failure

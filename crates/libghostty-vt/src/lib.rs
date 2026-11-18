@@ -156,8 +156,9 @@ macro_rules! book {
     ($page:expr) => {
         concat!(crate::book!(), "/", $page, ".html")
     };
+    // See build.rs
     () => {
-        env!("LIBGHOSTTY_BOOK_URL")
+        env!("BOOK_URL")
     };
 }
 use book;
@@ -165,7 +166,7 @@ use book;
 /// Form a Markdown link reference to any book page.
 macro_rules! book_ref {
     ($name:expr$(, $id:expr$(, $section:expr)?)?) => {
-        concat!("[", $name, "]: ", crate::book!($($id$(, $section)?)?),)
+        concat!("\n\n[", $name, "]: ", crate::book!($($id$(, $section)?)?),)
     };
 }
 use book_ref;
