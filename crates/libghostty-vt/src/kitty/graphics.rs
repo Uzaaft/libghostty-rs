@@ -1135,6 +1135,7 @@ mod animation_tests {
 mod png_decoder_tests {
     use super::*;
     use crate::alloc::testing::Capped;
+    use crate::sys::*;
 
     struct Png<'a> {
         width: u32,
