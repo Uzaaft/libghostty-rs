@@ -53,7 +53,7 @@ fn paste_event() -> (Result<bool, Error>, Vec<u8>) {
         // Without a clipboard-read handler the paste never reaches the
         // paste-event path, so the entropy source would not be called.
         .on_clipboard_read(|_term, request| {
-            request.reply(Err(ClipboardReadError::Denied), &[], false);
+            request.reply(Err(ClipboardReadError::Denied)).finish();
         })
         .unwrap();
     terminal.vt_write(b"\x1b[?5522h");

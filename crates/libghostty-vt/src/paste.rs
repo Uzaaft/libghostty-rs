@@ -596,7 +596,7 @@ mod tests {
         terminal
             .on_clipboard_read(|_term, request| {
                 granted.borrow_mut().push(request.granted());
-                request.reply(Err(ClipboardReadError::Denied), &[], false);
+                request.reply(Err(ClipboardReadError::Denied)).finish();
             })
             .unwrap();
         let mimes = [

@@ -902,20 +902,17 @@ impl<'t> ClipboardWrite<'t> {
     /// EBUSY, EINVAL, EIO); protocols without one (OSC 52, OSC 1337 Copy)
     /// discard the reply.
     ///
-    /// `remember` records a session grant so future requests from the same
-    /// program skip the permission prompt. It is only honored on success when
-    /// [`can_remember`](Self::can_remember) is set.
-    // FIXME: Reinstate reply object, make it resilient to breakages
-    pub fn reply(self, result: std::result::Result<(), ClipboardWriteError>, remember: bool) {
-        let reply = ffi::ClipboardWriteReply {
-            result: result.map_or_else(Into::into, |()| ffi::ClipboardWriteResult::SUCCESS),
-            remember,
-            ..ffi::sized!(ffi::ClipboardWriteReply)
-        };
-        // SAFETY: The request lives for the callback duration.
-        if let Some(callback) = unsafe { (*self.ptr).reply } {
-            // SAFETY: The reply only needs to outlive this synchronous call.
-            unsafe { callback(self.ptr, &raw const reply) };
+    /// Send the reply with [`ClipboardWriteReply::finish`].
+    pub fn reply(
+        self,
+        result: std::result::Result<(), ClipboardWriteError>,
+    ) -> ClipboardWriteReply<'t> {
+        ClipboardWriteReply {
+            write: self,
+            raw: ffi::ClipboardWriteReply {
+                result: result.map_or_else(Into::into, |()| ffi::ClipboardWriteResult::SUCCESS),
+                ..ffi::sized!(ffi::ClipboardWriteReply)
+            },
         }
     }
 
@@ -943,7 +940,6 @@ impl<'t> ClipboardWrite<'t> {
     /// The iterator is empty for a write carrying no representations, which
     /// requests that the destination be cleared (e.g. OSC 52 with an empty
     /// payload).
-    #[must_use]
     pub fn contents(&self) -> ClipboardContents<'t> {
         // SAFETY: We trust libghostty to give us a valid pointer
         // within the lifetime of the callback.
@@ -965,6 +961,7 @@ impl<'t> ClipboardWrite<'t> {
 
 /// An iterator into a borrowed array of MIME representations.
 #[derive(Clone, Debug)]
+#[must_use]
 pub struct ClipboardContents<'t>(std::slice::Iter<'t, ffi::ClipboardContent>);
 
 impl<'t> Iterator for ClipboardContents<'t> {
@@ -988,6 +985,37 @@ impl DoubleEndedIterator for ClipboardContents<'_> {
 }
 impl ExactSizeIterator for ClipboardContents<'_> {}
 impl std::iter::FusedIterator for ClipboardContents<'_> {}
+
+/// An in-progress reply to a clipboard write request.
+///
+/// See [`ClipboardWrite::reply`].
+#[derive(Debug)]
+#[must_use]
+pub struct ClipboardWriteReply<'t> {
+    write: ClipboardWrite<'t>,
+    raw: ffi::ClipboardWriteReply,
+}
+
+impl ClipboardWriteReply<'_> {
+    /// Whether to record a session grant so future requests from the same
+    /// program skip the permission prompt.
+    ///
+    /// It is only honored on success when [`ClipboardWrite::can_remember`]
+    /// is set.
+    pub fn with_remember(mut self, v: bool) -> Self {
+        self.raw.remember = v;
+        self
+    }
+
+    /// Finish the reply.
+    pub fn finish(self) {
+        // SAFETY: The request lives for the callback duration.
+        if let Some(callback) = unsafe { (*self.write.ptr).reply } {
+            // SAFETY: The reply only needs to outlive this synchronous call.
+            unsafe { callback(self.write.ptr, &raw const self.raw) };
+        }
+    }
+}
 
 /// One MIME representation in a clipboard write.
 ///
@@ -1176,47 +1204,68 @@ impl<'t> ClipboardRead<'t> {
     /// (OSC 52) use the first entry with a text MIME type such as
     /// `text/plain`.
     ///
-    /// `available` lists all MIME types available on the clipboard. It is
-    /// only used when [`list`](Self::list) is set.
-    ///
-    /// `remember` records a session grant so future requests from the same
-    /// program skip the permission prompt. It is only honored on success when
-    /// [`can_remember`](Self::can_remember) is set.
-    ///
-    /// All arguments are borrowed only for the duration of this call.
-    ///
     /// The answer is written to the pty before this returns, so the
     /// [pty write callback](Terminal::on_pty_write) runs inside this call. If
     /// both callbacks share state through a [`RefCell`](std::cell::RefCell),
     /// don't keep it borrowed across `reply`: the pty write callback's borrow
     /// would panic, and a panic in a callback aborts the process.
-    // FIXME: Reinstate reply object, make it resilient to breakages
     pub fn reply(
         self,
         result: std::result::Result<&[ClipboardReplyContent<'_>], ClipboardReadError>,
-        available: &[ClipboardMime<'_>],
-        remember: bool,
-    ) {
+    ) -> ClipboardReadReply<'t> {
         let (result, contents) = match result {
             Ok(contents) => (ffi::ClipboardReadResult::SUCCESS, contents),
             Err(error) => (error.into(), &[][..]),
         };
         // Both wrapper types are `repr(transparent)` over their C
         // counterparts, so the slices can be handed over without copying.
-        let reply = ffi::ClipboardReadReply {
-            result,
-            contents: contents.as_ptr().cast(),
-            contents_len: contents.len(),
-            available: available.as_ptr().cast(),
-            available_len: available.len(),
-            remember,
-            ..ffi::sized!(ffi::ClipboardReadReply)
-        };
+        ClipboardReadReply {
+            read: self,
+            reply: ffi::ClipboardReadReply {
+                result,
+                contents: contents.as_ptr().cast(),
+                contents_len: contents.len(),
+                ..ffi::sized!(ffi::ClipboardReadReply)
+            },
+        }
+    }
+}
+
+/// An in-progress reply to a clipboard read request.
+///
+/// See [`ClipboardRead::reply`].
+#[derive(Debug)]
+#[must_use]
+pub struct ClipboardReadReply<'t> {
+    read: ClipboardRead<'t>,
+    reply: ffi::ClipboardReadReply,
+}
+
+impl ClipboardReadReply<'_> {
+    /// Specify the list of all MIME types available on the clipboard.
+    ///
+    /// It is only used when [`ClipboardRead::list`] is set.
+    pub fn with_available_mimes(mut self, v: &[ClipboardMime<'_>]) -> Self {
+        self.reply.available = v.as_ptr().cast();
+        self.reply.available_len = v.len();
+        self
+    }
+    /// Whether to record a session grant so future requests from the same
+    /// program skip the permission prompt.
+    ///
+    /// It is only honored on success when [`ClipboardRead::can_remember`]
+    /// is set.
+    pub fn with_remember(mut self, v: bool) -> Self {
+        self.reply.remember = v;
+        self
+    }
+    /// Finish the reply.
+    pub fn finish(self) {
         // SAFETY: The request lives for the callback duration.
-        if let Some(callback) = unsafe { (*self.ptr).reply } {
+        if let Some(callback) = unsafe { (*self.read.ptr).reply } {
             // SAFETY: The reply and the buffers it points to only need to
             // outlive this synchronous call.
-            unsafe { callback(self.ptr, &raw const reply) };
+            unsafe { callback(self.read.ptr, &raw const self.reply) };
         }
     }
 }
@@ -2198,11 +2247,9 @@ mod tests {
     #[test]
     fn osc52_clipboard_read() {
         let (seen, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request.reply(
-                Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]),
-                &[],
-                false,
-            );
+            request
+                .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
+                .finish();
         });
         assert_eq!(
             seen,
@@ -2216,7 +2263,7 @@ mod tests {
 
         // Errors and missing replies both answer with an empty clipboard.
         let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request.reply(Err(ClipboardReadError::Denied), &[], false);
+            request.reply(Err(ClipboardReadError::Denied)).finish();
         });
         assert_eq!(output, b"\x1b]52;c;\x1b\\");
         let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |_request| {});
@@ -2230,21 +2277,20 @@ mod tests {
         let (seen, output) = clipboard_read(
             b"\x1b]5522;type=read:id=r1:name=YXBw;dGV4dC9wbGFpbiAu\x1b\\",
             |request| {
-                request.reply(
-                    Ok(&[
+                request
+                    .reply(Ok(&[
                         ClipboardReplyContent::new(b"text/plain", b"hello"),
                         // Not requested, so it must be ignored.
                         ClipboardReplyContent::new(b"image/png", b"png"),
-                    ]),
-                    &[
+                    ]))
+                    .with_available_mimes(&[
                         ClipboardMime::new(b"text/plain"),
                         ClipboardMime::new(b"image/png"),
                         // Not UTF-8: libghostty lists MIME types verbatim,
                         // so this must reach the program unchanged.
                         ClipboardMime::new(b"\xFF"),
-                    ],
-                    false,
-                );
+                    ])
+                    .finish();
             },
         );
         assert_eq!(
@@ -2272,7 +2318,7 @@ mod tests {
         // Errors map to protocol statuses, and a missing reply is EPERM.
         let (_, output) = clipboard_read(
             b"\x1b]5522;type=read:id=r2;dGV4dC9wbGFpbg==\x1b\\",
-            |request| request.reply(Err(ClipboardReadError::Busy), &[], false),
+            |request| request.reply(Err(ClipboardReadError::Busy)).finish(),
         );
         assert_eq!(output, b"\x1b]5522;type=read:status=EBUSY:id=r2\x1b\\");
         let (_, output) = clipboard_read(
@@ -2289,11 +2335,10 @@ mod tests {
         // spec, a password without a name is no password.
         let read = "\x1b]5522;type=read:id=a:name=YXBw:pw=c2VjcmV0;dGV4dC9wbGFpbg==\x1b\\";
         let (seen, _) = clipboard_read(read.repeat(2).as_bytes(), |request| {
-            request.reply(
-                Ok(&[ClipboardReplyContent::new(b"text/plain", b"hi")]),
-                &[],
-                true,
-            );
+            request
+                .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hi")]))
+                .with_remember(true)
+                .finish();
         });
         let grants: Vec<_> = seen.iter().map(|s| (s.can_remember, s.granted)).collect();
         assert_eq!(grants, [(true, false), (true, true)]);
@@ -2307,14 +2352,13 @@ mod tests {
         let (_, output) = clipboard_read(
             b"\x1b]5522;type=read:id=e;dGV4dC9wbGFpbg==\x1b\\",
             |request| {
-                request.reply(
-                    Ok(&[
+                request
+                    .reply(Ok(&[
                         ClipboardReplyContent::new(b"", b""),
                         ClipboardReplyContent::new(b"text/plain", b""),
-                    ]),
-                    &[ClipboardMime::new(b"")],
-                    false,
-                );
+                    ]))
+                    .with_available_mimes(&[ClipboardMime::new(b"")])
+                    .finish();
             },
         );
         assert_eq!(
@@ -2328,7 +2372,9 @@ mod tests {
 
         // OSC 52 has no text representation to use, so the clipboard is empty.
         let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request.reply(Ok(&[ClipboardReplyContent::new(b"", b"")]), &[], false);
+            request
+                .reply(Ok(&[ClipboardReplyContent::new(b"", b"")]))
+                .finish();
         });
         assert_eq!(output, b"\x1b]52;c;\x1b\\");
     }
@@ -2343,7 +2389,7 @@ mod tests {
         ] {
             let (_, output) = clipboard_read(
                 b"\x1b]5522;type=read:id=x;dGV4dC9wbGFpbg==\x1b\\",
-                |request| request.reply(Err(error), &[], false),
+                |request| request.reply(Err(error)).finish(),
             );
             let expected = format!("\x1b]5522;type=read:status={status}:id=x\x1b\\");
             assert_eq!(output, expected.as_bytes(), "{error:?}");
@@ -2353,11 +2399,9 @@ mod tests {
     #[test]
     fn clipboard_read_primary_location() {
         let reply = |request: ClipboardRead<'_>| {
-            request.reply(
-                Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]),
-                &[],
-                false,
-            );
+            request
+                .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
+                .finish();
         };
 
         let (seen, output) = clipboard_read(b"\x1b]52;p;?\x1b\\", reply);
@@ -2394,7 +2438,7 @@ mod tests {
                 for content in request.contents() {
                     written.borrow_mut().push(content.data.to_vec());
                 }
-                request.reply(Ok(()), false);
+                request.reply(Ok(())).finish();
             })
             .unwrap();
 
@@ -2415,7 +2459,7 @@ mod tests {
         let input = [remember, list, remember].concat();
         let (seen, output) = clipboard_read(input.as_bytes(), |request| {
             // Empty slices hand C dangling non-null pointers with length 0.
-            request.reply(Ok(&[]), &[], true);
+            request.reply(Ok(&[])).with_remember(true).finish();
         });
         let observed: Vec<_> = seen
             .iter()
@@ -2464,7 +2508,7 @@ mod tests {
                     written
                         .borrow_mut()
                         .extend(request.contents().map(|c| c.data.to_vec()));
-                    request.reply(Ok(()), false);
+                    request.reply(Ok(())).finish();
                 })
                 .unwrap()
                 .set_clipboard_write_max_bytes(Some(limit))
