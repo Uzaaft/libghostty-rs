@@ -332,6 +332,13 @@
           drv = miriCommand;
         };
 
+        devShells.book = craneLib.devShell {
+          packages = [
+            pkgs.mdbook
+            mdbookkit
+          ];
+        };
+
         devShells.default = craneLib.devShell {
           # Native Cargo examples opt into pkg-config; cross-target and
           # explicit source builds still use Zig from this shell.
@@ -346,8 +353,6 @@
             pkgs.openssl
             pkgs.cmake
             pkgs.ninja
-            pkgs.mdbook
-            mdbookkit
           ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
             pkgs.libx11
             pkgs.libxcursor
