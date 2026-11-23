@@ -625,7 +625,7 @@ mod tests {
     fn alternate_screen_results_are_separate() {
         let mut terminal = Terminal::new(20, 4).unwrap();
         terminal.vt_write(b"hit");
-        let mut search = Search::new(&mut terminal).unwrap();
+        let mut search = Search::new(&terminal).unwrap();
         search.set_needle(&mut terminal, b"hit").unwrap();
         search.run(&terminal).unwrap();
         assert_eq!(search.total_matches().unwrap(), 1);
@@ -704,7 +704,7 @@ mod tests {
     /// Fill a terminal with enough matching lines that the search has
     /// scrollback history to search, not just the active area.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn history_search<'t>(terminal: &mut Terminal<'_, '_>) -> Search<'static> {
+    fn history_search(terminal: &mut Terminal<'_, '_>) -> Search<'static> {
         for _ in 0..5000 {
             terminal.vt_write(b"hit\r\n");
         }

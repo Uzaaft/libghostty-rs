@@ -71,7 +71,7 @@ fn multiple_searches_share_identity_and_detach_on_terminal_drop() {
     let mut first = fixture(&mut terminal);
     let mut second = Search::new(&terminal).unwrap();
     second.set_needle(&mut terminal, b"fixture").unwrap();
-    second.run(&mut terminal).unwrap();
+    second.run(&terminal).unwrap();
     assert!(second.select_next(&terminal).unwrap().is_some());
     first.feed(&terminal).unwrap();
     drop(terminal);

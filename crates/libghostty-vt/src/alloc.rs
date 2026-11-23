@@ -623,10 +623,6 @@ pub(crate) mod testing {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::used_underscore_items,
-    reason = "the underscore-named vtable functions are what is under test"
-)]
 mod tests {
     /// A stateful allocator must stay reachable through the libghostty
     /// allocator. Adapting it by value used to leave libghostty with a
