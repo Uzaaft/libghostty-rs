@@ -3,10 +3,10 @@
 //! Use this when you render the terminal yourself.
 
 use libghostty_vt::{
-    Terminal,
     error::Error,
     point::{Coordinate, Point},
-    render::{CellIterator, CursorVisualStyle, Dirty, RenderState, RowIterator},
+    render::{CellIterator, Dirty, RenderState, RowIterator},
+    terminal::{Terminal, CursorStyle},
     style::Underline,
 };
 
@@ -64,10 +64,10 @@ fn main() -> Result<(), Error> {
         && let Some(viewport) = cursor.viewport
     {
         let style_name = match cursor.visual_style {
-            CursorVisualStyle::Bar => "bar",
-            CursorVisualStyle::Block => "block",
-            CursorVisualStyle::Underline => "underline",
-            CursorVisualStyle::BlockHollow => "hollow",
+            CursorStyle::Bar => "bar",
+            CursorStyle::Block => "block",
+            CursorStyle::Underline => "underline",
+            CursorStyle::BlockHollow => "hollow",
             _ => "unknown",
         };
         println!(

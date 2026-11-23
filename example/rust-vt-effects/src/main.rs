@@ -2,9 +2,9 @@
 //! the bell, title changes, OSC 52 clipboard reads and writes, and unknown
 //! sequences. You need these as soon as a real program runs in the terminal.
 use libghostty_vt::{
-    Terminal,
     effect::{ClipboardReplyContent, UnknownSequence},
     osc::Terminator,
+    Terminal,
 };
 use std::{cell::Cell, error::Error};
 
@@ -89,7 +89,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             println!();
         }
 
-        write.reply(Ok(()), false);
+        write.reply(Ok(())).finish();
     })?;
     // ANCHOR_END: effects-clipboard-write
 
@@ -113,14 +113,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         // Reply with every requested representation we have.
         // This example only has text.
-        read.reply(
-            Ok(&[ClipboardReplyContent::new(
-                b"text/plain",
-                b"Hello from the clipboard",
-            )]),
-            &[],
-            false,
-        );
+        read.reply(Ok(&[ClipboardReplyContent::new(
+            b"text/plain",
+            b"Hello from the clipboard",
+        )]))
+        .finish();
     })?;
     // ANCHOR_END: effects-clipboard-read
 

@@ -3,7 +3,7 @@
 //! (mode 5522). It also checks paste safety and encodes paste data without
 //! a terminal.
 
-use libghostty_vt::{Terminal, effect, error::Error, paste};
+use libghostty_vt::{effect, error::Error, paste, Terminal};
 use std::{
     cell::RefCell,
     io::{self, Write},
@@ -148,14 +148,11 @@ fn main() -> Result<(), Error> {
             println!("granted=no");
         }
 
-        read.reply(
-            Ok(&[effect::ClipboardReplyContent::new(
-                b"text/plain",
-                b"hello from the clipboard",
-            )]),
-            &[],
-            false,
-        );
+        read.reply(Ok(&[effect::ClipboardReplyContent::new(
+            b"text/plain",
+            b"hello from the clipboard",
+        )]))
+        .finish();
     })?;
 
     println!("Plain paste:");

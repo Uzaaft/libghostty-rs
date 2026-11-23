@@ -30,13 +30,14 @@ use libghostty_vt::{
         PrimaryDeviceAttributes, SecondaryDeviceAttributes, TertiaryDeviceAttributes,
     },
     key::{self, Key},
-    kitty::graphics::{self, DecodePng, DecodedImage, Graphics},
+    kitty::graphics::{self, Graphics},
     mouse,
     point::{Coordinate, Point},
     render::{CellIterator, ImageIterator, ImageLayer, ImageProtocol, RenderState, RowIterator},
     report::SizeReportSize,
     selection::gesture::{DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     terminal::{ScrollViewport, Terminal},
+    sys::{self, DecodePng, DecodedImage},
 };
 
 use crate::pty::{Child, Pty, PtyError};
@@ -78,13 +79,7 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    // Make libghostty-vt emit through the same tracing subscriber.
-    // SAFETY: Only the main thread ever calls into libghostty.
-    #[expect(
-        unsafe_code,
-        reason = "libghostty's global settings are unsynchronized"
-    )]
-    unsafe { libghostty_vt::set_logger(Some(Box::new(libghostty_vt::log::TracingLogger))) }?;
+    sys::LOGGER.install(&sys::TracingLogger)?;
 
     let font = load_ttf_font_from_bytes(include_bytes!("../fonts/JetBrainsMono-Medium.ttf"))?;
 
@@ -107,12 +102,7 @@ async fn main() -> Result<()> {
     // Install the PNG decoder so the terminal can handle PNG images in the
     // Kitty Graphics Protocol. This is a process-global setting and must be
     // done before any terminal is created.
-    // SAFETY: Only the main thread ever calls into libghostty.
-    #[expect(
-        unsafe_code,
-        reason = "libghostty's global settings are unsynchronized"
-    )]
-    unsafe { graphics::set_png_decoder(Some(Box::new(PngDecoder))) }?;
+    sys::PNG_DECODER.install(&PngDecoder)?;
 
     // Create a ghostty virtual terminal with the computed grid and 1000
     // lines of scrollback.  This holds all the parsed screen state (cells,
@@ -1400,7 +1390,7 @@ struct PngDecoder;
 
 impl DecodePng for PngDecoder {
     fn decode_png<'alloc>(
-        &mut self,
+        &self,
         alloc: &'alloc libghostty_vt::alloc::Allocator<'_>,
         data: &[u8],
     ) -> Option<DecodedImage<'alloc>> {
