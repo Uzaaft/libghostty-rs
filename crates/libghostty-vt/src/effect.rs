@@ -29,7 +29,7 @@ use crate::{
     report::{ColorScheme, SizeReportSize},
 };
 
-#[expect(unused, reason = "only referenced in docs")]
+#[allow(unused, reason = "only referenced in docs")]
 use crate::{Terminal, mode::Mode};
 
 /// You might be wondering just what the heck this is.

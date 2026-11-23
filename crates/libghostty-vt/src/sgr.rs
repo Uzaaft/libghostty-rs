@@ -99,13 +99,8 @@ impl<'alloc> Parser<'alloc> {
         crate::sys::GATE.freeze();
 
         let sep = match separators {
-            Some(seps) => {
-                assert!(
-                    seps.len() == params.len(),
-                    "separators length must equal params length"
-                );
-                seps.as_ptr().cast()
-            }
+            Some(seps) if seps.len() != params.len() => return Err(Error::InvalidValue),
+            Some(seps) => seps.as_ptr().cast(),
             None => std::ptr::null(),
         };
         let result = unsafe {

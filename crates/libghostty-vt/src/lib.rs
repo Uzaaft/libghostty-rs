@@ -96,7 +96,6 @@
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![warn(missing_copy_implementations)]
-#![warn(clippy::allow_attributes)]
 #![warn(clippy::allow_attributes_without_reason)]
 #![allow(
     clippy::missing_errors_doc,

@@ -105,11 +105,10 @@ unsafe extern "C" fn trampoline(
 /// A PNG decoder for [`sys::PNG_DECODER`](PNG_DECODER) using the [`png`] crate.
 ///
 /// ```rust
-/// use libghostty_vt::kitty::graphics;
+/// use libghostty_vt::sys;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// // SAFETY: No other thread uses libghostty yet.
-/// unsafe { graphics::set_png_decoder(Some(Box::new(graphics::RustPngDecoder::new()))) }?;
+/// sys::PNG_DECODER.install_with(|| Box::leak(Box::new(sys::RustPngDecoder::new())))?;
 /// # Ok(())
 /// # }
 /// ```
