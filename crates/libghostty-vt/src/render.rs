@@ -12,15 +12,6 @@ use crate::{
     terminal::{CursorStyle, Terminal},
 };
 
-pub use ffi::RenderStateRowSelection as RowSelection;
-
-/// A number of rows above and below the viewport.
-///
-/// This is used both to [request](RenderState::set_overscan) overscan and to
-/// [report](Snapshot::overscan) how many rows an update captured. See
-/// [Overscan](RenderState#overscan) for how the extra rows are used.
-pub use ffi::RenderStateOverscan as Overscan;
-
 /// Represents the state required to render a visible screen (a viewport) of
 /// a terminal instance.
 ///
@@ -861,6 +852,10 @@ impl<'alloc> RenderState<'alloc> {
     /// it is changed. Both sides are zero by default, which captures only the
     /// viewport. Expect a full redraw on the update after a change.
     pub fn set_overscan(&mut self, request: Overscan) -> Result<&mut Self> {
+        let request = ffi::RenderStateOverscan {
+            above: request.above,
+            below: request.below,
+        };
         self.set(ffi::RenderStateOption::OVERSCAN, &request)?;
         Ok(self)
     }
@@ -870,7 +865,11 @@ impl<'alloc> RenderState<'alloc> {
     /// The next update uses this request. Both sides are zero if it was never
     /// set.
     pub fn overscan_request(&self) -> Result<Overscan> {
-        self.get(ffi::RenderStateData::OVERSCAN_REQUEST)
+        self.get::<ffi::RenderStateOverscan>(ffi::RenderStateData::OVERSCAN_REQUEST)
+            .map(|v| Overscan {
+                above: v.above,
+                below: v.below,
+            })
     }
 }
 
@@ -942,7 +941,11 @@ impl Snapshot<'_, '_> {
     /// of the scrollback, and `below` is zero while the viewport is scrolled
     /// to the bottom.
     pub fn overscan(&self) -> Result<Overscan> {
-        self.get(ffi::RenderStateData::OVERSCAN)
+        self.get::<ffi::RenderStateOverscan>(ffi::RenderStateData::OVERSCAN)
+            .map(|v| Overscan {
+                above: v.above,
+                below: v.below,
+            })
     }
 
     /// Get the cursor color that may have been explicitly set by the terminal state.
@@ -1299,7 +1302,7 @@ impl RowIteration<'_, '_> {
 
     /// Row-local selected cell range.
     pub fn selection(&self) -> Result<Option<RowSelection>> {
-        let mut value = ffi::sized!(RowSelection);
+        let mut value = ffi::sized!(ffi::RenderStateRowSelection);
         let result = unsafe {
             crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_get(
@@ -1310,7 +1313,11 @@ impl RowIteration<'_, '_> {
         };
         // Since we manually model every possible query, this should never fail.
         // SAFETY: Value should be initialized after successful call.
-        from_optional_result(result, value)
+        match from_optional_result(result, value) {
+            Ok(Some(s)) => RowSelection::from_raw(s).map(Some),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -2034,6 +2041,47 @@ pub enum ImageLayer {
     BelowText = ffi::ImageLayer::BELOW_TEXT,
     /// Above the text.
     AboveText = ffi::ImageLayer::ABOVE_TEXT,
+}
+
+/// Row-local selection range.
+///
+/// Querying [`RowIteration::selection`] returns `None` if the current row
+/// does not intersect the current selection.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct RowSelection {
+    /// Start column of the row-local selection range, inclusive.
+    pub start_x: u16,
+    /// End column of the row-local selection range, inclusive.
+    pub end_x: u16,
+}
+
+impl RowSelection {
+    fn from_raw(raw: ffi::RenderStateRowSelection) -> Result<Self> {
+        let minimum_size =
+            std::mem::offset_of!(ffi::RenderStateRowSelection, end_x) + std::mem::size_of::<u16>();
+        if raw.size < minimum_size {
+            return Err(Error::InvalidValue);
+        }
+
+        Ok(Self {
+            start_x: raw.start_x,
+            end_x: raw.end_x,
+        })
+    }
+}
+
+/// A number of rows above and below the viewport.
+///
+/// This is used both to [request](RenderState::set_overscan) overscan and to
+/// [report](Snapshot::overscan) how many rows an update captured. See
+/// [Overscan](RenderState#overscan) for how the extra rows are used.
+#[derive(Debug, Clone, Copy)]
+pub struct Overscan {
+    /// Rows above the top of the viewport.
+    pub above: u16,
+    /// Rows below the bottom of the viewport.
+    pub below: u16,
 }
 
 /// The kinds of Kitty graphics placements in a render state's image list.

@@ -794,6 +794,7 @@ impl<'t> PlacementIteration<'t, '_> {
 ///
 #[doc = crate::guide_ref!("Drawing images", "images", "drawing")]
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct PlacementRenderInfo {
     /// The size to draw the image at, in pixels.
     pub pixel_size: PixelSize,

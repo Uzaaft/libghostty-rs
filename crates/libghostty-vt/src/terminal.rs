@@ -38,7 +38,7 @@ use crate::{
 };
 
 #[doc(inline)]
-pub use ffi::{TerminalMemoryUsage as MemoryUsage, TerminalScrollbar as Scrollbar};
+pub use ffi::TerminalScrollbar as Scrollbar;
 
 /// Opaque handle to a terminal instance.
 #[derive(Debug)]
@@ -183,6 +183,12 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let Some(stop) = from_optional_result(result, stop)? else {
             return Ok(None);
         };
+
+        let minimum_size =
+            std::mem::offset_of!(ffi::TerminalWriteStop, byte) + std::mem::size_of::<u8>();
+        if stop.size < minimum_size {
+            return Err(Error::InvalidValue);
+        }
 
         // Upstream zero-fills the fields that don't apply to a stop, and zero
         // is also a valid value for `kind` (APC), `introducer` (ESC) and
@@ -377,7 +383,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
             )
         };
         from_result(result)?;
-        Ok(usage)
+        MemoryUsage::from_raw(usage)
     }
     pub(crate) fn get<T>(&self, tag: ffi::TerminalData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
@@ -1171,6 +1177,7 @@ pub enum StringEnd {
 /// therefore `Option`s here, and are `None` whenever [`reached`](Self::reached)
 /// says they don't apply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WriteStop {
     /// Number of input bytes consumed, including the byte that reached the
     /// boundary. This is 0 when the stream was already at ground and you
@@ -1248,6 +1255,90 @@ pub enum CompressionResult {
 /// direction have the same meaning.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CompressionActivity(u64);
+
+/// Memory held by a terminal, read with [`Terminal::memory_usage`].
+///
+/// Each screen has its own set of fields in the form of [`ScreenMemoryUsage`].
+/// Add the two sets together for the terminal's total. The alternate fields
+/// are all zero until a program first switches to that screen.
+///
+/// See [Memory use] for what these figures cover and which one to budget against.
+#[doc = crate::guide_ref!("Memory use", "scrollback", "memory")]
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct MemoryUsage {
+    /// Whether compressing scrollback can free memory on this platform.
+    ///
+    /// When false, [`Terminal::compress`] reports [`CompressionResult::Unsupported`]
+    /// and the compressed fields are always zero. To reduce a terminal's memory
+    /// on such a platform, you have to do something else, such as closing it.
+    pub compression_supported: bool,
+    /// Memory usage of the primary screen.
+    pub primary: ScreenMemoryUsage,
+    /// Memory usage of the alternate screen.
+    pub alternate: ScreenMemoryUsage,
+}
+
+impl MemoryUsage {
+    fn from_raw(raw: ffi::TerminalMemoryUsage) -> Result<Self> {
+        let minimum_size = std::mem::offset_of!(ffi::TerminalMemoryUsage, alternate_image_bytes)
+            + std::mem::size_of::<u64>();
+        if raw.size < minimum_size {
+            return Err(Error::InvalidValue);
+        }
+
+        Ok(Self {
+            compression_supported: raw.compression_supported,
+            primary: ScreenMemoryUsage {
+                pages: raw.primary_pages,
+                virtual_bytes: raw.primary_virtual_bytes,
+                resident_bytes: raw.primary_resident_bytes,
+                compressed_pages: raw.primary_compressed_pages,
+                compressed_bytes: raw.primary_compressed_bytes,
+                image_bytes: raw.primary_image_bytes,
+            },
+            alternate: ScreenMemoryUsage {
+                pages: raw.alternate_pages,
+                virtual_bytes: raw.alternate_virtual_bytes,
+                resident_bytes: raw.alternate_resident_bytes,
+                compressed_pages: raw.alternate_compressed_pages,
+                compressed_bytes: raw.alternate_compressed_bytes,
+                image_bytes: raw.alternate_image_bytes,
+            },
+        })
+    }
+}
+
+/// Memory held by a single screen, either primary or alternate.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct ScreenMemoryUsage {
+    /// Number of pages in the screen, including compressed pages.
+    pub pages: u64,
+
+    /// Bytes of address space reserved for the primary screen's pages.
+    ///
+    /// This includes compressed pages and spare pages kept ready for reuse.
+    /// Always at least [`Self::resident_bytes`].
+    pub virtual_bytes: u64,
+
+    /// Bytes of physical memory used by the primary screen's pages.
+    ///
+    /// A compressed page counts only its compressed size. Use this figure for
+    /// memory budgets.
+    pub resident_bytes: u64,
+
+    /// Number of the primary screen's pages that are compressed.
+    pub compressed_pages: u64,
+
+    /// Bytes of compressed data held for the primary screen's compressed pages.
+    ///
+    /// This is already included in [`Self::resident_bytes`].
+    pub compressed_bytes: u64,
+
+    /// Bytes of image data stored for the primary screen through the Kitty graphics protocol. This is not included in primary_resident_bytes. Always zero when libghostty-vt is built without Kitty graphics.
+    pub image_bytes: u64,
+}
 
 #[cfg(test)]
 mod tests {
@@ -1562,28 +1653,28 @@ mod tests {
         // Upstream: the alternate screen's fields "are all zero until a
         // program first switches to it".
         let fresh = terminal.memory_usage().expect("memory usage should read");
-        assert_eq!(fresh.alternate_pages, 0);
-        assert_eq!(fresh.alternate_virtual_bytes, 0);
-        assert_eq!(fresh.alternate_resident_bytes, 0);
-        assert_eq!(fresh.alternate_compressed_pages, 0);
-        assert_eq!(fresh.alternate_compressed_bytes, 0);
-        assert_eq!(fresh.alternate_image_bytes, 0);
+        assert_eq!(fresh.alternate.pages, 0);
+        assert_eq!(fresh.alternate.virtual_bytes, 0);
+        assert_eq!(fresh.alternate.resident_bytes, 0);
+        assert_eq!(fresh.alternate.compressed_pages, 0);
+        assert_eq!(fresh.alternate.compressed_bytes, 0);
+        assert_eq!(fresh.alternate.image_bytes, 0);
 
         // The primary screen always has its visible rows in at least one page.
-        assert!(fresh.primary_pages >= 1);
-        assert!(fresh.primary_resident_bytes > 0);
+        assert!(fresh.primary.pages >= 1);
+        assert!(fresh.primary.resident_bytes > 0);
         // Upstream: virtual bytes are "always at least
         // `primary_resident_bytes`".
-        assert!(fresh.primary_virtual_bytes >= fresh.primary_resident_bytes);
+        assert!(fresh.primary.virtual_bytes >= fresh.primary.resident_bytes);
         // Upstream: compressed bytes are "already included in
         // `primary_resident_bytes`". That holds whether or not this platform
         // supports compression (the compressed fields are zero if it doesn't).
-        assert!(fresh.primary_compressed_bytes <= fresh.primary_resident_bytes);
+        assert!(fresh.primary.compressed_bytes <= fresh.primary.resident_bytes);
 
         // Once a program switches to the alternate screen, it gets pages.
         terminal.vt_write(b"\x1b[?1049h");
         let alternate = terminal.memory_usage().expect("memory usage should read");
-        assert!(alternate.alternate_pages >= 1);
+        assert!(alternate.alternate.pages >= 1);
     }
 
     #[test]

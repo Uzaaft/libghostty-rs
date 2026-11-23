@@ -26,10 +26,10 @@ fn terminal_resident_bytes(terminal: &Terminal<'_, '_>) -> Result<u64, Error> {
 
     // Count both screens and any images. The alternate screen reports zero
     // until a program such as a full-screen editor first switches to it.
-    Ok(usage.primary_resident_bytes
-        + usage.primary_image_bytes
-        + usage.alternate_resident_bytes
-        + usage.alternate_image_bytes)
+    Ok(usage.primary.resident_bytes
+        + usage.primary.image_bytes
+        + usage.alternate.resident_bytes
+        + usage.alternate.image_bytes)
 }
 // ANCHOR_END: memory-usage
 

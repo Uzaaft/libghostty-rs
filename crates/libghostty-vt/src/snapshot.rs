@@ -1272,7 +1272,7 @@ mod tests {
 
         // Left at its default, the option compresses nothing.
         let plain = Decoder::new_buf(&bytes).unwrap().decode().unwrap();
-        assert_eq!(plain.memory_usage().unwrap().primary_compressed_pages, 0);
+        assert_eq!(plain.memory_usage().unwrap().primary.compressed_pages, 0);
 
         let mut decoder = Decoder::new_buf(&bytes).unwrap();
         assert!(!decoder.is_compress_history_enabled().unwrap());
@@ -1286,9 +1286,9 @@ mod tests {
         // Upstream accepts the option where compression is unsupported, but it
         // has no effect there, so only expect compressed pages where it is.
         if compressed.compression_supported {
-            assert!(compressed.primary_compressed_pages > 0);
+            assert!(compressed.primary.compressed_pages > 0);
         } else {
-            assert_eq!(compressed.primary_compressed_pages, 0);
+            assert_eq!(compressed.primary.compressed_pages, 0);
         }
     }
 
