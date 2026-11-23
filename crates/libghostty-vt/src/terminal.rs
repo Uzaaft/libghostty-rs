@@ -2338,7 +2338,7 @@ mod miri_soundness {
         terminal
             .on_clipboard_read(|_, request| {
                 order.borrow_mut().push(1);
-                request.reply(Ok(&[]), &[], false);
+                request.reply(Ok(&[])).finish();
                 order.borrow_mut().push(3);
             })
             .unwrap();

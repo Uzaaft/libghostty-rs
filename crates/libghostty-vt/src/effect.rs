@@ -3366,7 +3366,7 @@ mod tests {
 mod miri_soundness {
     use super::*;
     use crate::Terminal;
-    use std::{mem::ManuallyDrop, num::NonZeroU16};
+    use std::num::NonZeroU16;
 
     /// Upstream may add resize request kinds without an ABI break, and asks
     /// callbacks to ignore tags they don't handle. The trampoline must skip
@@ -3462,7 +3462,7 @@ mod miri_soundness {
         // OSC 52 payload "//4=" base64-decodes to FF FE, which is not UTF-8.
         let data = [0xFF_u8, 0xFE];
         let raw = ffi::ClipboardContent {
-            mime: ffi::String::from("text/plain"),
+            mime: ffi::String::from("text/plain".as_bytes()),
             data: ffi::String {
                 ptr: data.as_ptr(),
                 len: data.len(),
