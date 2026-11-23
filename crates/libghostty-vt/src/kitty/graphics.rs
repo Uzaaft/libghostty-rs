@@ -23,9 +23,6 @@ use crate::{
     selection::Selection,
 };
 
-#[doc(inline)]
-pub use ffi::KittyGraphicsPlacementRenderInfo as PlacementRenderInfo;
-
 /// Opaque reference to a Kitty graphics image storage.
 ///
 /// Obtained via [`Terminal::kitty_graphics`]. The reference is borrowed from
@@ -707,14 +704,13 @@ impl<'t> PlacementIteration<'t, '_> {
     /// placements and placements relative to them. If you draw from both,
     /// images are drawn twice. See [Drawing images].
     #[doc = crate::guide_ref!("Drawing images", "images", "drawing")]
-    // FIXME: Use our own RenderInfo type instead or re-exporting
     pub fn render_info(
         &self,
         image: &Image<'t>,
         terminal: &'t Terminal<'_, '_>,
     ) -> Result<PlacementRenderInfo> {
         crate::sys::GATE.freeze();
-        let mut info = ffi::sized!(PlacementRenderInfo);
+        let mut info = ffi::sized!(ffi::KittyGraphicsPlacementRenderInfo);
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_render_info(
                 self.iterator.inner.as_raw(),
@@ -724,7 +720,7 @@ impl<'t> PlacementIteration<'t, '_> {
             )
         };
         from_result(result)?;
-        Ok(info)
+        PlacementRenderInfo::from_raw(info)
     }
 
     /// The image ID this placement belongs to.
@@ -782,6 +778,70 @@ impl<'t> PlacementIteration<'t, '_> {
     /// Z-index for this placement.
     pub fn z(&self) -> Result<i32> {
         self.get(ffi::KittyGraphicsPlacementData::Z)
+    }
+}
+
+/// The geometry of a storage placement, filled in by [`PlacementIteration::render_info()`].
+///
+/// It holds the results of [`PlacementIteration::pixel_size()`],
+/// [`PlacementIteration::grid_size()`], [`PlacementIteration::viewport_pos()`]
+/// and [`PlacementIteration::source_rect()`], so you can get all of them in one
+/// call. That helps most when each call is expensive, such as through FFI.
+///
+/// This is for inspecting the storage. To draw, use the render state’s image
+/// list, which gives the same values for every image on screen.
+/// See [Drawing images].
+///
+#[doc = crate::guide_ref!("Drawing images", "images", "drawing")]
+#[derive(Debug, Clone, Copy)]
+pub struct PlacementRenderInfo {
+    /// The size to draw the image at, in pixels.
+    pub pixel_size: PixelSize,
+    /// The number of grid cells and rows the placement covers.
+    pub grid_size: GridSize,
+    /// The column and row of the top-left cell.
+    ///
+    /// Absent when it is entirely outside the viewport, or when the storage
+    /// can't find its position: a virtual placement, or a placement relative
+    /// to one.
+    pub viewport: Option<ViewportPos>,
+    /// The source rectangle of the image to draw, in image pixels.
+    pub source_rect: SourceRect,
+}
+
+impl PlacementRenderInfo {
+    fn from_raw(raw: ffi::KittyGraphicsPlacementRenderInfo) -> Result<Self> {
+        let minimum_size =
+            std::mem::offset_of!(ffi::KittyGraphicsPlacementRenderInfo, source_height)
+                + std::mem::size_of::<u32>();
+        if raw.size < minimum_size {
+            return Err(Error::InvalidValue);
+        }
+
+        Ok(Self {
+            pixel_size: PixelSize {
+                width: raw.pixel_width,
+                height: raw.pixel_height,
+            },
+            grid_size: GridSize {
+                cols: raw.grid_cols,
+                rows: raw.grid_rows,
+            },
+            viewport: if raw.viewport_visible {
+                Some(ViewportPos {
+                    row: raw.viewport_row,
+                    col: raw.viewport_col,
+                })
+            } else {
+                None
+            },
+            source_rect: SourceRect {
+                x: raw.source_x,
+                y: raw.source_y,
+                width: raw.source_width,
+                height: raw.source_height,
+            },
+        })
     }
 }
 

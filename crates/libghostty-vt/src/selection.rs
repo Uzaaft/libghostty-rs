@@ -4,7 +4,19 @@
 //! snapshot, only valid until the next change to the terminal.
 //!
 //! You need a terminal, and usually a grid reference to start from.
-// FIXME: Transclude examples, link to guide
+//!
+//! The [Selection guide] covers making one, turning pointer gestures into one,
+//! and copying it out.
+//!
+#![doc = crate::guide_ref!("Selection guide", "selection")]
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! if let Ok(Some(sel)) = terminal.select_word(ref).finish() {
+//!     terminal.set_selection(Some(sel));
+//! }
+//! ```
 use std::marker::PhantomData;
 
 use crate::{

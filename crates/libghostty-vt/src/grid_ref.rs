@@ -6,7 +6,27 @@
 //! change to the terminal. A tracked reference follows its cell. Use one to
 //! read particular cells. They aren't fast enough to draw a frame, so use
 //! [Render State](crate::render) for that.
-// FIXME: Transclude examples, link to guide
+//!
+//! The [Grid guide] covers coordinates, both kinds of reference, and when each
+//! one dies.
+//!
+#![doc = crate::guide_ref!("Grid guide", "grid")]
+//!
+//! # Example
+//!
+//! ```rust
+//! use libghostty_vt::point::{Point, Coordinate};
+//! # use libghostty_vt::{Terminal, error::Error};
+//!
+//! # fn main() -> Result<(), Error> {
+//! # let terminal = Terminal::new(80, 24)?;
+//! let point = Point::Active(Coordinate { x: 4, y: 0 });
+//!
+//! if let Ok(grid_ref) = terminal.grid_ref(point) {
+//!     let cell = grid_ref.cell()?;
+//! }
+//! # Ok(()) }
+//! ```
 use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{

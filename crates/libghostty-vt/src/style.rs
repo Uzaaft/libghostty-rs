@@ -7,7 +7,17 @@
 //! You get one from [`GridRef::style`](crate::grid_ref::GridRef::style), or
 //! from a render state when you draw. Its colors can be unset, which means
 //! you use your default.
-// FIXME: Transclude examples
+//!
+//! See the [Grid guide].
+//!
+#![doc = crate::guide_ref!("Grid guide", "grid")]
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! let style = ref.style()?;
+//! let bold = style.bold;
+//! ```
 use std::mem::MaybeUninit;
 
 use crate::{
@@ -33,7 +43,6 @@ pub struct Id(pub(crate) ffi::StyleId);
     reason = "style attributes should be just a bunch of bools"
 )]
 #[expect(missing_docs, reason = "self-explanatory")]
-// FIXME: Replace with FFI wrapper. Don't model all the fields for API stability
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Style {
     pub fg_color: StyleColor,

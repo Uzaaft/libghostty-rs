@@ -17,7 +17,9 @@ pub use bindings::*;
 #[macro_export]
 macro_rules! sized {
     ($ty:ty) => {{
-        let mut t = <$ty as ::std::default::Default>::default();
+        // SAFETY: An all-zero bit pattern is explicitly guaranteed
+        // to always be safe in libghostty's sized structs.
+        let mut t = unsafe { ::std::mem::zeroed::<$ty>() };
         t.size = ::std::mem::size_of::<$ty>();
         t
     }};

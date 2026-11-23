@@ -6,7 +6,40 @@
 //! An encoder has to follow the terminal's modes. If you have a terminal, call
 //! [`Encoder::set_options_from_terminal`] before you encode. You don't need
 //! a terminal to use this, but then you set the options yourself.
-// FIXME: link to transcluded example & guide
+//!
+//! The [Input guide] explains which modes matter and when to sync them.
+//!
+#![doc = crate::guide_ref!("Input guide", "input")]
+//!
+//! # Example
+//!
+//! ```rust
+//! use libghostty_vt::key;
+//! # use libghostty_vt::error::Error;
+//!
+//! # fn main() -> Result<(), Error> {
+//! // Create encoder
+//! let mut encoder = key::Encoder::new()?;
+//!
+//! // Enable Kitty keyboard protocol with all features
+//! encoder.set_kitty_flags(key::KittyKeyFlags::ALL);
+//!
+//! // Create and configure key event for Ctrl+C press
+//! let mut event = key::Event::new()?;
+//! event
+//!     .set_action(key::Action::Press)
+//!     .set_key(key::Key::C)
+//!     .set_mods(key::Mods::CTRL)
+//!     .set_unshifted_codepoint('c');
+//!
+//! // Encode the key event
+//! let mut buf = [0u8; 128];
+//! let len = encoder.encode(&event, &mut buf)?;
+//!
+//! // Use the encoded sequence (e.g., write to terminal)
+//! println!("{}", buf[0..len].escape_ascii());
+//! # Ok(()) }
+//! ```
 use std::mem::MaybeUninit;
 
 use crate::{

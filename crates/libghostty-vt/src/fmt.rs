@@ -7,7 +7,27 @@
 //! saving what's on the screen. You need a terminal first, and it must
 //! outlive the formatter. Each format call reflects the terminal at the
 //! time of that call.
-// FIXME: Transclude examples, link to guide
+//!
+//! See the [Selection guide] for copying a selection.
+//!
+#![doc = crate::guide_ref!("Selection guide", "selection")]
+//!
+//! # Example
+//!
+//! ```rust
+//! use libghostty_vt::fmt::{Formatter, Format};
+//! # use libghostty_vt::{Terminal, error::Error};
+//!
+//! # fn main() -> Result<(), Error> {
+//! // Create a formatter for the terminal and ask for plain text with
+//! // trailing whitespace trimmed. A new formatter already does both, but
+//! // setting them shows how options work and makes the output we want
+//! // explicit.
+//! # let terminal = Terminal::new(80, 24)?;
+//! let mut formatter = Formatter::new(&terminal)?;
+//! formatter.set_format(Format::Plain)?.set_trim(true)?;
+//! # Ok(()) }
+//! ```
 use std::mem::MaybeUninit;
 
 use crate::{
