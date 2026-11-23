@@ -14,8 +14,10 @@ pub trait DecodePng: Sync + 'static {
     ///
     /// The library calls this when it receives a PNG image and needs the raw
     /// pixels. The decoder decodes the PNG bytes in `data` and returns the
-    /// result. See the [Kitty graphics example](crate::kitty::graphics#example)
-    /// for a complete callback.
+    /// result.
+    ///
+    /// See the example in the [System Interface](crate::sys) overview for a
+    /// complete callback.
     ///
     /// # On success
     ///

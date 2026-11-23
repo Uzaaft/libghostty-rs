@@ -81,13 +81,11 @@ macro_rules! handlers {
             ) |$t:ident, $func:ident| $block:block
         )*
     } => {
-        /// Methods for registering [effect handlers](#effects).
+        /// Methods for registering [effect handlers](crate::effect).
         impl<'alloc, 'cb> $crate::terminal::Terminal<'alloc, 'cb> {$(
             $(#[$fmeta])*
             ///
-            /// See [Effects] for more details.
-            ///
-            #[doc = crate::guide_ref!("Effects", "effects")]
+            /// See [Effects](crate::effect) for more details.
             $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
                 unsafe extern "C" fn callback(
                     t: $crate::ffi::Terminal,
@@ -175,12 +173,13 @@ macro_rules! handlers {
         )*}
         $(
             #[doc = concat!(
-                "[Effect](Terminal#effects) callback type for [`Terminal::",
+                "[Effect] callback type for [`Terminal::",
                 stringify!($name),
                 "`](Terminal::",
                 stringify!($name),
                 ").\n"
             )]
+            #[doc = $crate::guide_ref!("Effect", "effects")]
             $(#[$tmeta])*
             pub trait $fnty<'alloc, 'cb>:
                 $(for<$lf>)? FnMut(

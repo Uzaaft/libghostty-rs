@@ -185,8 +185,9 @@ impl<'alloc> Search<'alloc> {
 
     /// Create a search bound to a terminal, with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         terminal: &Terminal<'_, '_>,

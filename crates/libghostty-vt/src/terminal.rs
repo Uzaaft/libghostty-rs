@@ -75,8 +75,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// scrollback limits. Use the `Terminal::set_*` family of methods
     /// to change any options prior to using the terminal.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         cols: u16,

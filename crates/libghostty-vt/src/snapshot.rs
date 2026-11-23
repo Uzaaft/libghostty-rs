@@ -290,8 +290,9 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// decoder that owns it. Reading zero bytes before a required marker
     /// reports truncated snapshot data as [`Error::InvalidValue`].
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc, R: Read>(
         alloc: &'alloc Allocator<'ctx>,
         r: &'r mut R,
@@ -332,8 +333,9 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// [`Decoder::ready`] and read it through [`IncrementalDecoder::decoder`]
     /// after FINISH.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_buf_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>, buf: &'r [u8]) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_buf_inner(alloc.to_raw(), buf) }

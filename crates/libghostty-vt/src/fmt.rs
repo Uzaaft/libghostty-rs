@@ -100,8 +100,9 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
 
     /// Create a formatter for a terminal's active screen.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
         terminal: &'t Terminal<'alloc, 'cb>,

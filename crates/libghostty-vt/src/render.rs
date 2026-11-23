@@ -753,8 +753,9 @@ impl<'alloc> RenderState<'alloc> {
 
     /// Create a new render state instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
@@ -1103,8 +1104,9 @@ impl<'alloc> RowIterator<'alloc> {
 
     /// Create a new cell iterator instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
@@ -1330,8 +1332,9 @@ impl<'alloc> CellIterator<'alloc> {
 
     /// Create a new cell iterator instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
@@ -1618,8 +1621,9 @@ impl<'alloc> ImageIterator<'alloc> {
 
     /// Create a new image iterator instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
@@ -1779,16 +1783,7 @@ impl ImageIteration<'_, '_> {
     /// The generation of the image's contents.
     ///
     /// It changes whenever the image's pixels change, including when an
-    // Only link to the `kitty` wrappers when the `kitty-graphics` feature
-    // provides them. Otherwise the link would be broken.
-    #[cfg_attr(
-        feature = "kitty-graphics",
-        doc = "[animation](crate::kitty::graphics#animation) moves to a new frame. Use it as part of your texture cache"
-    )]
-    #[cfg_attr(
-        not(feature = "kitty-graphics"),
-        doc = "animation moves to a new frame. Use it as part of your texture cache"
-    )]
+    /// animation moves to a new frame. Use it as part of your texture cache
     /// key, with the [protocol](Self::protocol) and [image ID](Self::image_id):
     /// if it matches the texture you have, you don't need to read the pixels
     /// again. For Kitty graphics, this is the same value as

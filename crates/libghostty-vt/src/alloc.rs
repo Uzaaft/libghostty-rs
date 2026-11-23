@@ -3,8 +3,8 @@
 //! libghostty-vt allows you to customize how memory is allocated with custom
 //! allocator implementations, such as [`Allocator::GLOBAL`] for Rust's
 //! [global allocator](std::alloc::GlobalAlloc), or if the `allocator-api`
-//! feature is enabled, you can [adapt](Allocator::from) a Rust
-//! [`Allocator`](std::alloc::Allocator) into a libghostty-vt allocator.
+//! feature is enabled, you can adapt a Rust [`Allocator`](std::alloc::Allocator)
+//! into a libghostty-vt allocator with the `From` implementation.
 //!
 //! Most programs never need this. Any function that requires allocation has
 //! a default variant that uses the default allocator (e.g.
