@@ -14,16 +14,9 @@ concurrency:
 jobs:
   book:
     name: Build and deploy
-    runs-on: namespace-profile-linux-x86-sm
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Namespace cache
-        uses: namespacelabs/nscloud-cache-action@15799a6b54e5765f85b2aac25b3f0df43ed571c0 # v1.4.3
-        with:
-          cache: |
-            nix
-            rust
 
       - name: Install Nix
         uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
@@ -48,6 +41,6 @@ jobs:
         if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: team_fr91hydVu6mJHBtqaSqVUVzm
-          VERCEL_PROJECT_ID: prj_JYvFcqdBKIJpIoKvF6Y9AmrN3j23
+          VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
         run: nix develop -c npx --yes vercel@65.17.0 deploy book/html --prod --yes --token "$VERCEL_TOKEN"
