@@ -2847,7 +2847,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(miri))]
     fn image_iterator_allocation_failure_is_reported() {
         // The iterator is allocated with the given allocator, so one that
         // refuses everything makes creating it fail.
@@ -2859,7 +2858,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(all(not(miri), any(target_os = "linux", target_os = "macos")))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn image_iterator_uses_its_allocator() {
         // With guard pages, any use of the iterator's memory after libghostty
         // freed it, or freeing it with another allocator, crashes.

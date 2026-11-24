@@ -134,21 +134,6 @@ adding it to the generator's `TARGETS` list; unlisted targets receive no layout
 checks. Regeneration needs no target SDKs or installed cross-target Rust standard
 libraries, and ordinary builds need neither Clang nor the generator.
 
-### Miri Verification
-
-Run the Rust-owned soundness checks with:
-
-```sh
-nix run .#miri
-```
-
-The command supplies its own nightly Miri toolchain and checks both binding and
-wrapper crates. These checks intentionally stay on Rust-owned unsafe seams such
-as string, slice, and allocator plumbing. They do not execute the native
-Ghostty FFI backend.
-
-Use `nix develop .#miri` when working interactively with the same toolchain.
-
 ### WebAssembly
 
 Wasm support is selected by the Rust target, not a Cargo feature. The existing
@@ -193,6 +178,33 @@ The raw `ghostty_wasm_*` allocation helpers are available through
 `libghostty-vt-sys` on Wasm. Rust callers normally use the existing owned types
 and allocator APIs instead; the helpers are intended for hosts managing raw
 Wasm memory. Do not mix their allocations with `ghostty_free` or Rust's heap.
+
+### Sanitizers
+
+Run the tests and doctests under AddressSanitizer with:
+
+```sh
+nix run .#asan
+```
+
+ASan instruments the Rust side only, including a rebuilt std; Zig has no
+ASan, so libghostty's own memory accesses are not checked. It does check the
+wrapper's accesses to memory that libghostty allocated with its default
+allocator, and on Linux it also reports leaked libghostty objects. Terminal
+pages are mapped straight from the OS, so views into them are not covered.
+
+There is no MemorySanitizer run. MSan needs every store instrumented, which
+Zig can't do, so it reports the bytes libghostty writes as uninitialized.
+
+The `cargo-test-ubsan` flake check is the UndefinedBehaviorSanitizer
+counterpart. It runs the same tests in the dev profile against a Debug build of
+libghostty, which turns on Zig's safety checks and builds participating C and
+C++ sources with UBSan. Rust and Zig code do not have UBSan instrumentation.
+It is part of `nix flake check`; to run only it:
+
+```sh
+nix build .#checks.$(nix eval --impure --raw --expr builtins.currentSystem).cargo-test-ubsan
+```
 
 ### Running the example
 

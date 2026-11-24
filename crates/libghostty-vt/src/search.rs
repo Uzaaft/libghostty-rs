@@ -570,8 +570,7 @@ impl MatchBuffer {
 /// let mut terminal = Terminal::new(8, 2).unwrap();
 /// let mut search = Search::new(&mut terminal).unwrap();
 /// let mut storage = MatchBuffer::new();
-/// let snapshot = search.snapshot(&mut terminal).unwrap();
-/// let selected = snapshot.matches(&mut storage).unwrap().next().unwrap();
+/// let selected = search.matches(&terminal, &mut storage).unwrap().next().unwrap();
 /// drop(terminal);
 /// selected.start().cell().unwrap();
 /// ```
@@ -583,9 +582,8 @@ impl MatchBuffer {
 /// let mut terminal = Terminal::new(8, 2).unwrap();
 /// let mut search = Search::new(&mut terminal).unwrap();
 /// let mut storage = MatchBuffer::new();
-/// let snapshot = search.snapshot(&mut terminal).unwrap();
-/// let selected = snapshot.matches(&mut storage).unwrap().next().unwrap();
-/// snapshot.viewport_matches(&mut storage).unwrap();
+/// let selected = search.matches(&terminal, &mut storage).unwrap().next().unwrap();
+/// search.viewport_matches(&terminal, &mut storage).unwrap();
 /// selected.start().cell().unwrap();
 /// ```
 #[derive(Debug)]
@@ -623,7 +621,7 @@ impl DoubleEndedIterator for Matches<'_> {
 impl ExactSizeIterator for Matches<'_> {}
 impl std::iter::FusedIterator for Matches<'_> {}
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

@@ -360,7 +360,7 @@ pub enum Format {
     Html = ffi::FormatterFormat::HTML,
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

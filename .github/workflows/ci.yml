@@ -107,8 +107,8 @@ jobs:
             done
           '
 
-  miri:
-    name: Linux Miri
+  asan:
+    name: Linux AddressSanitizer
     runs-on: namespace-profile-linux-x86-sm
     steps:
       - uses: actions/checkout@v4
@@ -125,5 +125,13 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
 
-      - name: Miri soundness checks
-        run: nix run .#miri
+      # The app links the prebuilt libghostty, so pull it from the Ghostty
+      # cache rather than building it on every run.
+      - name: Use Ghostty binary cache
+        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with:
+          name: ghostty
+          skipPush: true
+
+      - name: AddressSanitizer checks
+        run: nix run .#asan

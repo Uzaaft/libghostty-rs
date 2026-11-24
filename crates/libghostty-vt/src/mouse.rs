@@ -519,7 +519,7 @@ pub enum Shape {
     ZoomOut = ffi::MouseShape::ZOOM_OUT,
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

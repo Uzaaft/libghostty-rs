@@ -408,7 +408,7 @@ unsafe fn get_allocator<'a, A: alloc::Allocator>(ptr: *mut c_void) -> Option<&'a
 
 /// Custom allocators for tests that need to observe or constrain what
 /// libghostty allocates.
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 pub(crate) mod testing {
     use std::{cell::Cell, ffi::c_void};
 
@@ -627,7 +627,7 @@ mod tests {
     /// A stateful allocator must stay reachable through the libghostty
     /// allocator. Adapting it by value used to leave libghostty with a
     /// pointer into a dead stack frame.
-    #[cfg(all(feature = "allocator_api", not(miri)))]
+    #[cfg(feature = "allocator_api")]
     #[test]
     fn allocator_api_allocators_keep_their_state() {
         use std::{
@@ -657,9 +657,6 @@ mod tests {
     use std::ptr::NonNull;
 
     use super::{rust_global_alloc, rust_global_free, rust_global_remap};
-
-    // These tests stay entirely within Rust-owned allocator callbacks so Miri can
-    // validate the pointer and initialization flow without executing Ghostty.
 
     #[test]
     fn global_allocator_respects_requested_alignment() {
@@ -726,10 +723,7 @@ mod tests {
         };
     }
 
-    // Unlike the tests above, this goes through `ghostty_alloc`, which Miri
-    // cannot execute.
     #[test]
-    #[cfg_attr(miri, ignore = "calls into libghostty")]
     fn bytes_are_zero_initialized() {
         for len in [0, 1, 4096] {
             for bytes in [
@@ -746,7 +740,6 @@ mod tests {
     // libghostty reports empty output as NULL with a zero length. That must
     // come back as an empty buffer, not be mistaken for an allocation failure.
     #[test]
-    #[cfg_attr(miri, ignore = "calls into libghostty")]
     fn empty_output_is_an_empty_buffer() {
         let terminal = crate::Terminal::new(10, 5).expect("terminal");
         let mut formatter = crate::fmt::Formatter::new(&terminal).expect("formatter");

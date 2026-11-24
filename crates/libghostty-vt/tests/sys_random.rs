@@ -1,9 +1,6 @@
 //! The secure random source is process-global and must not be changed while
 //! any other thread uses libghostty. Tests run on parallel threads, so this
 //! lives in its own test binary with a single test.
-// These call into libghostty, which Miri cannot execute.
-#![cfg(not(miri))]
-
 use std::{
     cell::RefCell,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},

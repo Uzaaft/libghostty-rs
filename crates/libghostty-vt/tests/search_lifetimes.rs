@@ -1,8 +1,5 @@
 //! Ownership scenarios between searches and their terminals, run against the
 //! real library.
-// These call into libghostty, which Miri cannot execute.
-#![cfg(not(miri))]
-
 use libghostty_vt::{Error, Terminal, search::Search};
 
 fn fixture(terminal: &mut Terminal<'_, '_>) -> Search<'static> {
