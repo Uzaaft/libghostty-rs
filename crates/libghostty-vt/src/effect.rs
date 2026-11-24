@@ -3343,6 +3343,12 @@ mod tests {
         // SAFETY: Ditto; an unknown tag makes `from_raw` read nothing else.
         assert_eq!(unsafe { UnknownSequence::from_raw(&raw const raw) }, None);
     }
+}
+
+// These regressions also run under Miri without a native backend (#74/#75).
+#[cfg(test)]
+mod soundness_tests {
+    use super::*;
 
     /// The C trampoline declares `contents: ?[*]const ClipboardContent` and
     /// sends `contents = NULL, contents_len = 0` for a write carrying no

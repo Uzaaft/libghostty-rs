@@ -76,6 +76,12 @@ fn main() {
         return;
     }
 
+    // The focused Miri regressions use Rust-owned data and a minimal test
+    // boundary; the interpreter cannot execute the native library.
+    if env::var("CARGO_CFG_MIRI").is_ok() {
+        return;
+    }
+
     let link_mode = LinkMode::current();
     // Cargo always sets TARGET for build scripts, so read it once here and
     // hand it to whichever path runs rather than re-reading it per call site.

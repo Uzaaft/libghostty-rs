@@ -2171,8 +2171,127 @@ mod tests {
 }
 
 #[cfg(test)]
-mod callback_tests {
+mod soundness_tests {
     use super::*;
+
+    // Only model handle ownership, callback registration and synchronous
+    // dispatch for the two regressions below. There is no parser, getter
+    // implementation or success fallback for other FFI operations.
+    #[cfg(miri)]
+    mod boundary {
+        use super::*;
+        use std::ffi::c_void;
+
+        struct Handle {
+            userdata: *mut c_void,
+            write: ffi::TerminalWritePtyFn,
+            read: ffi::TerminalClipboardReadFn,
+        }
+
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn ghostty_terminal_new(
+            alloc: *const ffi::Allocator,
+            out: *mut ffi::Terminal,
+            _: u16,
+            _: u16,
+        ) -> ffi::Result::Type {
+            assert!(
+                alloc.is_null(),
+                "test boundary only supports the default allocator"
+            );
+            let handle = Box::new(Handle {
+                userdata: std::ptr::null_mut(),
+                write: None,
+                read: None,
+            });
+            // SAFETY: Terminal::new supplies a writable out parameter.
+            unsafe { out.write(Box::into_raw(handle).cast()) };
+            ffi::Result::SUCCESS
+        }
+
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn ghostty_terminal_free(terminal: ffi::Terminal) {
+            // SAFETY: Terminal drops the handle from new exactly once.
+            unsafe { drop(Box::from_raw(terminal.cast::<Handle>())) };
+        }
+
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn ghostty_terminal_set(
+            terminal: ffi::Terminal,
+            option: ffi::TerminalOption::Type,
+            value: *const c_void,
+        ) -> ffi::Result::Type {
+            // SAFETY: Registration has exclusive access to the live handle.
+            let handle = unsafe { &mut *terminal.cast::<Handle>() };
+            match option {
+                ffi::TerminalOption::USERDATA => handle.userdata = value.cast_mut(),
+                ffi::TerminalOption::WRITE_PTY => {
+                    // SAFETY: on_pty_write supplies the matching callback ABI.
+                    handle.write = unsafe {
+                        std::mem::transmute::<*const c_void, ffi::TerminalWritePtyFn>(value)
+                    };
+                }
+                ffi::TerminalOption::CLIPBOARD_READ => {
+                    // SAFETY: on_clipboard_read supplies the matching callback ABI.
+                    handle.read = unsafe {
+                        std::mem::transmute::<*const c_void, ffi::TerminalClipboardReadFn>(value)
+                    };
+                }
+                _ => panic!("unexpected option in Miri test boundary: {option}"),
+            }
+            ffi::Result::SUCCESS
+        }
+
+        unsafe extern "C" fn reply(
+            request: *const ffi::ClipboardRead,
+            _: *const ffi::ClipboardReadReply,
+        ) {
+            // SAFETY: Dispatch stores the live handle in ctx for this call.
+            let terminal = unsafe { (*request).ctx.cast_mut().cast::<ffi::TerminalImpl>() };
+            let (userdata, write) = {
+                // SAFETY: End the handle borrow before invoking user code.
+                let handle = unsafe { &*terminal.cast::<Handle>() };
+                (handle.userdata, handle.write.unwrap())
+            };
+            let bytes = b"\x1b]52;c;\x1b\\";
+            // SAFETY: Registration supplied the callback and its userdata;
+            // the static response lives throughout this nested dispatch.
+            unsafe { write(terminal, userdata, bytes.as_ptr(), bytes.len()) };
+        }
+
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn ghostty_terminal_vt_write(
+            terminal: ffi::Terminal,
+            data: *const u8,
+            len: usize,
+        ) {
+            let (userdata, write, read) = {
+                // SAFETY: vt_write supplies a live handle. Keep no borrow
+                // across callbacks, which can dispatch a nested pty write.
+                let handle = unsafe { &*terminal.cast::<Handle>() };
+                (handle.userdata, handle.write, handle.read)
+            };
+            // SAFETY: vt_write supplies initialized input for this call.
+            match unsafe { std::slice::from_raw_parts(data, len) } {
+                b"\x1b[5n" => {
+                    let bytes = b"\x1b[0n";
+                    // SAFETY: Registration supplied the callback/userdata.
+                    unsafe { write.unwrap()(terminal, userdata, bytes.as_ptr(), bytes.len()) };
+                }
+                b"\x1b]52;c;?\x1b\\" => {
+                    let request = ffi::ClipboardRead {
+                        ctx: terminal.cast(),
+                        reply: Some(reply),
+                        ..ffi::ClipboardRead::default()
+                    };
+                    // SAFETY: Registration supplied the callback/userdata;
+                    // request remains live for the synchronous callback.
+                    unsafe { read.unwrap()(terminal, userdata, &raw const request) };
+                }
+                _ => panic!("unexpected input in Miri test boundary"),
+            }
+        }
+    }
 
     #[test]
     fn moved_terminal_callbacks_and_destruction() {

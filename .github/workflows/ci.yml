@@ -135,3 +135,6 @@ jobs:
 
       - name: AddressSanitizer checks
         run: nix run .#asan
+
+      - name: Miri bug regressions
+        run: nix run .#miri

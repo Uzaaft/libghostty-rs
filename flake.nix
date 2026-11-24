@@ -69,11 +69,11 @@
           targets = rustTargets;
         };
 
-        # ASan and wasm64 build std from rust-src with nightly.
+        # ASan, Miri and wasm64 need nightly and rust-src.
         nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (
           toolchain:
             toolchain.default.override {
-              extensions = ["rust-src" "rust-std"];
+              extensions = ["rust-src" "rust-std" "miri"];
               targets = rustTargets;
             }
         );
@@ -126,6 +126,19 @@
           else ghosttySourceLib;
 
         ghosttyDebugLib = ghostty.packages.${system}.libghostty-vt-debug;
+
+        miriCommand = pkgs.writeShellApplication {
+          name = "libghostty-miri";
+          runtimeInputs = [nightlyToolchain];
+          text = ''
+            # Only the bug regressions: clipboard bytes, reader initialization,
+            # and callback userdata across moves and nested dispatch. Native
+            # tests run the same assertions against real Ghostty separately.
+            for flags in "" "-Zmiri-tree-borrows"; do
+              MIRIFLAGS="$flags" cargo miri test --locked -p libghostty-vt --lib soundness_tests::
+            done
+          '';
+        };
 
         # Zig cannot be instrumented with ASan. This checks Rust's accesses
         # to malloc-backed Ghostty allocations, and leaks on Linux, but not
@@ -362,6 +375,10 @@
 
         apps.asan = flake-utils.lib.mkApp {
           drv = asanCommand;
+        };
+
+        apps.miri = flake-utils.lib.mkApp {
+          drv = miriCommand;
         };
 
         devShells.book = craneLib.devShell {

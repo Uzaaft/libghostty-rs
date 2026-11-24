@@ -206,6 +206,21 @@ It is part of `nix flake check`; to run only it:
 nix build .#checks.$(nix eval --impure --raw --expr builtins.currentSystem).cargo-test-ubsan
 ```
 
+### Focused Miri regressions
+
+Run the clipboard soundness, reader initialization, and callback ownership
+regressions under both Stacked Borrows and Tree Borrows with:
+
+```sh
+nix run .#miri
+```
+
+These tests also run natively. Miri checks Rust-owned data directly; only the
+callback ownership tests need a boundary implementing four terminal FFI
+functions for handle ownership, callback registration, and synchronous dispatch.
+It accepts only the options and inputs those tests use, not a general mock
+Ghostty backend. Miri does not execute or validate native Ghostty code.
+
 ### Running the example
 
 The examples live in their own workspace under `example/`. To run one, enter

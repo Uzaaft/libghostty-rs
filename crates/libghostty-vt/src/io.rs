@@ -65,7 +65,7 @@ pub fn to_reader<R: Read>(r: &mut R) -> ffi::Reader {
 }
 
 #[cfg(test)]
-mod tests {
+mod soundness_tests {
     use super::*;
 
     #[test]
@@ -83,21 +83,33 @@ mod tests {
 
         let mut reader = InspectingReader;
         let callback = to_reader(&mut reader);
-        // Nonzero bytes make a missing initialization fail deterministically
-        // without making the test itself read uninitialized memory.
-        let mut storage = [0xa5; 9];
+        // Native runs use nonzero bytes for a deterministic failure. Miri
+        // additionally checks the original uninitialized-buffer regression.
+        let mut storage = if cfg!(miri) {
+            std::mem::MaybeUninit::<[u8; 9]>::uninit()
+        } else {
+            std::mem::MaybeUninit::new([0xa5; 9])
+        };
         for _ in 0..2 {
             let mut read = usize::MAX;
             // SAFETY: Model the native callback contract: live userdata,
             // writable non-NULL storage, positive capacity and an out pointer.
             assert!(unsafe {
-                callback.read.unwrap()(callback.userdata, storage.as_mut_ptr(), 9, &raw mut read)
+                callback.read.unwrap()(
+                    callback.userdata,
+                    storage.as_mut_ptr().cast(),
+                    9,
+                    &raw mut read,
+                )
             });
             assert_eq!(read, 2);
-            assert_eq!(storage, [0x31, 0x8b, 0, 0, 0, 0, 0, 0, 0]);
+            // SAFETY: The reader adapter initializes all nine bytes, not
+            // just the two bytes reported by the Read implementation.
+            let bytes = unsafe { storage.assume_init_mut() };
+            assert_eq!(*bytes, [0x31, 0x8b, 0, 0, 0, 0, 0, 0, 0]);
             // Reused native buffers may contain old bytes. Initialization must
             // happen on every callback, not just on the first read.
-            storage.fill(0xa5);
+            bytes.fill(0xa5);
         }
     }
 }
