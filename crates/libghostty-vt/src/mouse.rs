@@ -132,6 +132,12 @@ impl<'alloc> Encoder<'alloc> {
     ///
     /// This sets tracking mode and output format from terminal state.
     /// It does not modify size or any-button state.
+    ///
+    /// If the terminal's tracking mode or format differs from the encoder's,
+    /// the encoder also forgets the cell remembered by
+    /// [`Self::set_track_last_cell`], so the next motion event is
+    /// written even if it's in that cell. If neither differs, the encoder keeps
+    /// the remembered cell. You can call this before every event.
     pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> &mut Self {
         crate::sys::GATE.freeze();
 
@@ -141,6 +147,8 @@ impl<'alloc> Encoder<'alloc> {
         self
     }
     /// Set mouse tracking mode.
+    ///
+    /// Changing it forgets the cell remembered by [`Self::set_track_last_cell`].
     pub fn set_tracking_mode(&mut self, value: TrackingMode) -> &mut Self {
         unsafe {
             self.setopt(Opt::EVENT, std::ptr::from_ref(&value).cast());
@@ -148,6 +156,8 @@ impl<'alloc> Encoder<'alloc> {
         self
     }
     /// Set mouse output format.
+    ///
+    /// Changing it forgets the cell remembered by [`Self::set_track_last_cell`].
     pub fn set_format(&mut self, value: Format) -> &mut Self {
         unsafe {
             self.setopt(Opt::FORMAT, std::ptr::from_ref(&value).cast());
@@ -155,6 +165,10 @@ impl<'alloc> Encoder<'alloc> {
         self
     }
     /// Set renderer size context.
+    ///
+    /// Changing it forgets the cell remembered by
+    /// [`Self::set_track_last_cell`]. Setting the size it
+    /// already has does nothing, so it's fine to set it before every event.
     ///
     /// Returns [`Error::InvalidValue`] if either cell dimension is zero.
     /// On error, the encoder keeps its previous size.
@@ -170,7 +184,46 @@ impl<'alloc> Encoder<'alloc> {
         }
         self
     }
-    /// Set whether to enable motion deduplication by last cell.
+    /// Set whether to skip motion events that stay in the same cell (default: false).
+    ///
+    /// When this is on, the encoder remembers the cell of the last event it
+    /// wrote, and writes nothing for a motion event in that same cell. Motion
+    /// is reported only when the pointer moves to a different cell. This is
+    /// what xterm and Ghostty do, and it's what most programs expect. Turn it
+    /// on unless you have a reason not to.
+    ///
+    /// The SGR-Pixels format reports positions in pixels rather than cells,
+    /// so this option has no effect on it. Every motion event is written.
+    ///
+    /// The encoder forgets the remembered cell when the tracking mode, the
+    /// format or the size changes, so the first motion after a change is
+    /// always written. Setting an option to the value it already has doesn't
+    /// count as a change. Turning this option off, or calling
+    /// [`Self::reset`], forgets it too.
+    ///
+    /// That means you can sync the encoder before every event safely:
+    ///
+    /// ```
+    /// # use libghostty_vt::{Terminal, mouse::{Encoder, EncoderSize, Event}};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let terminal = Terminal::new(80, 24)?;
+    /// # let mut encoder = Encoder::new()?;
+    /// # let event = Event::new()?;
+    /// # let size = EncoderSize {
+    /// #     screen_width: 800, screen_height: 480,
+    /// #     cell_width: 10, cell_height: 20,
+    /// #     padding_top: 0, padding_bottom: 0, padding_left: 0, padding_right: 0,
+    /// # };
+    /// # let mut buf = [0; 128];
+    /// encoder.set_track_last_cell(true);
+    ///
+    /// // For each mouse event:
+    /// encoder.set_options_from_terminal(&terminal);
+    /// encoder.set_size(size)?;
+    /// let written = encoder.encode(&event, &mut buf)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn set_track_last_cell(&mut self, value: bool) -> &mut Self {
         unsafe {
             self.setopt(Opt::TRACK_LAST_CELL, std::ptr::from_ref(&value).cast());

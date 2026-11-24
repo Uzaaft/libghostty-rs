@@ -85,6 +85,15 @@ pub fn codepoint_width(codepoint: char) -> u8 {
 /// and the stream may still continue; a later character could still extend the
 /// cluster and change its width.
 ///
+/// A skin tone modifier (U+1F3FB through U+1F3FF) that continues a
+/// cluster forces it wide (2), just like VS16. A modifier asks for the
+/// emoji form of the codepoint before it, so U+261D U+1F3FB (index
+/// pointing up, light skin tone) is 2 cells wide even though U+261D on
+/// its own is 1. A modifier only continues a cluster after an emoji that
+/// accepts skin tones, or after a Prepend codepoint such as U+0600.
+/// After anything else, such as "a", it starts a new cluster, which is
+/// 2 cells wide on its own.
+///
 /// Mode dependence: this models mode 2027, grapheme clustering, enabled. When
 /// mode 2027 is disabled, clusters never combine and variation selectors never
 /// change width; predict layout in that case by summing [`codepoint_width`] over
