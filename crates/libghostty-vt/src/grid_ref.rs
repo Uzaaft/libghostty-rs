@@ -6,7 +6,27 @@
 //! change to the terminal. A tracked reference follows its cell. Use one to
 //! read particular cells. They aren't fast enough to draw a frame, so use
 //! [Render State](crate::render) for that.
-// FIXME: Transclude examples, link to guide
+//!
+//! The [Grid guide] covers coordinates, both kinds of reference, and when each
+//! one dies.
+//!
+#![doc = crate::guide_ref!("Grid guide", "grid")]
+//!
+//! # Example
+//!
+//! ```rust
+//! use libghostty_vt::point::{Point, Coordinate};
+//! # use libghostty_vt::{Terminal, error::Error};
+//!
+//! # fn main() -> Result<(), Error> {
+//! # let terminal = Terminal::new(80, 24)?;
+//! let point = Point::Active(Coordinate { x: 4, y: 0 });
+//!
+//! if let Ok(grid_ref) = terminal.grid_ref(point) {
+//!     let cell = grid_ref.cell()?;
+//! }
+//! # Ok(()) }
+//! ```
 use std::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
@@ -17,6 +37,99 @@ use crate::{
     style::Style,
     terminal::Terminal,
 };
+
+/// Methods related to [grid references](crate::grid_ref).
+impl Terminal<'_, '_> {
+    /// Resolve a point in the terminal grid to a grid reference.
+    ///
+    /// Resolves the given point (which can be in active, viewport, screen,
+    /// or history coordinates) to a grid reference for that location. Use
+    /// [`GridRef::cell`] and [`GridRef::row`] to extract the cell and row.
+    ///
+    /// Lookups in the active region and viewport are fast. Lookups in the
+    /// screen and history may require traversing the full scrollback page
+    /// list to resolve the y coordinate, so they can be expensive for large
+    /// scrollback buffers.
+    ///
+    /// This function isn't meant to be used as the core of render loop. It
+    /// isn't built to sustain the framerates needed for rendering large
+    /// screens. Use the [render state API](crate::render::RenderState) for
+    /// that. This API is instead meant for less strictly performance-sensitive
+    /// use cases.
+    pub fn grid_ref(&self, point: Point) -> Result<GridRef<'_>> {
+        crate::sys::GATE.freeze();
+
+        let mut grid_ref = ffi::GridRef::default();
+        let result = unsafe {
+            ffi::ghostty_terminal_grid_ref(self.inner.as_raw(), point.into(), &raw mut grid_ref)
+        };
+        from_result(result)?;
+        Ok(unsafe { GridRef::from_raw(grid_ref) })
+    }
+
+    /// Create an owned tracked grid reference for a terminal point.
+    ///
+    /// This is the tracked variant of [`Terminal::grid_ref`]. The returned handle
+    /// follows the referenced cell as the terminal's page list is modified:
+    /// scrolling, pruning, resize/reflow, and other page-list operations update
+    /// the tracked reference automatically.
+    ///
+    /// The reference is attached to the terminal screen/page-list that is
+    /// active at creation time.
+    ///
+    /// If the point is outside the requested coordinate space, this returns
+    /// `Err(Error::InvalidValue)`.
+    ///
+    /// If the tracked grid reference outlives this terminal, the handle remains
+    /// valid, but it will always return `false` or `Ok(None)`.
+    pub fn track_grid_ref(&self, point: Point) -> Result<TrackedGridRef> {
+        crate::sys::GATE.freeze();
+
+        let mut raw: ffi::TrackedGridRef = std::ptr::null_mut();
+        let result = unsafe {
+            ffi::ghostty_terminal_grid_ref_track(self.inner.as_raw(), point.into(), &raw mut raw)
+        };
+        from_result(result)?;
+
+        let inner = NonNull::new(raw).ok_or(Error::InvalidValue)?;
+        Ok(TrackedGridRef::new(inner, self.inner.ptr))
+    }
+
+    /// Convert a grid reference back to a point in the given coordinate system.
+    ///
+    /// This is the inverse of [`Terminal::grid_ref`]: given a grid reference, it
+    /// returns the x/y coordinates in the requested coordinate system (active,
+    /// viewport, screen, or history).
+    ///
+    /// The grid reference must have been obtained from the same terminal instance.
+    /// Like all grid references, it is only valid until the next mutating
+    /// terminal call.
+    ///
+    /// Not every grid reference is representable in every coordinate system.
+    /// For example, a cell in scrollback history cannot be expressed in active
+    /// coordinates, and a cell that has scrolled off the visible area cannot
+    /// be expressed in viewport coordinates. In these cases, the function
+    /// returns `Ok(None)`.
+    pub fn point_from_grid_ref(
+        &self,
+        grid_ref: GridRef<'_>,
+        space: point::Space,
+    ) -> Result<Option<point::Coordinate>> {
+        crate::sys::GATE.freeze();
+
+        let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
+        let result = unsafe {
+            ffi::ghostty_terminal_point_from_grid_ref(
+                self.inner.as_raw(),
+                std::ptr::from_ref(&grid_ref.inner),
+                space.into_raw(),
+                point.as_mut_ptr(),
+            )
+        };
+
+        from_optional_result_uninit(result, point).map(|value| value.map(Into::into))
+    }
+}
 
 /// Resolved reference to a terminal cell position.
 ///
@@ -34,7 +147,7 @@ use crate::{
 /// This API is not meant to be used as the core of render loop.
 /// It isn't built to sustain the framerates needed for rendering large screens.
 /// Use the render state API for that.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct GridRef<'t> {
     pub(crate) inner: ffi::GridRef,
     pub(crate) _phan: PhantomData<&'t ffi::Terminal>,
@@ -50,6 +163,8 @@ impl GridRef<'_> {
 
     /// Get the row from a grid reference.
     pub fn row(&self) -> Result<Row> {
+        crate::sys::GATE.freeze();
+
         let mut v = ffi::Row::default();
         let result =
             unsafe { ffi::ghostty_grid_ref_row(std::ptr::from_ref(&self.inner), &raw mut v) };
@@ -58,6 +173,8 @@ impl GridRef<'_> {
     }
     /// Get the cell from a grid reference.
     pub fn cell(&self) -> Result<Cell> {
+        crate::sys::GATE.freeze();
+
         let mut v = ffi::Cell::default();
         let result =
             unsafe { ffi::ghostty_grid_ref_cell(std::ptr::from_ref(&self.inner), &raw mut v) };
@@ -66,6 +183,8 @@ impl GridRef<'_> {
     }
     /// Get the style of the cell at the grid reference's position.
     pub fn style(&self) -> Result<Style> {
+        crate::sys::GATE.freeze();
+
         let mut v = ffi::Style::default();
         let result =
             unsafe { ffi::ghostty_grid_ref_style(std::ptr::from_ref(&self.inner), &raw mut v) };
@@ -85,6 +204,8 @@ impl GridRef<'_> {
     /// required number of codepoints. The caller can then retry with
     /// a sufficiently sized buffer.
     pub fn graphemes(&self, buf: &mut [char]) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut len = 0;
         let result = unsafe {
             ffi::ghostty_grid_ref_graphemes(
@@ -107,6 +228,8 @@ impl GridRef<'_> {
     /// required number of codepoints. The caller can then retry with
     /// a sufficiently sized buffer.
     pub fn hyperlink_uri(&self, buf: &mut [u8]) -> Result<usize> {
+        crate::sys::GATE.freeze();
+
         let mut len = 0;
         let result = unsafe {
             ffi::ghostty_grid_ref_hyperlink_uri(
@@ -172,6 +295,7 @@ impl TrackedGridRef {
     /// this returns false.
     #[must_use]
     pub fn has_value(&self) -> bool {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_tracked_grid_ref_has_value(self.inner.as_ptr()) }
     }
 
@@ -191,6 +315,8 @@ impl TrackedGridRef {
         if self.terminal != terminal.inner.ptr {
             return Err(Error::InvalidValue);
         }
+        crate::sys::GATE.freeze();
+
         let mut grid_ref = MaybeUninit::zeroed();
         let result = unsafe {
             ffi::ghostty_tracked_grid_ref_snapshot(self.inner.as_ptr(), grid_ref.as_mut_ptr())
@@ -223,6 +349,8 @@ impl TrackedGridRef {
     /// in the requested coordinate space, including after the terminal that
     /// created the tracked reference has been dropped.
     pub fn point(&self, space: point::Space) -> Result<Option<point::Coordinate>> {
+        crate::sys::GATE.freeze();
+
         let mut point = MaybeUninit::<ffi::PointCoordinate>::zeroed();
         let result = unsafe {
             ffi::ghostty_tracked_grid_ref_point(
@@ -247,6 +375,8 @@ impl TrackedGridRef {
     /// primary and alternate screens, this may move the tracked reference from
     /// one screen/page-list to the other.
     pub fn set(&mut self, terminal: &mut Terminal<'_, '_>, point: Point) -> Result<&mut Self> {
+        crate::sys::GATE.freeze();
+
         // The C layer validates the terminal/tracked-ref pairing and returns
         // GHOSTTY_INVALID_VALUE on mismatch, so we don't duplicate the check
         // on the Rust side.
@@ -264,6 +394,7 @@ impl TrackedGridRef {
 
 impl Drop for TrackedGridRef {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_tracked_grid_ref_free(self.inner.as_ptr()) }
     }
 }

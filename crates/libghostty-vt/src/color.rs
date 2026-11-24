@@ -1,18 +1,105 @@
 //! Parse colors, generate palettes, and look up X11 color names.
 //!
-//! These are Ghostty's own color rules, so you don't have to write them again: the color strings its config and theme files accept, the 256-color palette the terminal uses, and the X11 color names.
+//! These are Ghostty's own color rules, so you don't have to write them again:
+//! the color strings its config and theme files accept, the 256-color palette
+//! the terminal uses, and the X11 color names.
 //!
-//! Use them when your application has to agree with Ghostty about what a color means, or to make UI decisions from luminance and contrast values. You don't need a terminal.
+//! Use them when your application has to agree with Ghostty about what a color
+//! means, or to make UI decisions from luminance and contrast values.
+//! You don't need a terminal.
+//!
+//! See the [Colors guide] for parsing, palettes, and how a terminal's colors work.
+//!
+#![doc = crate::guide_ref!("Colors guide", "colors")]
 //!
 //! # Example
+//!
 //! ```
 //! use libghostty_vt::color::Rgb;
 //! let color: Rgb = "#abc".parse().unwrap();
 //! ```
-// FIXME: link to transcluded examples and guide
 use std::{ffi::CStr, mem::MaybeUninit, slice};
 
-use crate::{error::Result, ffi};
+use crate::{Terminal, error::Result, ffi};
+
+/// Methods related to [colors](crate::color).
+impl Terminal<'_, '_> {
+    /// The effective foreground color (override or default).
+    pub fn fg_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_FOREGROUND)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default foreground color (ignoring any OSC override).
+    pub fn default_fg_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_FOREGROUND_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default foreground color.
+    pub fn set_default_fg_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::COLOR_FOREGROUND,
+            v.map(ffi::ColorRgb::from).as_ref(),
+        )?;
+        Ok(self)
+    }
+
+    /// The effective background color (override or default).
+    pub fn bg_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_BACKGROUND)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default background color (ignoring any OSC override).
+    pub fn default_bg_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_BACKGROUND_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default background color.
+    pub fn set_default_bg_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::COLOR_BACKGROUND,
+            v.map(ffi::ColorRgb::from).as_ref(),
+        )?;
+        Ok(self)
+    }
+
+    /// The effective cursor color (override or default).
+    pub fn cursor_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_CURSOR)
+            .map(|v| v.map(Into::into))
+    }
+    /// The default cursor color (ignoring any OSC override).
+    pub fn default_cursor_color(&self) -> Result<Option<Rgb>> {
+        self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_CURSOR_DEFAULT)
+            .map(|v| v.map(Into::into))
+    }
+    /// Set the default cursor color.
+    pub fn set_default_cursor_color(&mut self, v: Option<Rgb>) -> Result<&mut Self> {
+        self.set_optional(
+            ffi::TerminalOption::COLOR_CURSOR,
+            v.map(ffi::ColorRgb::from).as_ref(),
+        )?;
+        Ok(self)
+    }
+
+    /// The current 256-color palette.
+    pub fn color_palette(&self) -> Result<Palette> {
+        self.get::<RawPalette>(ffi::TerminalData::COLOR_PALETTE)
+            .map(Palette::from)
+    }
+    /// The default 256-color palette (ignoring any OSC overrides).
+    pub fn default_color_palette(&self) -> Result<Palette> {
+        self.get::<RawPalette>(ffi::TerminalData::COLOR_PALETTE_DEFAULT)
+            .map(Palette::from)
+    }
+    /// Set the default 256-color palette.
+    pub fn set_default_color_palette(&mut self, v: Option<Palette>) -> Result<&mut Self> {
+        self.set_optional::<RawPalette>(
+            ffi::TerminalOption::COLOR_PALETTE,
+            v.map(std::convert::Into::into).as_ref(),
+        )?;
+        Ok(self)
+    }
+}
 
 /// RGB color value.
 #[repr(C)]
@@ -34,6 +121,7 @@ impl Rgb {
     pub fn parse_x11_color(name: impl AsRef<[u8]>) -> Result<Self> {
         // Ditto (see `Palette::parse_palette_entry`): upstream takes bytes.
         let name = name.as_ref();
+        crate::sys::GATE.freeze();
         let mut out = MaybeUninit::uninit();
         let result = unsafe {
             ffi::ghostty_color_parse_x11(name.as_ptr().cast(), name.len(), out.as_mut_ptr())
@@ -52,6 +140,7 @@ impl Rgb {
     pub fn parse(value: impl AsRef<[u8]>) -> Result<Self> {
         // Ditto (see `Palette::parse_palette_entry`): upstream takes bytes.
         let value = value.as_ref();
+        crate::sys::GATE.freeze();
         let mut out = MaybeUninit::uninit();
         let result = unsafe {
             ffi::ghostty_color_parse(value.as_ptr().cast(), value.len(), out.as_mut_ptr())
@@ -66,6 +155,7 @@ impl Rgb {
     /// <https://www.w3.org/TR/WCAG20/#relativeluminancedef>.
     #[must_use]
     pub fn luminance(self) -> f64 {
+        crate::sys::GATE.freeze();
         let this: ffi::ColorRgb = self.into();
         unsafe { ffi::ghostty_color_luminance(&raw const this) }
     }
@@ -77,6 +167,7 @@ impl Rgb {
     /// metric used internally by [`Palette::generate`], which uses CIELAB lightness.
     #[must_use]
     pub fn perceived_luminance(self) -> f64 {
+        crate::sys::GATE.freeze();
         let this: ffi::ColorRgb = self.into();
         unsafe { ffi::ghostty_color_perceived_luminance(&raw const this) }
     }
@@ -87,6 +178,7 @@ impl Rgb {
     /// 21.0 for black and white.
     #[must_use]
     pub fn contrast(self, other: Rgb) -> f64 {
+        crate::sys::GATE.freeze();
         let this: ffi::ColorRgb = self.into();
         let that: ffi::ColorRgb = other.into();
         unsafe { ffi::ghostty_color_contrast(&raw const this, &raw const that) }
@@ -117,7 +209,7 @@ impl From<Rgb> for ffi::ColorRgb {
 pub struct Palette(pub [Rgb; 256]);
 
 // Saves a bit of typing
-pub(crate) type RawPalette = [ffi::ColorRgb; 256];
+type RawPalette = [ffi::ColorRgb; 256];
 
 impl From<RawPalette> for Palette {
     fn from(v: RawPalette) -> Self {
@@ -136,6 +228,7 @@ impl Default for Palette {
     /// Returns Ghostty's base16 defaults, the xterm 6x6x6 color cube, and the
     /// grayscale ramp.
     fn default() -> Self {
+        crate::sys::GATE.freeze();
         let mut raw = [ffi::ColorRgb::default(); 256];
         unsafe { ffi::ghostty_color_palette_default(raw.as_mut_ptr()) };
         raw.into()
@@ -167,6 +260,7 @@ impl Palette {
         // a UTF-8 check first. Input that isn't valid syntax, non-ASCII
         // included, is rejected by upstream as `Error::InvalidValue`.
         let value = value.as_ref();
+        crate::sys::GATE.freeze();
         let mut index = MaybeUninit::uninit();
         let mut rgb = MaybeUninit::uninit();
         let result = unsafe {
@@ -215,6 +309,7 @@ impl Palette {
         let bg: ffi::ColorRgb = background.into();
         let fg: ffi::ColorRgb = foreground.into();
 
+        crate::sys::GATE.freeze();
         unsafe {
             ffi::ghostty_color_palette_generate(
                 base_ptr,
@@ -323,6 +418,7 @@ impl X11ColorNames {
     /// case-insensitively.
     #[must_use]
     pub fn new() -> Self {
+        crate::sys::GATE.freeze();
         let ptr = unsafe { ffi::ghostty_color_x11_names() };
         let len = unsafe { ffi::ghostty_color_x11_name_count() };
         let entries = unsafe { slice::from_raw_parts(ptr, len) };

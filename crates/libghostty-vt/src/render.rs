@@ -9,17 +9,8 @@ use crate::{
     ffi,
     screen::{Cell, Row},
     style::Style,
-    terminal::Terminal,
+    terminal::{CursorStyle, Terminal},
 };
-
-pub use ffi::RenderStateRowSelection as RowSelection;
-
-/// A number of rows above and below the viewport.
-///
-/// This is used both to [request](RenderState::set_overscan) overscan and to
-/// [report](Snapshot::overscan) how many rows an update captured. See
-/// [Overscan](RenderState#overscan) for how the extra rows are used.
-pub use ffi::RenderStateOverscan as Overscan;
 
 /// Represents the state required to render a visible screen (a viewport) of
 /// a terminal instance.
@@ -762,14 +753,17 @@ impl<'alloc> RenderState<'alloc> {
 
     /// Create a new render state instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw: ffi::RenderState = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_render_state_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -790,6 +784,8 @@ impl<'alloc> RenderState<'alloc> {
         &mut self,
         terminal: &Terminal<'alloc, 'cb>,
     ) -> Result<Snapshot<'alloc, '_>> {
+        crate::sys::GATE.freeze();
+
         let result =
             unsafe { ffi::ghostty_render_state_update(self.0.as_raw(), terminal.inner.as_raw()) };
         from_result(result)?;
@@ -819,6 +815,8 @@ impl<'alloc> RenderState<'alloc> {
         &mut self,
         terminal: &Terminal<'alloc, 'cb>,
     ) -> Result<Update<'alloc, '_>> {
+        crate::sys::GATE.freeze();
+
         let result = unsafe {
             ffi::ghostty_render_state_begin_update(self.0.as_raw(), terminal.inner.as_raw())
         };
@@ -827,6 +825,8 @@ impl<'alloc> RenderState<'alloc> {
     }
 
     fn get<T>(&self, tag: ffi::RenderStateData::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_render_state_get(self.0.as_raw(), tag, value.as_mut_ptr().cast())
@@ -838,6 +838,8 @@ impl<'alloc> RenderState<'alloc> {
     }
 
     fn set<T>(&self, tag: ffi::RenderStateOption::Type, value: &T) -> Result<()> {
+        crate::sys::GATE.freeze();
+
         let result = unsafe {
             ffi::ghostty_render_state_set(self.0.as_raw(), tag, std::ptr::from_ref(value).cast())
         };
@@ -851,6 +853,10 @@ impl<'alloc> RenderState<'alloc> {
     /// it is changed. Both sides are zero by default, which captures only the
     /// viewport. Expect a full redraw on the update after a change.
     pub fn set_overscan(&mut self, request: Overscan) -> Result<&mut Self> {
+        let request = ffi::RenderStateOverscan {
+            above: request.above,
+            below: request.below,
+        };
         self.set(ffi::RenderStateOption::OVERSCAN, &request)?;
         Ok(self)
     }
@@ -860,12 +866,17 @@ impl<'alloc> RenderState<'alloc> {
     /// The next update uses this request. Both sides are zero if it was never
     /// set.
     pub fn overscan_request(&self) -> Result<Overscan> {
-        self.get(ffi::RenderStateData::OVERSCAN_REQUEST)
+        self.get::<ffi::RenderStateOverscan>(ffi::RenderStateData::OVERSCAN_REQUEST)
+            .map(|v| Overscan {
+                above: v.above,
+                below: v.below,
+            })
     }
 }
 
 impl Drop for RenderState<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_render_state_free(self.0.as_raw()) }
     }
 }
@@ -880,6 +891,7 @@ impl<'alloc, 's> Update<'alloc, 's> {
         let Some(state) = self.state.take() else {
             return Err(Error::InvalidValue);
         };
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_render_state_end_update(state.0.as_raw()) };
         from_result(result)?;
         Ok(Snapshot(state))
@@ -889,6 +901,7 @@ impl<'alloc, 's> Update<'alloc, 's> {
 impl Drop for Update<'_, '_> {
     fn drop(&mut self) {
         if let Some(state) = self.state.take() {
+            crate::sys::GATE.freeze();
             let _ = unsafe { ffi::ghostty_render_state_end_update(state.0.as_raw()) };
         }
     }
@@ -929,7 +942,11 @@ impl Snapshot<'_, '_> {
     /// of the scrollback, and `below` is zero while the viewport is scrolled
     /// to the bottom.
     pub fn overscan(&self) -> Result<Overscan> {
-        self.get(ffi::RenderStateData::OVERSCAN)
+        self.get::<ffi::RenderStateOverscan>(ffi::RenderStateData::OVERSCAN)
+            .map(|v| Overscan {
+                above: v.above,
+                below: v.below,
+            })
     }
 
     /// Get the cursor color that may have been explicitly set by the terminal state.
@@ -959,7 +976,7 @@ impl Snapshot<'_, '_> {
     }
 
     /// Get the visual style of the cursor.
-    pub fn cursor_visual_style(&self) -> Result<CursorVisualStyle> {
+    pub fn cursor_visual_style(&self) -> Result<CursorStyle> {
         self.get::<ffi::CursorStyle::Type>(ffi::RenderStateData::CURSOR_VISUAL_STYLE)
             .and_then(|v| v.try_into().map_err(|_| Error::Unsupported))
     }
@@ -983,6 +1000,7 @@ impl Snapshot<'_, '_> {
     /// This is equivalent to the individual `cursor_*` getters, but needs a
     /// single query instead of one per property.
     pub fn cursor(&self) -> Result<Cursor> {
+        crate::sys::GATE.freeze();
         let mut raw = ffi::sized!(ffi::RenderStateCursor);
         from_result(unsafe {
             ffi::ghostty_render_state_get(
@@ -1020,11 +1038,13 @@ impl Snapshot<'_, '_> {
     /// consumers should use [`Self::set_dirty`] and [`RowIteration::set_dirty`]
     /// instead.
     pub fn clean(&self) -> Result<()> {
+        crate::sys::GATE.freeze();
         from_result(unsafe { ffi::ghostty_render_state_clean(self.0.0.as_raw()) })
     }
 
     /// Get the current color information from a render state.
     pub fn colors(&self) -> Result<Colors> {
+        crate::sys::GATE.freeze();
         let mut colors = ffi::sized!(ffi::RenderStateColors);
         let result = unsafe {
             ffi::ghostty_render_state_get(
@@ -1084,14 +1104,16 @@ impl<'alloc> RowIterator<'alloc> {
 
     /// Create a new cell iterator instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
         let mut raw: ffi::RenderStateRowIterator = std::ptr::null_mut();
         let result = unsafe { ffi::ghostty_render_state_row_iterator_new(alloc, &raw mut raw) };
         from_result(result)?;
@@ -1117,6 +1139,7 @@ impl<'alloc> RowIterator<'alloc> {
         &'s mut self,
         snapshot: &'s Snapshot<'alloc, '_>,
     ) -> Result<RowIteration<'alloc, 's>> {
+        crate::sys::GATE.freeze();
         let result = unsafe {
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
@@ -1135,6 +1158,7 @@ impl<'alloc> RowIterator<'alloc> {
 
 impl Drop for RowIterator<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_render_state_row_iterator_free(self.0.as_raw()) }
     }
 }
@@ -1194,6 +1218,7 @@ impl RowIteration<'_, '_> {
     /// y. With overscan, it counts from the highest captured row, so use
     /// [`Self::viewport_y`] to place the row.
     pub fn next_dirty(&mut self) -> Option<(u16, &Self)> {
+        crate::sys::GATE.freeze();
         let mut y = 0;
         // The receiver is evaluated before the arguments, so `y` is read only
         // after libghostty has written it.
@@ -1212,6 +1237,7 @@ impl RowIteration<'_, '_> {
         reason = "lending `next` cannot implement trait"
     )]
     pub fn next(&mut self) -> Option<&Self> {
+        crate::sys::GATE.freeze();
         if unsafe { ffi::ghostty_render_state_row_iterator_next(self.iter.0.as_raw()) } {
             Some(self)
         } else {
@@ -1222,6 +1248,7 @@ impl RowIteration<'_, '_> {
     fn get<T>(&self, tag: ffi::RenderStateRowData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_get(self.iter.0.as_raw(), tag, value.as_mut_ptr().cast())
         };
         // Since we manually model every possible query, this should never fail.
@@ -1232,6 +1259,7 @@ impl RowIteration<'_, '_> {
 
     fn set<T>(&self, tag: ffi::RenderStateRowOption::Type, value: &T) -> Result<()> {
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_set(
                 self.iter.0.as_raw(),
                 tag,
@@ -1276,8 +1304,9 @@ impl RowIteration<'_, '_> {
 
     /// Row-local selected cell range.
     pub fn selection(&self) -> Result<Option<RowSelection>> {
-        let mut value = ffi::sized!(RowSelection);
+        let mut value = ffi::sized!(ffi::RenderStateRowSelection);
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowData::SELECTION,
@@ -1286,7 +1315,11 @@ impl RowIteration<'_, '_> {
         };
         // Since we manually model every possible query, this should never fail.
         // SAFETY: Value should be initialized after successful call.
-        from_optional_result(result, value)
+        match from_optional_result(result, value) {
+            Ok(Some(s)) => RowSelection::from_raw(s).map(Some),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -1299,15 +1332,17 @@ impl<'alloc> CellIterator<'alloc> {
 
     /// Create a new cell iterator instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
         let mut raw: ffi::RenderStateRowCells = std::ptr::null_mut();
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_render_state_row_cells_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -1339,6 +1374,7 @@ impl<'alloc> CellIterator<'alloc> {
         row: &'s RowIteration<'alloc, '_>,
     ) -> Result<CellIteration<'alloc, 's>> {
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_get(
                 row.iter.0.as_raw(),
                 ffi::RenderStateRowData::CELLS,
@@ -1356,6 +1392,7 @@ impl<'alloc> CellIterator<'alloc> {
 
 impl Drop for CellIterator<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_render_state_row_cells_free(self.0.as_raw()) }
     }
 }
@@ -1370,6 +1407,7 @@ impl CellIteration<'_, '_> {
         reason = "lending `next` cannot implement trait"
     )]
     pub fn next(&mut self) -> Option<&Self> {
+        crate::sys::GATE.freeze();
         if unsafe { ffi::ghostty_render_state_row_cells_next(self.iter.0.as_raw()) } {
             Some(self)
         } else {
@@ -1382,6 +1420,7 @@ impl CellIteration<'_, '_> {
     /// Positions the iteration at the given x (column) index so that
     /// subsequent reads return data for that cell.
     pub fn select(&mut self, x: u16) -> Result<()> {
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_render_state_row_cells_select(self.iter.0.as_raw(), x) };
         from_result(result)
     }
@@ -1398,6 +1437,7 @@ impl CellIteration<'_, '_> {
     fn get_optional<T>(&self, tag: ffi::RenderStateRowCellsData::Type) -> Result<Option<T>> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
                 tag,
@@ -1416,6 +1456,7 @@ impl CellIteration<'_, '_> {
     pub fn style(&self) -> Result<Style> {
         let mut value = ffi::Style::default();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowCellsData::STYLE,
@@ -1489,6 +1530,7 @@ impl CellIteration<'_, '_> {
         // grapheme codepoints are Unicode scalar values, and upstream
         // writes at most `cap` elements, including on OUT_OF_SPACE.
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_row_cells_get(
                 self.iter.0.as_raw(),
                 ffi::RenderStateRowCellsData::GRAPHEMES_BUF,
@@ -1524,6 +1566,7 @@ impl CellIteration<'_, '_> {
                 len: 0,
             };
             let result = unsafe {
+                crate::sys::GATE.freeze();
                 ffi::ghostty_render_state_row_cells_get(
                     self.iter.0.as_raw(),
                     ffi::RenderStateRowCellsData::GRAPHEMES_UTF8,
@@ -1578,15 +1621,17 @@ impl<'alloc> ImageIterator<'alloc> {
 
     /// Create a new image iterator instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
 
     unsafe fn new_inner(alloc: *const ffi::Allocator) -> Result<Self> {
         let mut raw: ffi::RenderStateImageIterator = std::ptr::null_mut();
+        crate::sys::GATE.freeze();
         let result = unsafe { ffi::ghostty_render_state_image_iterator_new(alloc, &raw mut raw) };
         from_result(result)?;
         Ok(Self(Object::new(raw)?))
@@ -1618,6 +1663,7 @@ impl<'alloc> ImageIterator<'alloc> {
         // Unlike most data keys, `out` points to an existing iterator handle,
         // which libghostty refills in place.
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_get(
                 snapshot.0.0.as_raw(),
                 ffi::RenderStateData::IMAGE_ITERATOR,
@@ -1635,6 +1681,7 @@ impl<'alloc> ImageIterator<'alloc> {
 
 impl Drop for ImageIterator<'_> {
     fn drop(&mut self) {
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_render_state_image_iterator_free(self.0.as_raw()) }
     }
 }
@@ -1667,6 +1714,7 @@ impl ImageIteration<'_, '_> {
         reason = "lending `next` cannot implement trait"
     )]
     pub fn next(&mut self) -> Option<&Self> {
+        crate::sys::GATE.freeze();
         if unsafe { ffi::ghostty_render_state_image_iterator_next(self.iter.0.as_raw()) } {
             Some(self)
         } else {
@@ -1677,6 +1725,7 @@ impl ImageIteration<'_, '_> {
     fn get<T>(&self, tag: ffi::RenderStateImageData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_image_get(
                 self.iter.0.as_raw(),
                 tag,
@@ -1696,6 +1745,7 @@ impl ImageIteration<'_, '_> {
     fn get_optional<T>(&self, tag: ffi::RenderStateImageData::Type) -> Result<Option<T>> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
+            crate::sys::GATE.freeze();
             ffi::ghostty_render_state_image_get(
                 self.iter.0.as_raw(),
                 tag,
@@ -1733,16 +1783,7 @@ impl ImageIteration<'_, '_> {
     /// The generation of the image's contents.
     ///
     /// It changes whenever the image's pixels change, including when an
-    // Only link to the `kitty` wrappers when the `kitty-graphics` feature
-    // provides them. Otherwise the link would be broken.
-    #[cfg_attr(
-        feature = "kitty-graphics",
-        doc = "[animation](crate::kitty::graphics#animation) moves to a new frame. Use it as part of your texture cache"
-    )]
-    #[cfg_attr(
-        not(feature = "kitty-graphics"),
-        doc = "animation moves to a new frame. Use it as part of your texture cache"
-    )]
+    /// animation moves to a new frame. Use it as part of your texture cache
     /// key, with the [protocol](Self::protocol) and [image ID](Self::image_id):
     /// if it matches the texture you have, you don't need to read the pixels
     /// again. For Kitty graphics, this is the same value as
@@ -1919,7 +1960,7 @@ pub struct Cursor {
     /// Whether the cursor is at a password input field.
     pub password_input: bool,
     /// The visual style of the cursor.
-    pub visual_style: CursorVisualStyle,
+    pub visual_style: CursorStyle,
 }
 
 /// The [identity](RenderState#row-identity) of a row across render state
@@ -1954,21 +1995,6 @@ pub enum Dirty {
     Partial = ffi::RenderStateDirty::PARTIAL,
     /// Global state changed; renderer should redraw everything.
     Full = ffi::RenderStateDirty::FULL,
-}
-
-/// Visual style of the cursor.
-#[repr(i32)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]
-#[non_exhaustive]
-pub enum CursorVisualStyle {
-    /// Bar cursor (DECSCUSR 5, 6).
-    Bar = ffi::CursorStyle::BAR,
-    /// Block cursor (DECSCUSR 1, 2).
-    Block = ffi::CursorStyle::BLOCK,
-    /// Underline cursor (DECSCUSR 3, 4).
-    Underline = ffi::CursorStyle::UNDERLINE,
-    /// Hollow block cursor.
-    BlockHollow = ffi::CursorStyle::BLOCK_HOLLOW,
 }
 
 /// The image protocols that a terminal supports.
@@ -2010,6 +2036,47 @@ pub enum ImageLayer {
     BelowText = ffi::ImageLayer::BELOW_TEXT,
     /// Above the text.
     AboveText = ffi::ImageLayer::ABOVE_TEXT,
+}
+
+/// Row-local selection range.
+///
+/// Querying [`RowIteration::selection`] returns `None` if the current row
+/// does not intersect the current selection.
+#[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
+pub struct RowSelection {
+    /// Start column of the row-local selection range, inclusive.
+    pub start_x: u16,
+    /// End column of the row-local selection range, inclusive.
+    pub end_x: u16,
+}
+
+impl RowSelection {
+    fn from_raw(raw: ffi::RenderStateRowSelection) -> Result<Self> {
+        let minimum_size =
+            std::mem::offset_of!(ffi::RenderStateRowSelection, end_x) + std::mem::size_of::<u16>();
+        if raw.size < minimum_size {
+            return Err(Error::InvalidValue);
+        }
+
+        Ok(Self {
+            start_x: raw.start_x,
+            end_x: raw.end_x,
+        })
+    }
+}
+
+/// A number of rows above and below the viewport.
+///
+/// This is used both to [request](RenderState::set_overscan) overscan and to
+/// [report](Snapshot::overscan) how many rows an update captured. See
+/// [Overscan](RenderState#overscan) for how the extra rows are used.
+#[derive(Debug, Clone, Copy)]
+pub struct Overscan {
+    /// Rows above the top of the viewport.
+    pub above: u16,
+    /// Rows below the bottom of the viewport.
+    pub below: u16,
 }
 
 /// The kinds of Kitty graphics placements in a render state's image list.
@@ -2116,7 +2183,7 @@ mod tests {
         let cursor = snapshot.cursor().unwrap();
         assert_eq!(cursor, cursor_from_getters(&snapshot));
         assert!(!cursor.visible);
-        assert_eq!(cursor.visual_style, CursorVisualStyle::Bar);
+        assert_eq!(cursor.visual_style, CursorStyle::Bar);
         assert_eq!(
             cursor.viewport,
             Some(CursorViewport {
@@ -2128,7 +2195,9 @@ mod tests {
 
         // Scrolling the cursor out of the viewport leaves no position.
         terminal.vt_write(b"\r\n\r\n\r\n");
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Top)
+            .unwrap();
         let snapshot = state.update(&terminal).unwrap();
         let cursor = snapshot.cursor().unwrap();
         assert_eq!(cursor, cursor_from_getters(&snapshot));
@@ -2235,7 +2304,9 @@ mod tests {
         );
 
         // At the top, there is nothing above it.
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Top);
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Top)
+            .unwrap();
         let snapshot = state.update(&terminal).unwrap();
         assert_eq!(sides(snapshot.overscan().unwrap()), (0, 1));
         assert_eq!(
@@ -2275,7 +2346,9 @@ mod tests {
         );
 
         // Scrolling up by one moves each row one position down, keeping its id.
-        terminal.scroll_viewport(crate::terminal::ScrollViewport::Delta(-1));
+        terminal
+            .scroll_viewport(crate::terminal::ScrollViewport::Delta(-1))
+            .unwrap();
         let after = row_ids(&mut rows, &state.update(&terminal).unwrap());
         assert_eq!(after[1..], before[..2]);
         assert!(!before.contains(&after[0]));
@@ -2311,12 +2384,13 @@ mod tests {
         let second_row = iteration.next().unwrap().cells_raw().unwrap();
         let first_row: Vec<_> = first_row.collect();
         assert_eq!(first_row, expected);
-        let codepoints =
-            |cells: &[Cell]| -> Vec<u32> { cells.iter().map(|c| c.codepoint().unwrap()).collect() };
-        assert_eq!(codepoints(&first_row), [0x61, 0x62, 0, 0]);
+        let codepoints = |cells: &[Cell]| -> Vec<char> {
+            cells.iter().map(|c| c.codepoint().unwrap()).collect()
+        };
+        assert_eq!(codepoints(&first_row), ['a', 'b', '\0', '\0']);
         assert_eq!(
             codepoints(&second_row.collect::<Vec<_>>()),
-            [0x63, 0x64, 0, 0]
+            ['c', 'd', '\0', '\0']
         );
     }
 
@@ -2387,16 +2461,7 @@ mod tests {
                 .iter()
                 .map(|c| c.codepoint().unwrap())
                 .collect::<Vec<_>>(),
-            [
-                u32::from('a'),
-                u32::from('B'),
-                u32::from('c'),
-                u32::from('界'),
-                0,
-                u32::from('e'),
-                u32::from('P'),
-                0
-            ]
+            ['a', 'B', 'c', '界', '\0', 'e', 'P', '\0']
         );
         assert!(cells[1].has_styling().unwrap());
         assert!(!cells[1].has_hyperlink().unwrap());
@@ -2560,18 +2625,13 @@ mod tests {
 
         // A 1x1 RGB image displayed at the cursor, but no cell size yet.
         terminal.vt_write(b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;////\x1b\\");
+
         // The image was stored, so an empty list is due to the cell size.
         // Only the check needs the `kitty` wrappers; libghostty stores the
         // image either way.
         #[cfg(feature = "kitty-graphics")]
-        assert!(
-            terminal
-                .kitty_graphics()
-                .unwrap()
-                .expect("kitty graphics enabled")
-                .image(1)
-                .is_some()
-        );
+        assert!(terminal.kitty_graphics().unwrap().image(1).is_some());
+
         let snapshot = state.update(&terminal).unwrap();
         let generation = snapshot.image_placements_generation().unwrap();
         {
@@ -2650,12 +2710,8 @@ mod tests {
         // only the `kitty` wrappers can read.
         #[cfg(feature = "kitty-graphics")]
         {
-            let image = terminal
-                .kitty_graphics()
-                .unwrap()
-                .expect("kitty graphics enabled")
-                .image(7)
-                .unwrap();
+            let graphics = terminal.kitty_graphics().unwrap();
+            let image = graphics.image(7).unwrap();
             assert_eq!(found[0].1, image.generation().unwrap());
         }
 
@@ -2797,7 +2853,7 @@ mod tests {
         // refuses everything makes creating it fail.
         let capped = crate::alloc::testing::Capped::new(0);
         assert!(matches!(
-            ImageIterator::new_with_alloc(&capped.allocator()),
+            ImageIterator::new_in(&capped.allocator()),
             Err(Error::OutOfMemory)
         ));
     }
@@ -2813,7 +2869,7 @@ mod tests {
         terminal.vt_write(b"\x1b_Ga=T,f=24,s=1,v=1,i=1,q=2;////\x1b\\");
 
         let mut state = RenderState::new().unwrap();
-        let mut images = ImageIterator::new_with_alloc(&alloc).unwrap();
+        let mut images = ImageIterator::new_in(&alloc).unwrap();
         let snapshot = state.update(&terminal).unwrap();
         let found = placements(&mut images, &snapshot);
         assert_eq!(found.len(), 1);

@@ -50,9 +50,10 @@ impl<'alloc> Gesture<'alloc> {
 
     /// Create a new selection gesture instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -211,7 +212,7 @@ impl Event<'_> {
 
         // SAFETY: We trust that libghostty will give us a
         // selection object with correct lifetimes.
-        Ok(selection.map(|v| unsafe { Selection::from_raw(v) }))
+        Ok(selection.map(|v| unsafe { Selection::from_raw(terminal.inner.as_raw(), v) }))
     }
 }
 impl Drop for Event<'_> {
@@ -236,9 +237,10 @@ impl<'alloc> PressEvent<'alloc> {
 
     /// Create a new selection gesture press event instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -350,9 +352,10 @@ impl<'alloc> ReleaseEvent<'alloc> {
 
     /// Create a new selection gesture release event instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -398,9 +401,10 @@ impl<'alloc> DragEvent<'alloc> {
 
     /// Create a new selection gesture drag event instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -478,9 +482,10 @@ impl<'alloc> AutoscrollTickEvent<'alloc> {
 
     /// Create a new selection gesture autoscroll tick event instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }
@@ -561,9 +566,10 @@ impl<'alloc> DeepPressEvent<'alloc> {
 
     /// Create a new selection gesture deep press event instance with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw()) }
     }

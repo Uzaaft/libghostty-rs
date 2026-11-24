@@ -9,6 +9,7 @@
 - Build examples: `cargo build --manifest-path example/Cargo.toml --workspace`
 - Run example: `cargo run --manifest-path example/Cargo.toml -p ghostling_rs`
 - After bumping the crate versions, also run `cargo update -w --manifest-path example/Cargo.toml`: CI builds the examples with `--locked`, so a stale `example/Cargo.lock` fails it
+- Build the mdbook by running `mdbook build`, result can be found under `book/`
 
 ## Code Conventions
 

@@ -3,11 +3,14 @@
 //! [open source](https://github.com/ghostty-org/ghostty) and
 //! [MIT licensed](https://github.com/ghostty-org/ghostty/blob/main/LICENSE).
 //!
-//! We are currently in process of porting the
-//! [C documentation](https://lib.ghostty.org/vt) to Rust. In the mean time,
-//! feel free to browse through each module and consult the original
-//! [libghostty guides](https://lib.ghostty.org/vt/guides.html).
-//! They remain useful even though some details will be different in Rust.
+//! Guide-level documentation is available in the [Book], which is a Rustified
+//! one-to-one translation of the original [C documentation](https://lib.ghostty.org/vt).
+//! The API reference here will frequently link back to the book, so make sure
+//! to familiarize yourself with it. The [Getting Started] section is especially
+//! important for beginners.
+//!
+#![doc = crate::book_ref!("Book")]
+#![doc = crate::book_ref!("Getting Started", "getting-started/index")]
 //!
 //! # Rust version
 //!
@@ -43,11 +46,12 @@
 //! - [Search](crate::search) - Find a string in a terminal, including its scrollback
 //! - [Formatter](crate::fmt) - Turn terminal content into plain text, VT
 //!   sequences, or HTML
+//!
 //! ## Rendering
 //!
 //! - [Render State](crate::render) - Find out what changed since the last frame
 //!   and read the rows and cells to draw
-//! - [Kitty Graphics](crate::kitty::graphics) - 	Read the images that programs
+//! - [Kitty Graphics](crate::kitty::graphics) - Read the images that programs
 //!   send with the Kitty graphics protocol
 //!
 //! ## Input
@@ -79,10 +83,10 @@
 //!
 //! Types and settings shared by every API.
 //!
-//! - [Error Handling](crate::error)
+//! - [Error Handling](crate::error) - All the possible errors libghostty-vt returns.
 //! - [Build Info](crate::build_info) - Find out how this copy of the library
 //!   was built and which features it has
-//! - [Allocators](crate::alloc) - 	Run the library on your own memory allocator
+//! - [Allocators](crate::alloc) - Run the library on your own memory allocator
 //! - [System Interface](crate::sys) - Plug in your own system functions, such
 //!   as a PNG decoder
 #![doc(
@@ -92,18 +96,13 @@
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![warn(missing_copy_implementations)]
-#![warn(clippy::allow_attributes)]
 #![warn(clippy::allow_attributes_without_reason)]
-#![expect(
-    clippy::needless_pass_by_value,
-    reason = "handles such as grid refs and option structs are small, and taken
-    by value the same way the C API takes them"
-)]
 #![allow(
     clippy::missing_errors_doc,
     reason = "underlying C API may return any error outside of expected and
     mitigated situations, and it is not feasible to document them all"
 )]
+#![allow(clippy::doc_markdown, reason = "false positives")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 // Cargo's rust-version cannot express a higher minimum for an optional feature.
@@ -129,7 +128,6 @@ pub mod grid_ref;
 pub(crate) mod io;
 pub mod key;
 pub mod kitty;
-pub mod log;
 pub mod mode;
 pub mod mouse;
 pub mod osc;
@@ -147,14 +145,42 @@ pub mod sys;
 pub mod unicode;
 
 #[doc(inline)]
-pub use crate::{
-    error::Error,
-    log::{Logger, set_logger},
-    render::RenderState,
-    terminal::Terminal,
-};
+pub use crate::{error::Error, render::RenderState, terminal::Terminal};
 
-pub(crate) fn sys_set<T>(opt: ffi::SysOption::Type, val: *const T) -> error::Result<()> {
-    let result = unsafe { ffi::ghostty_sys_set(opt, val.cast()) };
-    error::from_result(result)
+/// Get the URL to a specific page in the book.
+macro_rules! book {
+    ($page:expr, $section:expr) => {
+        concat!(crate::book!($page), "#", $section)
+    };
+    ($page:expr) => {
+        concat!(crate::book!(), "/", $page, ".html")
+    };
+    // See build.rs
+    () => {
+        env!("BOOK_URL")
+    };
 }
+use book;
+
+/// Form a Markdown link reference to any book page.
+macro_rules! book_ref {
+    ($name:expr$(, $id:expr$(, $section:expr)?)?) => {
+        concat!("\n\n[", $name, "]: ", crate::book!($($id$(, $section)?)?),)
+    };
+}
+use book_ref;
+
+/// Form a Markdown link reference to the guide.
+macro_rules! guide_ref {
+    ($name:expr, $id:expr, $section:expr) => {
+        crate::book_ref!(
+            $name,
+            concat!("guides/", $id),
+            concat!("guide-", $id, "-", $section)
+        )
+    };
+    ($name:expr, $id:expr) => {
+        crate::book_ref!($name, concat!("guides/", $id), concat!("guide-", $id))
+    };
+}
+use guide_ref;

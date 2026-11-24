@@ -17,7 +17,9 @@ pub use bindings::*;
 #[macro_export]
 macro_rules! sized {
     ($ty:ty) => {{
-        let mut t = <$ty as ::std::default::Default>::default();
+        // SAFETY: An all-zero bit pattern is explicitly guaranteed
+        // to always be safe in libghostty's sized structs.
+        let mut t = unsafe { ::std::mem::zeroed::<$ty>() };
         t.size = ::std::mem::size_of::<$ty>();
         t
     }};
@@ -25,7 +27,7 @@ macro_rules! sized {
 
 impl<S> From<S> for bindings::String
 where
-    S: Deref<Target = str>,
+    S: Deref<Target = [u8]>,
 {
     fn from(value: S) -> Self {
         Self {
@@ -78,7 +80,7 @@ mod tests {
 
     #[test]
     fn ffi_string_round_trips_static_str() {
-        let raw = bindings::String::from("ghostty");
+        let raw = bindings::String::from("ghostty".as_bytes());
         assert_eq!(raw.len, "ghostty".len());
         // SAFETY: The source string is `'static` and valid UTF-8.
         assert_eq!(unsafe { raw.to_str() }, "ghostty");
@@ -87,7 +89,7 @@ mod tests {
     #[test]
     fn ffi_string_round_trips_borrowed_string() {
         let owned = String::from("terminal");
-        let raw = bindings::String::from(owned.as_str());
+        let raw = bindings::String::from(owned.as_str().as_bytes());
         // SAFETY: `owned` outlives the conversion and contains valid UTF-8.
         assert_eq!(unsafe { raw.to_str() }, "terminal");
     }

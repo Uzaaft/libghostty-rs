@@ -7,7 +7,11 @@
 //! does all of the work. For a find bar over a lot of scrollback, you decide
 //! when the work happens.
 //!
-//!  # Lifetime
+//! The [Search guide] covers driving a search, reading matches, lifetime, and threads.
+//!
+#![doc = crate::guide_ref!("Search guide", "search")]
+//!
+//! # Lifetime
 //!
 //! The search is bound to the terminal it was created with, but only borrows
 //! it during operations that need it, so the terminal can be used normally in
@@ -21,14 +25,98 @@
 //! return whatever the search last saw, and dropping the search releases only
 //! search-owned memory. A search cannot be rebound, so searching another
 //! terminal means creating a new search.
-// FIXME: Transclude examples, link to guide
+//!
+//! # Example
+//!
+//! ```rust
+//! use libghostty_vt::{
+//!     Terminal,
+//!     error::Error,
+//!     point::Space,
+//!     search::{MatchBuffer, Search},
+//! };
+//!
+//! fn main() -> Result<(), Error> {
+//!     // Create a terminal and fill it with some content to search.
+//!     let mut terminal = Terminal::new(80, 24)?;
+//!     terminal.vt_write(b"$ make test\r\n");
+//!     terminal.vt_write(b"compiling module A... ok\r\n");
+//!     terminal.vt_write(b"compiling module B... error: missing semicolon\r\n");
+//!     terminal.vt_write(b"linking... error: undefined symbol\r\n");
+//!     terminal.vt_write(b"$ grep -n ERROR build.log\r\n");
+//!
+//!     // The user opened the find bar, so create a search bound to the
+//!     // terminal. It starts idle until it has a needle.
+//!     let mut search = Search::new(&terminal)?;
+//!
+//!     // The user typed a query. Matching is byte-exact except ASCII
+//!     // letters, which compare case-insensitively, so "error" also finds
+//!     // "ERROR". Retyping just sets the needle again: a changed needle
+//!     // restarts the search and an unchanged one keeps its results.
+//!     search.set_needle(&mut terminal, b"error")?;
+//!
+//!     // Drive the search. Interactive embedders interleave
+//!     // `Search::tick` and `Search::feed` with their event
+//!     // loop, but for a one-shot search we can just run it to completion.
+//!     search.run(&terminal)?;
+//!
+//!     // The total match count, for find bar text like "1 of 3".
+//!     let total = search.total_matches()?;
+//!     println!(r#"{total} matches for "error""#);
+//!
+//!     // The user pressed Enter, so select the next match. Selection starts
+//!     // at the newest match, moves toward older content, and wraps around.
+//!     // This scrolls the viewport to the match if it isn't visible, per
+//!     // the `Search::scroll` policy.
+//!     while let Some(s) = search.select_next(&terminal)? {
+//!         // Read the selection state. Index 0 is the newest
+//!         // match, so a "k of n" find bar renders index + 1.
+//!         let selected_index = s.index()?;
+//!         println!("selected {} of {}", selected_index + 1, total);
+//!
+//!         // Wrapped back around to the first match: stop.
+//!         if selected_index + 1 == total {
+//!             break;
+//!         }
+//!     }
+//!
+//!     // Each frame while the find bar is open, feed to catch up with any
+//!     // terminal changes and then read the viewport matches to draw
+//!     // highlights. The list can include matches just past the viewport
+//!     // when they share a page with it, so convert each endpoint to
+//!     // viewport coordinates and skip matches outside the visible rows.
+//!     search.feed(&terminal)?;
+//!
+//!     let mut match_buffer = MatchBuffer::new();
+//!     for m in search.viewport_matches(&terminal, &mut match_buffer)? {
+//!         let Ok(Some(start)) = terminal.point_from_grid_ref(m.start(), Space::Viewport) else {
+//!             continue;
+//!         };
+//!         let Ok(Some(end)) = terminal.point_from_grid_ref(m.end(), Space::Viewport) else {
+//!             continue;
+//!         };
+//!
+//!         if start.y >= 24 || end.y >= 24 {
+//!             continue;
+//!         }
+//!
+//!         // A real embedder draws a highlight rect from start to end here.
+//!         println!(
+//!             "highlight rows {}-{}, cols {}-{}",
+//!             start.y, end.y, start.x, end.x
+//!         );
+//!     }
+//!
+//!     Ok(())
+//! }
+//! ```
 
 use std::marker::PhantomData;
 
 use crate::{
     Terminal,
     alloc::{Allocator, Object},
-    error::{Error, Result, from_optional_result, from_result},
+    error::{Error, Result, from_optional_result, from_result, from_result_with_len},
     ffi,
     selection::Selection,
 };
@@ -41,81 +129,8 @@ use crate::{
 /// both borrows it for the duration of the operation and checks that it is the
 /// terminal this search was created with. Passing any other terminal returns
 /// [`Error::InvalidValue`]. Moving the original terminal is fine.
-///
-/// Match snapshots prevent writes while their selections are in use:
-///
-/// ```compile_fail,E0499
-/// use libghostty_vt::{Terminal, search::Search};
-/// let mut terminal = Terminal::new(8, 2).unwrap();
-/// let mut search = Search::new(&mut terminal).unwrap();
-/// let snapshot = search.snapshot(&mut terminal).unwrap();
-/// let selected = snapshot.selected_match().unwrap().unwrap();
-/// terminal.vt_write(b"\x1bc");
-/// selected.start().cell().unwrap();
-/// ```
-///
-/// They also prevent replacing and freeing the terminal:
-///
-/// ```compile_fail,E0499
-/// use libghostty_vt::{Terminal, search::Search};
-/// let mut terminal = Terminal::new(8, 2).unwrap();
-/// let mut search = Search::new(&mut terminal).unwrap();
-/// let snapshot = search.snapshot(&mut terminal).unwrap();
-/// let selected = snapshot.selected_match().unwrap().unwrap();
-/// let original = std::mem::replace(&mut terminal, Terminal::new(8, 2).unwrap());
-/// drop(original);
-/// selected.start().cell().unwrap();
-/// ```
-///
-/// Other searches cannot mutate the same terminal while a snapshot is borrowed:
-///
-/// ```compile_fail,E0499
-/// use libghostty_vt::{Terminal, search::Search};
-/// let mut terminal = Terminal::new(8, 2).unwrap();
-/// let mut first = Search::new(&mut terminal).unwrap();
-/// let mut second = Search::new(&mut terminal).unwrap();
-/// let snapshot = first.snapshot(&mut terminal).unwrap();
-/// second.select_next(&mut terminal).unwrap();
-/// snapshot.selected_match().unwrap();
-/// ```
-///
-/// `'term` is the lifetime of the terminal's allocator. libghostty keeps the
-/// search and the terminal pointing at each other until one of them is freed,
-/// so the search may not outlive the memory of the terminal, even one that was
-/// leaked with [`std::mem::forget`] and never freed:
-///
-#[cfg_attr(
-    feature = "allocator_api",
-    doc = r"```compile_fail,E0505
-use libghostty_vt::{Terminal, alloc::Allocator, search::Search};
-let arena = std::alloc::Global;
-let alloc = Allocator::from(&arena);
-let mut terminal = Terminal::new_with_alloc(&alloc, 8, 2).unwrap();
-let mut search = Search::new(&mut terminal).unwrap();
-std::mem::forget(terminal);
-drop(alloc); // Would free the terminal's memory under the search.
-search.tick().unwrap();
-```"
-)]
-///
-/// Likewise, the search's own memory must outlive the terminal, which detaches
-/// the search when it is freed, even if the search was leaked:
-///
-#[cfg_attr(
-    feature = "allocator_api",
-    doc = r"```compile_fail,E0505
-use libghostty_vt::{Terminal, alloc::Allocator, search::Search};
-let arena = std::alloc::Global;
-let alloc = Allocator::from(&arena);
-let mut terminal = Terminal::new(8, 2).unwrap();
-let search = Search::new_with_alloc(&alloc, &mut terminal).unwrap();
-std::mem::forget(search);
-drop(alloc); // Would free the search's memory before the terminal detaches it.
-drop(terminal);
-```"
-)]
 #[derive(Debug)]
-pub struct Search<'alloc: 'term, 'term> {
+pub struct Search<'alloc> {
     inner: Object<'alloc, ffi::SearchImpl>,
     // The native terminal this search was created with. Comparing addresses is
     // enough to reject a different live terminal. A terminal allocated later at
@@ -124,8 +139,6 @@ pub struct Search<'alloc: 'term, 'term> {
     // would touch the new one, ticks included, and every match is read after
     // such a call.
     terminal: ffi::Terminal,
-    // Ties the search to the terminal's memory; see the type docs.
-    _terminal: PhantomData<&'term ()>,
 }
 
 /// Progress state of a search.
@@ -159,33 +172,33 @@ pub enum Scroll {
     None = ffi::SearchScroll::NONE,
 }
 
-impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
+impl<'alloc> Search<'alloc> {
     /// Create a search bound to a terminal.
     ///
     /// The search starts idle with no needle: it reports [`Status::Complete`]
     /// and finds nothing. Set a needle with [`Self::set_needle`] to start
     /// searching.
-    pub fn new(terminal: &mut Terminal<'term, '_>) -> Result<Self> {
+    pub fn new(terminal: &Terminal<'_, '_>) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_inner(terminal, std::ptr::null()) }
     }
 
     /// Create a search bound to a terminal, with a custom allocator.
     ///
-    /// See the [crate-level documentation](crate#memory-management-and-lifetimes)
-    /// regarding custom memory management and lifetimes.
-    pub fn new_with_alloc<'ctx: 'alloc>(
+    /// See [Memory] regarding custom memory management and lifetimes.
+    ///
+    #[doc = crate::book_ref!("Memory", "memory")]
+    pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
-        terminal: &mut Terminal<'term, '_>,
+        terminal: &Terminal<'_, '_>,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(terminal, alloc.to_raw()) }
     }
 
-    unsafe fn new_inner(
-        terminal: &mut Terminal<'term, '_>,
-        alloc: *const ffi::Allocator,
-    ) -> Result<Self> {
+    unsafe fn new_inner(terminal: &Terminal<'_, '_>, alloc: *const ffi::Allocator) -> Result<Self> {
+        crate::sys::GATE.freeze();
+
         let mut raw = std::ptr::null_mut();
         // SAFETY: The exclusive terminal borrow serializes the registration
         // with all other access to the terminal.
@@ -195,7 +208,6 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
         Ok(Self {
             inner: Object::new(raw)?,
             terminal: terminal.inner.as_raw(),
-            _terminal: PhantomData,
         })
     }
 
@@ -218,12 +230,14 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     pub fn set_needle(
         &mut self,
         terminal: &mut Terminal<'_, '_>,
-        needle: &[u8],
+        needle: impl AsRef<[u8]>,
     ) -> Result<&mut Self> {
         self.check_terminal(terminal)?;
+        crate::sys::GATE.freeze();
+
         let raw = ffi::String {
-            ptr: needle.as_ptr(),
-            len: needle.len(),
+            ptr: needle.as_ref().as_ptr(),
+            len: needle.as_ref().len(),
         };
         // SAFETY: The needle is copied, and the exclusive terminal borrow
         // serializes releasing tracked state within the terminal.
@@ -240,6 +254,8 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// The needle this search is looking for, or `None` when no needle is
     /// set.
     pub fn needle(&self) -> Result<Option<&[u8]>> {
+        crate::sys::GATE.freeze();
+
         let mut raw = ffi::String::default();
         // SAFETY: Reading only touches search-owned memory.
         let result = unsafe {
@@ -265,9 +281,9 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// use, even after it reports complete.
     ///
     /// Each call does a bounded amount of work.
-    pub fn feed(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<()> {
+    pub fn feed(&mut self, terminal: &Terminal<'_, '_>) -> Result<()> {
         self.check_terminal(terminal)?;
-        // SAFETY: The exclusive terminal borrow serializes reading it.
+        crate::sys::GATE.freeze();
         from_result(unsafe { ffi::ghostty_search_feed(self.inner.as_raw()) })
     }
 
@@ -280,6 +296,8 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     ///
     /// Returns [`Error::InvalidValue`] after the terminal was dropped.
     pub fn tick(&mut self) -> Result<Status> {
+        crate::sys::GATE.freeze();
+
         let mut status = ffi::SearchStatus::COMPLETE;
         // SAFETY: libghostty rejects ticking a search whose terminal was
         // freed, since ticking a scrollback search reads a pin the terminal
@@ -296,14 +314,15 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// is [`Status::Complete`]. Searching a large scrollback can take a while,
     /// so interactive embedders should drive [`Self::tick`] and
     /// [`Self::feed`] themselves.
-    pub fn run(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<()> {
+    pub fn run(&mut self, terminal: &Terminal<'_, '_>) -> Result<()> {
         self.check_terminal(terminal)?;
-        // SAFETY: The exclusive terminal borrow serializes reading it.
+        crate::sys::GATE.freeze();
         from_result(unsafe { ffi::ghostty_search_run(self.inner.as_raw()) })
     }
 
     // Only the explicitly typed accessors below choose an output type.
     fn get<T: Default>(&self, key: ffi::SearchData::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
         let mut value = T::default();
         // SAFETY: Reading only touches search-owned memory, and `T` matches
         // the output type documented for `key`.
@@ -332,24 +351,6 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
         self.get(ffi::SearchData::TOTAL_MATCHES)
     }
 
-    /// Index of the selected match, or `None` when nothing is selected.
-    ///
-    /// This indexes the newest to oldest ordering of [`Snapshot::matches`],
-    /// where 0 is the newest match, so a "k of n" find bar renders
-    /// `index + 1` of [`Self::total_matches`].
-    pub fn selected_index(&self) -> Result<Option<usize>> {
-        let mut index = 0usize;
-        // SAFETY: Reading only touches search-owned memory.
-        let result = unsafe {
-            ffi::ghostty_search_get(
-                self.inner.as_raw(),
-                ffi::SearchData::SELECTED_INDEX,
-                (&raw mut index).cast(),
-            )
-        };
-        from_optional_result(result, index)
-    }
-
     /// Current scroll policy.
     pub fn scroll(&self) -> Result<Scroll> {
         self.get::<ffi::SearchScroll::Type>(ffi::SearchData::SELECT_SCROLL)?
@@ -360,6 +361,7 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// Set the scroll policy applied by [`Self::select_next`] and
     /// [`Self::select_prev`]. The policy persists until changed.
     pub fn set_scroll(&mut self, scroll: Scroll) -> Result<&mut Self> {
+        crate::sys::GATE.freeze();
         let raw: ffi::SearchScroll::Type = scroll.into();
         // SAFETY: This only modifies search-owned state.
         from_result(unsafe {
@@ -372,17 +374,6 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
         Ok(self)
     }
 
-    fn select(
-        &mut self,
-        terminal: &mut Terminal<'_, '_>,
-        select: unsafe extern "C" fn(ffi::Search) -> ffi::Result::Type,
-    ) -> Result<bool> {
-        self.check_terminal(terminal)?;
-        // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
-        let result = unsafe { select(self.inner.as_raw()) };
-        Ok(from_optional_result(result, ())?.is_some())
-    }
-
     /// Select the next match, moving toward older content: from the bottom
     /// of the screen upward into history, the direction a search from the
     /// prompt usually wants. Wraps around past the oldest match.
@@ -391,96 +382,54 @@ impl<'alloc: 'term, 'term> Search<'alloc, 'term> {
     /// time relative to feeds. The viewport scrolls to the newly selected
     /// match according to [`Self::set_scroll`]. Returns `false` when there
     /// are no matches.
-    pub fn select_next(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<bool> {
-        self.select(terminal, ffi::ghostty_search_select_next)
+    pub fn select_next<'t>(
+        &mut self,
+        terminal: &'t Terminal<'_, '_>,
+    ) -> Result<Option<Match<'_, 't, 'alloc>>> {
+        self.check_terminal(terminal)?;
+        // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
+        crate::sys::GATE.freeze();
+        let result = unsafe { ffi::ghostty_search_select_next(self.inner.as_raw()) };
+
+        from_optional_result(
+            result,
+            Match {
+                search: self,
+                _phan: PhantomData,
+            },
+        )
     }
 
     /// Select the previous match, moving toward newer content, wrapping
     /// around past the newest match. Otherwise identical to
     /// [`Self::select_next`].
-    pub fn select_prev(&mut self, terminal: &mut Terminal<'_, '_>) -> Result<bool> {
-        self.select(terminal, ffi::ghostty_search_select_prev)
+    pub fn select_prev<'t>(
+        &mut self,
+        terminal: &'t Terminal<'_, '_>,
+    ) -> Result<Option<Match<'_, 't, 'alloc>>> {
+        self.check_terminal(terminal)?;
+        // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
+        crate::sys::GATE.freeze();
+        let result = unsafe { ffi::ghostty_search_select_prev(self.inner.as_raw()) };
+
+        from_optional_result(
+            result,
+            Match {
+                search: self,
+                _phan: PhantomData,
+            },
+        )
     }
 
-    /// Feed the search, then borrow its matches together with the terminal.
-    ///
-    /// The snapshot keeps the terminal borrowed, so the terminal cannot be
-    /// modified while any match read from it is still in use.
-    pub fn snapshot<'s, 'ta: 'cb, 'cb>(
-        &'s mut self,
-        terminal: &'s mut Terminal<'ta, 'cb>,
-    ) -> Result<Snapshot<'s, 'alloc, 'term, 'ta, 'cb>> {
-        self.feed(terminal)?;
-        Ok(Snapshot {
-            search: self,
-            terminal,
-        })
-    }
-}
-
-impl Drop for Search<'_, '_> {
-    fn drop(&mut self) {
-        // SAFETY: libghostty releases tracked state within a live terminal,
-        // or only search-owned memory once the terminal was freed.
-        //
-        // Releasing that state must be serialized with all other access to
-        // the terminal. The terminal is not shared across threads, so the
-        // only other access that can be in progress is a libghostty call that
-        // is running Rust code, when the search is dropped from inside one:
-        // an effect callback during a VT write, reset or resize, or the
-        // reader or writer of a streaming call such as snapshot encoding and
-        // decoding or continuation export. That is fine too: releasing only
-        // unregisters the search from the terminal and untracks its pins.
-        // Effect callbacks are invoked by the stream handler while it handles
-        // a sequence, never from within a page list operation, and streaming
-        // calls only hand bytes to their reader or writer, so the terminal
-        // isn't iterating its searches or tracked pins at any of these points,
-        // and it never holds on to the pins this search owns. Upstream likewise only forbids re-entering VT
-        // writes from callbacks, and expects other terminal calls, such as
-        // updating a render state, to be made from them. It doesn't document
-        // freeing a search from a callback, though, so this relies on how the
-        // pinned version is implemented.
-        unsafe { ffi::ghostty_search_free(self.inner.as_raw()) };
-    }
-}
-
-/// Matches of a [`Search`], borrowed together with their terminal.
-///
-/// Created by [`Search::snapshot`].
-#[derive(Debug)]
-pub struct Snapshot<'s, 'alloc: 'term, 'term, 'ta: 'cb, 'cb> {
-    search: &'s Search<'alloc, 'term>,
-    terminal: &'s Terminal<'ta, 'cb>,
-}
-
-impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
-    /// The terminal that produced these matches.
-    #[must_use]
-    pub fn terminal(&self) -> &Terminal<'ta, 'cb> {
-        self.terminal
-    }
-
-    /// The selected match, or `None` when nothing is selected.
-    pub fn selected_match(&self) -> Result<Option<Selection<'_>>> {
-        let mut raw = ffi::Selection::default();
-        // SAFETY: Reading only touches search-owned memory.
-        let result = unsafe {
-            ffi::ghostty_search_get(
-                self.search.inner.as_raw(),
-                ffi::SearchData::SELECTED_MATCH,
-                (&raw mut raw).cast(),
-            )
-        };
-        // SAFETY: The selection points into terminal pages, which cannot
-        // change while this snapshot borrows the terminal.
-        Ok(from_optional_result(result, raw)?.map(|raw| unsafe { Selection::from_raw(raw) }))
-    }
-
-    fn read_matches<'s>(
-        &'s self,
-        storage: &'s mut MatchBuffer,
+    fn read_matches<'t>(
+        &self,
+        terminal: &'t Terminal<'_, '_>,
+        storage: &'t mut MatchBuffer,
         key: ffi::SearchData::Type,
-    ) -> Result<Matches<'s>> {
+    ) -> Result<Matches<'t>> {
+        self.check_terminal(terminal)?;
+        crate::sys::GATE.freeze();
+
         loop {
             let mut buffer = ffi::SelectionBuffer {
                 // An empty buffer queries the required capacity, which
@@ -496,20 +445,25 @@ impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
             // SAFETY: Reading only touches search-owned memory, and `buffer`
             // describes `cap` initialized selections.
             let result = unsafe {
-                ffi::ghostty_search_get(self.search.inner.as_raw(), key, (&raw mut buffer).cast())
+                ffi::ghostty_search_get(self.inner.as_raw(), key, (&raw mut buffer).cast())
             };
-            if result == ffi::Result::OUT_OF_SPACE {
-                // Growing is only needed when the storage is too small, so
-                // existing capacity is reused on later snapshots.
-                // libghostty reports the required length, which is larger.
-                storage.inner.resize(buffer.len, ffi::Selection::default());
-                continue;
+            match from_result_with_len(result, buffer.len) {
+                Ok(_) => {}
+                Err(Error::OutOfSpace { required }) => {
+                    // Growing is only needed when the storage is too small, so
+                    // existing capacity is reused on later snapshots.
+                    // libghostty reports the required length, which is larger.
+                    storage.inner.resize(required, ffi::Selection::default());
+                    continue;
+                }
+                Err(e) => return Err(e),
             }
-            from_result(result)?;
+
             // Never expose stale entries left over from an earlier, longer
             // read. On success libghostty wrote `len <= cap` entries.
             let values = &storage.inner[..buffer.len];
             return Ok(Matches {
+                terminal: terminal.inner.as_raw(),
                 inner: values.iter(),
             });
         }
@@ -521,8 +475,12 @@ impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
     /// The matches are read into `storage`, which is reused across calls.
     /// Both this snapshot and the storage stay borrowed while the matches are
     /// in use.
-    pub fn matches<'s>(&'s self, storage: &'s mut MatchBuffer) -> Result<Matches<'s>> {
-        self.read_matches(storage, ffi::SearchData::MATCHES)
+    pub fn matches<'t>(
+        &self,
+        terminal: &'t Terminal<'_, '_>,
+        storage: &'t mut MatchBuffer,
+    ) -> Result<Matches<'t>> {
+        self.read_matches(terminal, storage, ffi::SearchData::MATCHES)
     }
 
     /// Matches on the pages covering the viewport, for drawing highlight
@@ -536,8 +494,52 @@ impl<'ta: 'cb, 'cb> Snapshot<'_, '_, '_, 'ta, 'cb> {
     /// beyond the visible row count.
     ///
     /// Storage is reused and borrowed like with [`Self::matches`].
-    pub fn viewport_matches<'s>(&'s self, storage: &'s mut MatchBuffer) -> Result<Matches<'s>> {
-        self.read_matches(storage, ffi::SearchData::VIEWPORT_MATCHES)
+    pub fn viewport_matches<'t>(
+        &self,
+        terminal: &'t Terminal<'_, '_>,
+        storage: &'t mut MatchBuffer,
+    ) -> Result<Matches<'t>> {
+        self.read_matches(terminal, storage, ffi::SearchData::VIEWPORT_MATCHES)
+    }
+}
+
+impl Drop for Search<'_> {
+    fn drop(&mut self) {
+        // SAFETY: libghostty releases tracked state within a live terminal,
+        // or only search-owned memory once the terminal was freed.
+        crate::sys::GATE.freeze();
+        unsafe { ffi::ghostty_search_free(self.inner.as_raw()) };
+    }
+}
+
+/// Current match selected by a [`Search`].
+///
+/// Created by [`Search::select_next`] and [`Search::select_prev`].
+#[derive(Debug)]
+pub struct Match<'s, 't, 'alloc> {
+    search: &'s Search<'alloc>,
+    _phan: PhantomData<&'t ffi::Terminal>,
+}
+
+impl<'t> Match<'_, 't, '_> {
+    /// Index of the selected match.
+    ///
+    /// This indexes the newest to oldest ordering of [`Search::matches`],
+    /// where 0 is the newest match, so a "k of n" find bar renders
+    /// `index + 1` of [`Search::total_mat;
+    pub fn index(&self) -> Result<usize> {
+        self.search.get(ffi::SearchData::SELECTED_INDEX)
+    }
+
+    /// The selected match.
+    pub fn selection(&self) -> Result<Selection<'t>> {
+        let selection = self
+            .search
+            .get::<ffi::Selection>(ffi::SearchData::SELECTED_MATCH)?;
+
+        // SAFETY: The selection points into terminal pages, which cannot
+        // change while this snapshot borrows the terminal.
+        Ok(unsafe { Selection::from_raw(self.search.terminal, selection) })
     }
 }
 
@@ -559,7 +561,7 @@ impl MatchBuffer {
     }
 }
 
-/// An iterator over matches read from a [`Snapshot`].
+/// An iterator over matches read from a [`Search`].
 ///
 /// A match cannot outlive its terminal:
 ///
@@ -588,6 +590,7 @@ impl MatchBuffer {
 /// ```
 #[derive(Debug)]
 pub struct Matches<'s> {
+    terminal: ffi::Terminal,
     inner: std::slice::Iter<'s, ffi::Selection>,
 }
 
@@ -600,7 +603,7 @@ impl<'s> Iterator for Matches<'s> {
         // snapshot is borrowed for `'s`.
         self.inner
             .next()
-            .map(|raw| unsafe { Selection::from_raw(*raw) })
+            .map(|raw| unsafe { Selection::from_raw(self.terminal, *raw) })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -613,7 +616,7 @@ impl DoubleEndedIterator for Matches<'_> {
         // SAFETY: Ditto
         self.inner
             .next_back()
-            .map(|raw| unsafe { Selection::from_raw(*raw) })
+            .map(|raw| unsafe { Selection::from_raw(self.terminal, *raw) })
     }
 }
 
@@ -625,7 +628,7 @@ mod tests {
     use super::*;
 
     /// Drive a search with feeds and ticks, as an interactive embedder would.
-    fn drive(search: &mut Search<'_, '_>, terminal: &mut Terminal<'_, '_>) {
+    fn drive(search: &mut Search<'_>, terminal: &mut Terminal<'_, '_>) {
         loop {
             search.feed(terminal).unwrap();
             let mut status = search.status().unwrap();
@@ -643,12 +646,12 @@ mod tests {
     fn feeding_and_ticking_finds_matches() {
         let mut terminal = Terminal::new(20, 4).unwrap();
         terminal.vt_write(b"Hello hello\r\nother");
-        let mut search = Search::new(&mut terminal).unwrap();
+        let mut search = Search::new(&terminal).unwrap();
 
         // An idle search is complete and finds nothing.
         assert_eq!(search.status().unwrap(), Status::Complete);
         assert_eq!(search.needle().unwrap(), None);
-        assert!(!search.select_next(&mut terminal).unwrap());
+        assert!(search.select_next(&terminal).unwrap().is_none());
 
         // A new needle needs a feed before it can make progress.
         search.set_needle(&mut terminal, b"HELLO").unwrap();
@@ -675,31 +678,32 @@ mod tests {
     fn selection_moves_newest_to_oldest_and_wraps() {
         let mut terminal = Terminal::new(20, 4).unwrap();
         terminal.vt_write(b"hit\r\nhit\r\nhit");
-        let mut search = Search::new(&mut terminal).unwrap();
+        let mut search = Search::new(&terminal).unwrap();
         search.set_needle(&mut terminal, b"hit").unwrap();
-        search.run(&mut terminal).unwrap();
-        assert_eq!(search.selected_index().unwrap(), None);
+        search.run(&terminal).unwrap();
 
         let mut indices = Vec::new();
         for _ in 0..4 {
-            assert!(search.select_next(&mut terminal).unwrap());
-            indices.push(search.selected_index().unwrap().unwrap());
+            let m = search.select_next(&terminal).unwrap().unwrap();
+            indices.push(m.index().unwrap());
         }
         // Next moves toward older content and wraps past the oldest match.
         assert_eq!(indices, [0, 1, 2, 0]);
         // Previous moves toward newer content and wraps past the newest.
-        assert!(search.select_prev(&mut terminal).unwrap());
-        assert_eq!(search.selected_index().unwrap(), Some(2));
+        let m = search.select_prev(&terminal).unwrap().unwrap();
+        assert_eq!(m.index().unwrap(), 2);
 
         // The selected match is the newest-to-oldest entry at that index.
         let mut storage = MatchBuffer::new();
-        let snapshot = search.snapshot(&mut terminal).unwrap();
-        let selected = snapshot.selected_match().unwrap().unwrap();
-        let oldest = snapshot.matches(&mut storage).unwrap().next_back().unwrap();
+        let selected = m.selection().unwrap();
+        let oldest = search
+            .matches(&terminal, &mut storage)
+            .unwrap()
+            .next_back()
+            .unwrap();
         let row = |selection: &Selection<'_>| {
-            snapshot
-                .terminal()
-                .point_from_grid_ref(&selection.start(), crate::point::Space::Active)
+            terminal
+                .point_from_grid_ref(selection.start(), crate::point::Space::Active)
                 .unwrap()
                 .unwrap()
         };
@@ -707,43 +711,21 @@ mod tests {
     }
 
     #[test]
-    fn equal_needle_keeps_results() {
-        let mut terminal = Terminal::new(20, 4).unwrap();
-        terminal.vt_write(b"hit\r\nhit");
-        let mut search = Search::new(&mut terminal).unwrap();
-        search.set_needle(&mut terminal, b"hit").unwrap();
-        search.run(&mut terminal).unwrap();
-        assert!(search.select_next(&mut terminal).unwrap());
-        assert!(search.select_next(&mut terminal).unwrap());
-        assert_eq!(search.selected_index().unwrap(), Some(1));
-
-        // Equal as compared by matching, so results and selection survive.
-        search.set_needle(&mut terminal, b"HIT").unwrap();
-        assert_eq!(search.selected_index().unwrap(), Some(1));
-        assert_eq!(search.total_matches().unwrap(), 2);
-
-        // A different needle restarts from scratch.
-        search.set_needle(&mut terminal, b"hi").unwrap();
-        assert_eq!(search.selected_index().unwrap(), None);
-        assert_eq!(search.total_matches().unwrap(), 0);
-    }
-
-    #[test]
     fn alternate_screen_results_are_separate() {
         let mut terminal = Terminal::new(20, 4).unwrap();
         terminal.vt_write(b"hit");
-        let mut search = Search::new(&mut terminal).unwrap();
+        let mut search = Search::new(&terminal).unwrap();
         search.set_needle(&mut terminal, b"hit").unwrap();
-        search.run(&mut terminal).unwrap();
+        search.run(&terminal).unwrap();
         assert_eq!(search.total_matches().unwrap(), 1);
 
         terminal.vt_write(b"\x1b[?1049h\x1b[Hhit hit hit");
-        search.run(&mut terminal).unwrap();
+        search.run(&terminal).unwrap();
         assert_eq!(search.total_matches().unwrap(), 3);
 
         // Primary screen results are restored on the way back.
         terminal.vt_write(b"\x1b[?1049l");
-        search.run(&mut terminal).unwrap();
+        search.run(&terminal).unwrap();
         assert_eq!(search.total_matches().unwrap(), 1);
     }
 
@@ -762,12 +744,12 @@ mod tests {
             for _ in 0..10 {
                 terminal.vt_write(b"\r\nfiller");
             }
-            let mut search = Search::new(&mut terminal).unwrap();
+            let mut search = Search::new(&terminal).unwrap();
             search.set_scroll(scroll).unwrap();
             assert_eq!(search.scroll().unwrap(), scroll);
             search.set_needle(&mut terminal, b"hit").unwrap();
-            search.run(&mut terminal).unwrap();
-            assert!(search.select_next(&mut terminal).unwrap());
+            search.run(&terminal).unwrap();
+            assert!(search.select_next(&terminal).unwrap().is_some());
             terminal.scrollbar().unwrap().offset
         };
 
@@ -779,39 +761,25 @@ mod tests {
     fn match_storage_is_reused_across_snapshots() {
         let mut terminal = Terminal::new(20, 4).unwrap();
         terminal.vt_write(b"hit hit hit");
-        let mut search = Search::new(&mut terminal).unwrap();
+        let mut search = Search::new(&terminal).unwrap();
         search.set_needle(&mut terminal, b"hit").unwrap();
-        search.run(&mut terminal).unwrap();
+        search.run(&terminal).unwrap();
 
         let mut storage = MatchBuffer::new();
-        assert_eq!(
-            search
-                .snapshot(&mut terminal)
-                .unwrap()
-                .matches(&mut storage)
-                .unwrap()
-                .len(),
-            3
-        );
+        assert_eq!(search.matches(&terminal, &mut storage).unwrap().len(), 3);
         let allocation = storage.inner.as_ptr();
 
         // A shorter result never exposes stale entries from the longer one.
         search.set_needle(&mut terminal, b"").unwrap();
-        assert_eq!(
-            search
-                .snapshot(&mut terminal)
-                .unwrap()
-                .matches(&mut storage)
-                .unwrap()
-                .len(),
-            0
-        );
+        assert_eq!(search.matches(&terminal, &mut storage).unwrap().len(), 0);
 
         search.set_needle(&mut terminal, b"hit").unwrap();
-        search.run(&mut terminal).unwrap();
+        search.run(&terminal).unwrap();
         {
-            let snapshot = search.snapshot(&mut terminal).unwrap();
-            let viewport: Vec<_> = snapshot.viewport_matches(&mut storage).unwrap().collect();
+            let viewport: Vec<_> = search
+                .viewport_matches(&terminal, &mut storage)
+                .unwrap()
+                .collect();
             assert_eq!(viewport.len(), 3);
             for selected in &viewport {
                 selected.start().cell().unwrap();
@@ -825,7 +793,7 @@ mod tests {
     /// Fill a terminal with enough matching lines that the search has
     /// scrollback history to search, not just the active area.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn history_search<'t>(terminal: &mut Terminal<'t, '_>) -> Search<'static, 't> {
+    fn history_search(terminal: &mut Terminal<'_, '_>) -> Search<'static> {
         for _ in 0..5000 {
             terminal.vt_write(b"hit\r\n");
         }
@@ -846,7 +814,7 @@ mod tests {
         // Make sure the search really has history to tick through. Without
         // it, ticking would complete without touching anything, instead of
         // blocking on the next history feed.
-        let mut terminal = Terminal::new_with_alloc(&alloc, 10, 3).unwrap();
+        let mut terminal = Terminal::new_in(&alloc, 10, 3).unwrap();
         let mut search = history_search(&mut terminal);
         assert_eq!(search.tick().unwrap(), Status::FeedRequired);
         drop(search);
@@ -854,7 +822,7 @@ mod tests {
 
         // Ticking the history search reads a pin tracked by the terminal, so
         // it must not happen once the terminal is gone.
-        let mut terminal = Terminal::new_with_alloc(&alloc, 10, 3).unwrap();
+        let mut terminal = Terminal::new_in(&alloc, 10, 3).unwrap();
         let mut search = history_search(&mut terminal);
         drop(terminal);
         assert!(matches!(search.tick(), Err(Error::InvalidValue)));
@@ -868,7 +836,7 @@ mod tests {
     fn search_can_be_dropped_from_an_effect_callback() {
         let alloc = crate::alloc::testing::Guard::allocator();
         let slot = std::cell::RefCell::new(None);
-        let mut terminal = Terminal::new_with_alloc(&alloc, 10, 3).unwrap();
+        let mut terminal = Terminal::new_in(&alloc, 10, 3).unwrap();
         terminal
             .on_bell(|_| drop(slot.borrow_mut().take()))
             .unwrap();
@@ -884,9 +852,9 @@ mod tests {
         assert!(slot.borrow().is_none());
 
         // The terminal's remaining tracked state is intact.
-        let mut search = Search::new(&mut terminal).unwrap();
+        let mut search = Search::new(&terminal).unwrap();
         search.set_needle(&mut terminal, b"hit").unwrap();
-        search.run(&mut terminal).unwrap();
+        search.run(&terminal).unwrap();
         assert!(search.total_matches().unwrap() > 5000);
     }
 }

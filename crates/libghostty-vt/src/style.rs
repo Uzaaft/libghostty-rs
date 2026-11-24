@@ -7,7 +7,17 @@
 //! You get one from [`GridRef::style`](crate::grid_ref::GridRef::style), or
 //! from a render state when you draw. Its colors can be unset, which means
 //! you use your default.
-// FIXME: Transclude examples
+//!
+//! See the [Grid guide].
+//!
+#![doc = crate::guide_ref!("Grid guide", "grid")]
+//!
+//! # Example
+//!
+//! ```rust,ignore
+//! let style = ref.style()?;
+//! let bold = style.bold;
+//! ```
 use std::mem::MaybeUninit;
 
 use crate::{
@@ -33,7 +43,6 @@ pub struct Id(pub(crate) ffi::StyleId);
     reason = "style attributes should be just a bunch of bools"
 )]
 #[expect(missing_docs, reason = "self-explanatory")]
-// FIXME: Replace with FFI wrapper. Don't model all the fields for API stability
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Style {
     pub fg_color: StyleColor,
@@ -56,6 +65,8 @@ impl Style {
     /// Returns true if all colors are unset and all flags are off.
     #[must_use]
     pub fn is_default(self) -> bool {
+        crate::sys::GATE.freeze();
+
         let raw = ffi::Style::from(self);
         unsafe { ffi::ghostty_style_is_default(&raw const raw) }
     }
@@ -66,6 +77,8 @@ impl Default for Style {
     ///
     /// Initializes the style to the default values (no colors, no flags).
     fn default() -> Self {
+        crate::sys::GATE.freeze();
+
         let mut style = MaybeUninit::zeroed();
         unsafe {
             ffi::ghostty_style_default(style.as_mut_ptr());

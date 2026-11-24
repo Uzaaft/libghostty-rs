@@ -199,6 +199,8 @@
             inherit cargoArtifacts;
           }
         );
+
+        mdbookkit = pkgs.callPackage ./nix/mdbookkit.nix { };
       in {
         packages.default = application;
 
@@ -328,6 +330,13 @@
 
         apps.miri = flake-utils.lib.mkApp {
           drv = miriCommand;
+        };
+
+        devShells.book = craneLib.devShell {
+          packages = [
+            pkgs.mdbook
+            mdbookkit
+          ];
         };
 
         devShells.default = craneLib.devShell {

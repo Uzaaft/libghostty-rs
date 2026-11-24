@@ -1,4 +1,20 @@
-//! Adapting custom allocators to work with libghostty.
+//! Run the library on your own memory allocator.
+//!
+//! libghostty-vt allows you to customize how memory is allocated with custom
+//! allocator implementations, such as [`Allocator::GLOBAL`] for Rust's
+//! [global allocator](std::alloc::GlobalAlloc), or if the `allocator-api`
+//! feature is enabled, you can adapt a Rust [`Allocator`](std::alloc::Allocator)
+//! into a libghostty-vt allocator with the `From` implementation.
+//!
+//! Most programs never need this. Any function that requires allocation has
+//! a default variant that uses the default allocator (e.g.
+//! [`Terminal::new`](crate::Terminal::new)) and a variant that accepts a
+//! specific allocator (e.g. [`Terminal::new_in`](crate::Terminal::new_in)).
+//!
+//! See [Memory] in the Book for more details.
+//!
+#![doc = crate::book_ref!("Memory", "memory")]
+
 use std::{
     borrow::Borrow,
     ffi::c_void,
@@ -20,10 +36,6 @@ use crate::{
 /// The allocator may depend on some external state for the
 /// duration of lifetime `'ctx`. This is useful for adapting external,
 /// stateful allocators that may not have a `'static` lifetime.
-///
-/// One example of a custom allocator that *does* have a `'static`
-/// lifetime is Rust's own default allocator, which can also be used
-/// within libghostty as [`Allocator::GLOBAL`].
 #[derive(Debug)]
 pub struct Allocator<'ctx> {
     pub(crate) inner: ffi::Allocator,
@@ -110,10 +122,7 @@ impl<'alloc> Bytes<'alloc> {
     ///
     /// Rarely needed, except by a PNG decoder, which must allocate its output
     /// with this.
-    pub fn new_zeroed_with_alloc<'ctx: 'alloc>(
-        alloc: &'alloc Allocator<'ctx>,
-        len: usize,
-    ) -> Result<Self> {
+    pub fn new_zeroed_in<'ctx: 'alloc>(alloc: &'alloc Allocator<'ctx>, len: usize) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_zeroed_inner(alloc.to_raw(), len) }
     }
@@ -126,6 +135,7 @@ impl<'alloc> Bytes<'alloc> {
             return Ok(unsafe { Self::from_raw_parts(std::ptr::null_mut(), 0, alloc) });
         }
 
+        crate::sys::GATE.freeze();
         let raw = unsafe { ffi::ghostty_alloc(alloc, len) };
         let ptr = NonNull::new(raw).ok_or(Error::OutOfMemory)?;
         // Neither Zig allocators nor `std::alloc::alloc` initialize memory,
@@ -184,6 +194,7 @@ impl Drop for Bytes<'_> {
         // SAFETY: The lifetime dictates that the allocator must
         // remain valid through here. We retain ownership of the bytes
         // memory itself so it should not be freed beforehand.
+        crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_free(self.alloc, self.ptr.as_ptr(), self.len) };
     }
 }
@@ -238,10 +249,11 @@ impl Allocator<'static> {
         inner: ffi::Allocator {
             ctx: std::ptr::null_mut(),
             vtable: &ffi::AllocatorVtable {
-                alloc: Some(_global_alloc),
-                free: Some(_global_free),
-                resize: Some(_global_resize),
-                remap: Some(_global_remap),
+                alloc: Some(rust_global_alloc),
+                free: Some(rust_global_free),
+                // Rust allocators currently do not support in-place resizes.
+                resize: None,
+                remap: Some(rust_global_remap),
                 reserved: [std::ptr::null_mut(); 4],
             },
         },
@@ -249,7 +261,7 @@ impl Allocator<'static> {
     };
 }
 
-unsafe extern "C" fn _global_alloc(
+unsafe extern "C" fn rust_global_alloc(
     _allocator: *mut c_void,
     len: usize,
     alignment: u8,
@@ -261,7 +273,7 @@ unsafe extern "C" fn _global_alloc(
     unsafe { std::alloc::alloc(layout).cast::<c_void>() }
 }
 
-unsafe extern "C" fn _global_free(
+unsafe extern "C" fn rust_global_free(
     _allocator: *mut c_void,
     mem: *mut c_void,
     len: usize,
@@ -273,17 +285,7 @@ unsafe extern "C" fn _global_free(
     };
     unsafe { std::alloc::dealloc(mem.cast::<u8>(), layout) }
 }
-unsafe extern "C" fn _global_resize(
-    _allocator: *mut c_void,
-    _mem: *mut c_void,
-    _old_len: usize,
-    _alignment: u8,
-    _new_len: usize,
-    _ret_addr: usize,
-) -> bool {
-    false
-}
-unsafe extern "C" fn _global_remap(
+unsafe extern "C" fn rust_global_remap(
     _allocator: *mut c_void,
     mem: *mut c_void,
     old_len: usize,
@@ -317,7 +319,8 @@ impl<'ctx, A: alloc::Allocator> From<&'ctx A> for Allocator<'ctx> {
                 vtable: &ffi::AllocatorVtable {
                     alloc: Some(_alloc::<A>),
                     free: Some(_free::<A>),
-                    resize: Some(_resize),
+                    // Rust allocators currently do not support in-place resizes.
+                    resize: None,
                     remap: Some(_remap::<A>),
                     reserved: [std::ptr::null_mut(); 4],
                 },
@@ -358,25 +361,6 @@ unsafe extern "C" fn _free<A: alloc::Allocator>(
     if let Some(alloc) = unsafe { get_allocator::<A>(allocator) } {
         unsafe { alloc.deallocate(mem, layout) };
     }
-}
-
-/// Resize (grow or shrink) an allocation *in-place*.
-///
-/// Rather unfortunately, Rust's Allocator API does not guarantee that
-/// growing or shrinking an allocation would necessarily be in-place.
-/// Therefore, we have to assume rather pessimistically that every
-/// resizing operation might relocate the memory block, so in-place
-/// resizes are always impossible.
-#[cfg(feature = "allocator_api")]
-unsafe extern "C" fn _resize(
-    _allocator: *mut c_void,
-    _mem: *mut c_void,
-    _old_len: usize,
-    _alignment: u8,
-    _new_len: usize,
-    _ret_addr: usize,
-) -> bool {
-    false
 }
 
 /// Resize (grow or shrink) an allocation, *allowing relocation if necessary*,
@@ -639,10 +623,6 @@ pub(crate) mod testing {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::used_underscore_items,
-    reason = "the underscore-named vtable functions are what is under test"
-)]
 mod tests {
     /// A stateful allocator must stay reachable through the libghostty
     /// allocator. Adapting it by value used to leave libghostty with a
@@ -669,14 +649,14 @@ mod tests {
 
         let counting = Counting(Cell::new(0));
         let alloc = super::Allocator::from(&counting);
-        let terminal = crate::Terminal::new_with_alloc(&alloc, 80, 24).unwrap();
+        let terminal = crate::Terminal::new_in(&alloc, 80, 24).unwrap();
         drop(terminal);
         assert!(counting.0.get() > 0);
     }
 
     use std::ptr::NonNull;
 
-    use super::{_global_alloc, _global_free, _global_remap};
+    use super::{rust_global_alloc, rust_global_free, rust_global_remap};
 
     // These tests stay entirely within Rust-owned allocator callbacks so Miri can
     // validate the pointer and initialization flow without executing Ghostty.
@@ -687,13 +667,13 @@ mod tests {
         let alignment_log2 = 4u8;
         let expected_alignment = 1usize << alignment_log2;
 
-        let raw = unsafe { _global_alloc(std::ptr::null_mut(), len, alignment_log2, 0) };
+        let raw = unsafe { rust_global_alloc(std::ptr::null_mut(), len, alignment_log2, 0) };
         let mem = NonNull::new(raw.cast::<u8>()).expect("global allocator returned null");
 
         assert_eq!((mem.as_ptr() as usize) % expected_alignment, 0);
 
         unsafe {
-            _global_free(
+            rust_global_free(
                 std::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 len,
@@ -709,7 +689,8 @@ mod tests {
         let new_len = 32usize;
         let alignment_log2 = 3u8;
 
-        let raw = unsafe { _global_alloc(std::ptr::null_mut(), initial_len, alignment_log2, 0) };
+        let raw =
+            unsafe { rust_global_alloc(std::ptr::null_mut(), initial_len, alignment_log2, 0) };
         let mem = NonNull::new(raw.cast::<u8>()).expect("global allocator returned null");
 
         let initial = unsafe { std::slice::from_raw_parts_mut(mem.as_ptr(), initial_len) };
@@ -718,7 +699,7 @@ mod tests {
         }
 
         let raw = unsafe {
-            _global_remap(
+            rust_global_remap(
                 std::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 initial_len,
@@ -735,7 +716,7 @@ mod tests {
         }
 
         unsafe {
-            _global_free(
+            rust_global_free(
                 std::ptr::null_mut(),
                 mem.as_ptr().cast(),
                 new_len,
@@ -753,7 +734,7 @@ mod tests {
         for len in [0, 1, 4096] {
             for bytes in [
                 super::Bytes::new_zeroed(len).expect("allocation failed"),
-                super::Bytes::new_zeroed_with_alloc(&super::Allocator::GLOBAL, len)
+                super::Bytes::new_zeroed_in(&super::Allocator::GLOBAL, len)
                     .expect("allocation failed"),
             ] {
                 assert_eq!(bytes.len(), len);

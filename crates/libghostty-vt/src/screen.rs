@@ -32,6 +32,8 @@ pub struct Row(pub(crate) ffi::Row);
 
 impl Row {
     fn get<T>(&self, tag: ffi::RowData::Type) -> Result<T> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe { ffi::ghostty_row_get(self.0, tag, value.as_mut_ptr().cast()) };
         // Since we manually model every possible query, this should never fail.
@@ -150,7 +152,7 @@ pub mod cell {
 
     keys! {
         /// The codepoint of the cell (0 if empty or bg-color-only).
-        Codepoint: CODEPOINT, u32 => u32, Ok;
+        Codepoint: CODEPOINT, u32 => char, |v| char::from_u32(v).ok_or(Error::InvalidValue);
         /// The content tag describing what kind of content is in the cell.
         ContentTag: CONTENT_TAG, ffi::CellContentTag::Type => CellContentTag,
             |v: ffi::CellContentTag::Type| v.try_into().map_err(|_| Error::Unsupported);
@@ -196,6 +198,8 @@ pub mod cell {
                     $(let mut $rest = MaybeUninit::<$rest::Raw>::zeroed();)*
                     let keys = [$first::TAG, $($rest::TAG,)*];
                     let mut values = [$first.as_mut_ptr().cast(), $($rest.as_mut_ptr().cast(),)*];
+
+                    crate::sys::GATE.freeze();
                     // SAFETY: Sealed keys pair each tag with the documented
                     // raw type. Every output points to a distinct live slot.
                     from_result(unsafe {
@@ -227,6 +231,8 @@ impl Cell {
     /// returns a `u32`, while [`cell::HasText`] returns a `bool`.
     /// The named getters, such as [`Self::codepoint`], use the same keys.
     pub fn get<K: cell::Key>(self, _key: K) -> Result<K::Value> {
+        crate::sys::GATE.freeze();
+
         let mut value = MaybeUninit::<K::Raw>::zeroed();
         // SAFETY: The sealed key pairs its tag with the documented raw type.
         let result = unsafe { ffi::ghostty_cell_get(self.0, K::TAG, value.as_mut_ptr().cast()) };
@@ -250,11 +256,14 @@ impl Cell {
     /// ```
     /// use libghostty_vt::{Terminal, screen::cell, point::{Point, Coordinate}};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///
     /// let mut terminal = Terminal::new(80, 24)?;
     /// terminal.vt_write(b"A");
+    ///
     /// let cell = terminal.grid_ref(Point::Viewport(Coordinate { x: 0, y: 0 }))?.cell()?;
     /// let (codepoint, has_text) = cell.get_multi((cell::Codepoint, cell::HasText))?;
-    /// assert_eq!(codepoint, u32::from('A'));
+    ///
+    /// assert_eq!(codepoint, 'A');
     /// assert!(has_text);
     /// # Ok(()) }
     /// ```
@@ -263,7 +272,7 @@ impl Cell {
     }
 
     /// The codepoint of the cell (0 if empty or bg-color-only).
-    pub fn codepoint(self) -> Result<u32> {
+    pub fn codepoint(self) -> Result<char> {
         self.get(cell::Codepoint)
     }
     /// The content tag describing what kind of content is in the cell.

@@ -27,16 +27,17 @@ use libghostty_vt::{
     build_info, color,
     effect::{
         ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
-        PrimaryDeviceAttributes, SecondaryDeviceAttributes,
+        PrimaryDeviceAttributes, SecondaryDeviceAttributes, TertiaryDeviceAttributes,
     },
     key::{self, Key},
-    kitty::graphics::{self, DecodePng, DecodedImage, Graphics},
+    kitty::graphics::{self, Graphics},
     mouse,
     point::{Coordinate, Point},
     render::{CellIterator, ImageIterator, ImageLayer, ImageProtocol, RenderState, RowIterator},
     report::SizeReportSize,
     selection::gesture::{DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     terminal::{ScrollViewport, Terminal},
+    sys::{self, DecodePng, DecodedImage},
 };
 
 use crate::pty::{Child, Pty, PtyError};
@@ -78,13 +79,7 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    // Make libghostty-vt emit through the same tracing subscriber.
-    // SAFETY: Only the main thread ever calls into libghostty.
-    #[expect(
-        unsafe_code,
-        reason = "libghostty's global settings are unsynchronized"
-    )]
-    unsafe { libghostty_vt::set_logger(Some(Box::new(libghostty_vt::log::TracingLogger))) }?;
+    sys::LOGGER.install(&sys::TracingLogger)?;
 
     let font = load_ttf_font_from_bytes(include_bytes!("../fonts/JetBrainsMono-Medium.ttf"))?;
 
@@ -107,12 +102,7 @@ async fn main() -> Result<()> {
     // Install the PNG decoder so the terminal can handle PNG images in the
     // Kitty Graphics Protocol. This is a process-global setting and must be
     // done before any terminal is created.
-    // SAFETY: Only the main thread ever calls into libghostty.
-    #[expect(
-        unsafe_code,
-        reason = "libghostty's global settings are unsynchronized"
-    )]
-    unsafe { graphics::set_png_decoder(Some(Box::new(PngDecoder))) }?;
+    sys::PNG_DECODER.install(&PngDecoder)?;
 
     // Create a ghostty virtual terminal with the computed grid and 1000
     // lines of scrollback.  This holds all the parsed screen state (cells,
@@ -131,7 +121,7 @@ async fn main() -> Result<()> {
     terminal
         // Enable Kitty graphics by setting a storage limit.  Without this the
         // terminal rejects all image data.  64 MiB is a generous default.
-        .set_kitty_image_storage_limit(64 * 1024 * 1024)?
+        .set_kitty_image_storage_limit(Some(64 * 1024 * 1024))?
         // Allow images to be transmitted via file, temp file, and shared
         // memory mediums in addition to the default inline (direct) medium.
         // The temp file medium is restricted to the system temp directory.
@@ -185,7 +175,7 @@ async fn main() -> Result<()> {
                     rom_cartridge: 0,
                 },
                 // DA3: default unit id (0).
-                tertiary: Default::default(),
+                tertiary: TertiaryDeviceAttributes::default(),
             })
         })?
         // xtversion effect — responds to CSI > q with our application name.
@@ -259,7 +249,7 @@ async fn main() -> Result<()> {
                 input.response.clear();
 
                 match pty.read(&mut terminal) {
-                    Ok(_) => {}
+                    Ok(()) => {}
                     Err(PtyError::EndOfStream) => {
                         // EOF — the child's side of the pty is closed.
                         child = Child::Exited(pid);
@@ -302,11 +292,12 @@ async fn main() -> Result<()> {
         // vsync via `next_frame` regardless, so we have nothing to schedule
         // and the next tick simply happens on the next frame.
         let now_ms = u64::try_from(animation_clock.elapsed().as_millis())?;
-        terminal.kitty_graphics_animation_tick(now_ms)?;
+        let mut graphics = terminal.kitty_graphics()?;
+        graphics.tick_animation(now_ms)?;
 
         // Draw the current terminal screen.
         renderer.render_terminal(&terminal, dims, Some(&font))?;
-        next_frame().await
+        next_frame().await;
     }
 }
 
@@ -464,9 +455,9 @@ impl<'alloc> Renderer<'alloc> {
 
         // Obtain the Kitty graphics storage from the terminal. We only need
         // it for the images' pixels. This is a reference valid until the next
-        // mutating terminal call. It's `None` when libghostty was built
-        // without Kitty graphics, in which case there are no images to draw.
-        let graphics = terminal.kitty_graphics()?;
+        // mutating terminal call. It's `Err(Error::Unsupported)` when libghostty
+        // was built without Kitty graphics, in which case there are no images to draw.
+        let graphics = terminal.kitty_graphics();
 
         // Populate the row iterator from the current render state snapshot,
         // resulting in a row *iteration* object, which can be thought of as
@@ -476,7 +467,7 @@ impl<'alloc> Renderer<'alloc> {
         let mut row_it = self.row_it.update(&snapshot)?;
 
         // --- Layer 1: images below cell backgrounds ---
-        if let Some(graphics) = graphics.as_ref() {
+        if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
                 &self.images,
                 &mut self.textures,
@@ -484,7 +475,7 @@ impl<'alloc> Renderer<'alloc> {
                 ImageLayer::BelowBackground,
                 dims,
                 grid,
-            )?
+            )?;
         }
 
         // Small padding from the window edges.
@@ -568,10 +559,10 @@ impl<'alloc> Renderer<'alloc> {
                     draw_text_ex(
                         &text,
                         x,
-                        y + FONT_SIZE as f32 + ROW_GAP,
+                        y + f32::from(FONT_SIZE) + ROW_GAP,
                         TextParams {
                             font,
-                            font_size: (FONT_SIZE as f32 * screen_dpi_scale()) as u16,
+                            font_size: (f32::from(FONT_SIZE) * screen_dpi_scale()) as u16,
                             color: color(fg),
                             ..Default::default()
                         },
@@ -587,10 +578,10 @@ impl<'alloc> Renderer<'alloc> {
                         draw_text_ex(
                             &text,
                             x + 1.0,
-                            y + FONT_SIZE as f32 + ROW_GAP,
+                            y + f32::from(FONT_SIZE) + ROW_GAP,
                             TextParams {
                                 font,
-                                font_size: (FONT_SIZE as f32 * screen_dpi_scale()) as u16,
+                                font_size: (f32::from(FONT_SIZE) * screen_dpi_scale()) as u16,
                                 color: color(fg),
                                 ..Default::default()
                             },
@@ -599,7 +590,6 @@ impl<'alloc> Renderer<'alloc> {
                 }
 
                 x += dims.cell_width;
-                continue;
             }
 
             y += dims.cell_height;
@@ -610,7 +600,7 @@ impl<'alloc> Renderer<'alloc> {
         // above-text images.  In our single-pass renderer the cell text
         // has already been drawn, but this still achieves the correct
         // visual for the common case where images sit behind text.
-        if let Some(graphics) = graphics.as_ref() {
+        if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
                 &self.images,
                 &mut self.textures,
@@ -618,7 +608,7 @@ impl<'alloc> Renderer<'alloc> {
                 ImageLayer::BelowText,
                 dims,
                 grid,
-            )?
+            )?;
         }
 
         // Draw the cursor if visible.
@@ -631,8 +621,8 @@ impl<'alloc> Renderer<'alloc> {
             let cursor_color = colors.cursor.unwrap_or(colors.foreground);
 
             draw_rectangle(
-                PADDING + vp.x as f32 * dims.cell_width,
-                PADDING + vp.y as f32 * dims.cell_height,
+                PADDING + f32::from(vp.x) * dims.cell_width,
+                PADDING + f32::from(vp.y) * dims.cell_height,
                 dims.cell_width,
                 dims.cell_height,
                 color(cursor_color),
@@ -640,7 +630,7 @@ impl<'alloc> Renderer<'alloc> {
         }
 
         // --- Layer 3: images above text ---
-        if let Some(graphics) = graphics.as_ref() {
+        if let Ok(graphics) = graphics.as_ref() {
             Self::render_kitty_images(
                 &self.images,
                 &mut self.textures,
@@ -648,7 +638,7 @@ impl<'alloc> Renderer<'alloc> {
                 ImageLayer::AboveText,
                 dims,
                 grid,
-            )?
+            )?;
         }
 
         // The whole frame is drawn, so mark all of it clean at once so the
@@ -793,7 +783,10 @@ impl Dimensions {
         (cols, rows)
     }
     fn update(&mut self) -> bool {
-        if screen_width() == self.window_width && screen_height() == self.window_height {
+        let epsilon = 1e-6f32;
+        if (screen_width() - self.window_width).abs() < epsilon
+            && (screen_height() - self.window_height).abs() < epsilon
+        {
             return false;
         }
         self.window_width = screen_width();
@@ -1035,7 +1028,7 @@ impl<'alloc> Input<'alloc> {
                 // for a comfortable pace.  Delta is negative to scroll
                 // up (into history), positive to scroll down.
                 let scroll_delta: isize = (wheel_y * -2.5) as isize;
-                terminal.scroll_viewport(ScrollViewport::Delta(scroll_delta));
+                terminal.scroll_viewport(ScrollViewport::Delta(scroll_delta))?;
             }
         }
         Ok(())
@@ -1095,12 +1088,12 @@ impl<'alloc> Input<'alloc> {
         let (xpos, ypos) = mouse_position();
 
         let x = if xpos > PADDING {
-            ((xpos - PADDING) / dims.cell_width).clamp(0.0, cols as f32) as u16
+            ((xpos - PADDING) / dims.cell_width).clamp(0.0, f32::from(cols)) as u16
         } else {
             0
         };
         let y = if ypos > PADDING {
-            ((ypos - PADDING) / dims.cell_height).clamp(0.0, rows as f32) as u32
+            ((ypos - PADDING) / dims.cell_height).clamp(0.0, f32::from(rows)) as u32
         } else {
             0
         };
@@ -1124,8 +1117,8 @@ impl<'alloc> Input<'alloc> {
         let (xpos, ypos) = mouse_position();
         let left = PADDING;
         let top = PADDING;
-        let right = left + cols as f32 * dims.cell_width;
-        let bottom = top + rows as f32 * dims.cell_height;
+        let right = left + f32::from(cols) * dims.cell_width;
+        let bottom = top + f32::from(rows) * dims.cell_height;
 
         if xpos < left || xpos >= right || ypos < top || ypos >= bottom {
             return Ok(false);
@@ -1266,14 +1259,13 @@ impl SelectionState<'_> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         let grid_ref = terminal.grid_ref(point)?;
 
-        let selection = self
-            .press_event
-            .set_repeat_distance(dims.cell_width.into())?
-            .set_time(self.start_time.elapsed())?
-            .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref)?;
-
-        terminal.set_selection(selection.as_ref())?;
+        terminal.set_selection(
+            self.press_event
+                .set_repeat_distance(dims.cell_width.into())?
+                .set_time(self.start_time.elapsed())?
+                .set_position(x.into(), y.into())?
+                .apply(&mut self.gesture, terminal, grid_ref)?,
+        )?;
         Ok(())
     }
 
@@ -1306,13 +1298,12 @@ impl SelectionState<'_> {
             screen_height: dims.window_height as u32,
         };
 
-        let selection = self
-            .drag_event
-            .set_rectangle(Input::selection_rectangle_mods(mods))?
-            .set_position(x.into(), y.into())?
-            .apply(&mut self.gesture, terminal, grid_ref, geometry)?;
-
-        terminal.set_selection(selection.as_ref())?;
+        terminal.set_selection(
+            self.drag_event
+                .set_rectangle(Input::selection_rectangle_mods(mods))?
+                .set_position(x.into(), y.into())?
+                .apply(&mut self.gesture, terminal, grid_ref, geometry)?,
+        )?;
         Ok(())
     }
 
@@ -1399,19 +1390,19 @@ struct PngDecoder;
 
 impl DecodePng for PngDecoder {
     fn decode_png<'alloc>(
-        &mut self,
+        &self,
         alloc: &'alloc libghostty_vt::alloc::Allocator<'_>,
         data: &[u8],
     ) -> Option<DecodedImage<'alloc>> {
         // `macroquad` decodes the PNG image for us and converts it
         // to the correct RGBA8 pixel format automatically.
         let img = Image::from_file_with_format(data, Some(ImageFormat::Png)).ok()?;
-        let mut data = Bytes::new_zeroed_with_alloc(alloc, img.bytes.len()).ok()?;
+        let mut data = Bytes::new_zeroed_in(alloc, img.bytes.len()).ok()?;
         data.copy_from_slice(&img.bytes);
 
         Some(DecodedImage {
-            width: img.width as u32,
-            height: img.height as u32,
+            width: u32::from(img.width),
+            height: u32::from(img.height),
             data,
         })
     }
@@ -1517,17 +1508,16 @@ mod pty {
             loop {
                 match nix::unistd::read(&self.0, &mut buf) {
                     // EOF -- the child closed its side of the pty.
-                    Ok(0) => return Err(PtyError::EndOfStream),
+                    // On Linux, the slave closing often produces EIO rather
+                    // than a clean EOF (read returning 0). Treat it the same.
+                    Ok(0) | Err(Errno::EIO) => return Err(PtyError::EndOfStream),
                     Ok(len) => term.vt_write(&buf[..len]),
 
                     // Distinguish "no data right now" from real errors.
                     Err(Errno::EAGAIN) => return Ok(()),
-                    Err(Errno::EINTR) => continue, // retry the read
-                    // On Linux, the slave closing often produces EIO rather
-                    // than a clean EOF (read returning 0). Treat it the same.
-                    Err(Errno::EIO) => return Err(PtyError::EndOfStream),
+                    Err(Errno::EINTR) => {}, // retry the read
                     Err(err) => return Err(PtyError::OtherError(err)),
-                };
+                }
             }
         }
 
@@ -1541,7 +1531,7 @@ mod pty {
             while !remaining.is_empty() {
                 match nix::unistd::write(&self.0, remaining) {
                     Ok(len) => remaining = &remaining[len..],
-                    Err(Errno::EINTR) => continue,
+                    Err(Errno::EINTR) => {}
                     // EAGAIN or real error -- drop the remainder.
                     Err(_) => break,
                 }
