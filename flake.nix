@@ -19,8 +19,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     ghostty = {
-      # vt-1.0.1, pinned by commit so tag changes cannot alter the source.
-      url = "github:ghostty-org/ghostty/108cacb17ed8990840cd14abfce43d8ed8503ca1";
+      # vt-1.0.2, pinned by commit so tag changes cannot alter the source.
+      url = "github:ghostty-org/ghostty/573c4a21e02311ae87844af26b6a7a179f82858e";
     };
   };
 
@@ -97,11 +97,11 @@
         ghosttyLib =
           if pkgs.stdenv.isDarwin
           then
-            assert ghostty.rev == "108cacb17ed8990840cd14abfce43d8ed8503ca1";
-              pkgs.runCommand "libghostty-vt-1.0.1-macos" {
+            assert ghostty.rev == "573c4a21e02311ae87844af26b6a7a179f82858e";
+              pkgs.runCommand "libghostty-vt-1.0.2-macos" {
                 src = pkgs.fetchurl {
-                  url = "https://release.files.ghostty.org/libghostty-vt/1.0.1/ghostty-vt-1.0.1.xcframework.zip";
-                  sha256 = "sha256-wPljEnf3JhVMj1IZVNF83EGqxGJvwN+M+SWhnuWOgps=";
+                  url = "https://release.files.ghostty.org/libghostty-vt/1.0.2/ghostty-vt-1.0.2.xcframework.zip";
+                  sha256 = "sha256-FUdyCc6GrRyUTyF+klyErPeW7MUaunqTWqoad2mJC9Y=";
                 };
                 nativeBuildInputs = [pkgs.unzip];
               } ''
@@ -117,7 +117,7 @@
 
                 Name: libghostty-vt-static
                 Description: Ghostty VT library (static)
-                Version: 1.0.1
+                Version: 1.0.2
                 Libs: -L\''${libdir} -lghostty-vt
                 Cflags: -I\''${includedir}
                 EOF
