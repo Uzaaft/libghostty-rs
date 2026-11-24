@@ -76,8 +76,8 @@ fn main() {
         return;
     }
 
-    // Miri cannot load or call the native Ghostty library. The Miri suite stays
-    // within Rust-owned seams, so there is nothing to build or link for it.
+    // The focused Miri regressions use Rust-owned data and a minimal test
+    // boundary; the interpreter cannot execute the native library.
     if env::var("CARGO_CFG_MIRI").is_ok() {
         return;
     }

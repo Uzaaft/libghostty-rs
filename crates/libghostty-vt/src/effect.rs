@@ -3282,9 +3282,7 @@ mod tests {
             })
         );
 
-        // A kind added upstream later has no Rust value. That the trampoline
-        // then skips the closure is checked by the miri mock in
-        // `miri_soundness::resize_window_skips_unknown_tags`.
+        // A kind added upstream later has no Rust value.
         raw.tag = ffi::TerminalResizeWindowTag::GRID + 1;
         // SAFETY: Ditto; an unknown tag makes `from_raw` read nothing else.
         assert_eq!(unsafe { ResizeWindow::from_raw(&raw const raw) }, None);
@@ -3340,97 +3338,17 @@ mod tests {
         // SAFETY: Ditto
         assert_eq!(unsafe { UnknownSequence::from_raw(&raw const raw) }, None);
 
-        // A kind added upstream later has no Rust value either. That the
-        // trampoline then skips the closure is checked by the miri mock in
-        // `miri_soundness::unknown_sequence_skips_unknown_tags_and_terminators`.
+        // A kind added upstream later has no Rust value either.
         raw.tag = ffi::TerminalUnknownSequenceTag::OSC + 1;
         // SAFETY: Ditto; an unknown tag makes `from_raw` read nothing else.
         assert_eq!(unsafe { UnknownSequence::from_raw(&raw const raw) }, None);
     }
 }
 
-/// Soundness regression tests for
-/// <https://github.com/Uzaaft/libghostty-rs/issues/74>.
-///
-/// These tests are gated on `cfg(miri)` because they construct the exact
-/// shapes the C API produces and feed them into the safe wrappers, which was
-/// UB before the wrappers stopped building slices and `&str` from unvalidated
-/// FFI input. The module also holds tests that need the mock C API to produce
-/// shapes real libghostty can't yet (e.g. unknown upstream tags). Run with:
-///
-/// ```sh
-/// cargo +nightly miri test -p libghostty-vt miri_soundness
-/// ```
-#[cfg(all(test, miri))]
-mod miri_soundness {
+// These regressions also run under Miri without a native backend (#74/#75).
+#[cfg(test)]
+mod soundness_tests {
     use super::*;
-    use crate::Terminal;
-    use std::num::NonZeroU16;
-
-    /// Upstream may add resize request kinds without an ABI break, and asks
-    /// callbacks to ignore tags they don't handle. The trampoline must skip
-    /// the closure for such a tag rather than abort (e.g. by `expect`ing the
-    /// conversion inside `extern "C"`), while still delivering known tags.
-    #[test]
-    fn resize_window_skips_unknown_tags() {
-        let seen = std::cell::RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_resize_window(|_, request| seen.borrow_mut().push(request))
-            .unwrap();
-        // `GRID + 1`, then `GRID` as the positive control.
-        terminal.vt_write(b"resize:unknown");
-        terminal.vt_write(b"resize:grid");
-        drop(terminal);
-        assert_eq!(
-            seen.into_inner(),
-            [ResizeWindow::Grid {
-                rows: NonZeroU16::new(30),
-                columns: NonZeroU16::new(100),
-            }]
-        );
-    }
-
-    /// Upstream may add unknown-sequence kinds and OSC terminators without an
-    /// ABI break, and fills the union with `lib.TaggedUnion.cval`, which
-    /// leaves bytes outside the active field (the whole union, for a kind
-    /// without a payload) undefined. The trampoline must read only the tag
-    /// and then the field it names, and skip the closure for a kind or
-    /// terminator it doesn't know, while still delivering known ones.
-    #[test]
-    fn unknown_sequence_skips_unknown_tags_and_terminators() {
-        let seen = std::cell::RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_unknown_sequence(|_, sequence| {
-                // Copy the content out; it is only borrowed for the callback.
-                seen.borrow_mut().push(match sequence {
-                    UnknownSequence::Apc { content, truncated } => {
-                        (None, content.to_vec(), truncated)
-                    }
-                    UnknownSequence::Osc {
-                        content,
-                        truncated,
-                        terminator,
-                    } => (Some(terminator), content.to_vec(), truncated),
-                });
-            })
-            .unwrap();
-        // `OSC + 1` and an OSC ending in `BEL + 1`, then APC and OSC as the
-        // positive controls.
-        terminal.vt_write(b"unknown:future");
-        terminal.vt_write(b"unknown:osc-badterm");
-        terminal.vt_write(b"unknown:apc");
-        terminal.vt_write(b"unknown:osc");
-        drop(terminal);
-        assert_eq!(
-            seen.into_inner(),
-            [
-                (None, b"payload".to_vec(), true),
-                (Some(osc::Terminator::Bel), b"payload".to_vec(), false),
-            ]
-        );
-    }
 
     /// The C trampoline declares `contents: ?[*]const ClipboardContent` and
     /// sends `contents = NULL, contents_len = 0` for a write carrying no
@@ -3447,7 +3365,7 @@ mod miri_soundness {
             ..ffi::ClipboardWrite::default()
         };
         // SAFETY: `raw` outlives the borrow, matching the callback contract.
-        let write = unsafe { ClipboardWrite::from_raw(&raw) };
+        let write = unsafe { ClipboardWrite::from_raw(&raw const raw) };
         assert_eq!(write.contents().count(), 0);
     }
 

@@ -921,7 +921,7 @@ pub enum ProgressKind {
     },
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

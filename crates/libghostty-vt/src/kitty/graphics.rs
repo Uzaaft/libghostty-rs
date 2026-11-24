@@ -454,7 +454,7 @@ impl<'alloc> PlacementIterator<'alloc> {
     /// # use libghostty_vt::{Terminal, kitty::graphics::PlacementIterator};
     /// let terminal = Terminal::new(80, 24).unwrap();
     /// let mut iterator = PlacementIterator::new().unwrap();
-    /// let graphics = terminal.kitty_graphics().unwrap().unwrap();
+    /// let graphics = terminal.kitty_graphics().unwrap();
     /// let mut placements = iterator.update(&graphics).unwrap();
     /// drop(terminal);
     /// placements.next();
@@ -949,7 +949,7 @@ pub enum Compression {
     ZlibDeflate = ffi::KittyImageCompression::ZLIB_DEFLATE,
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod placement_tests {
     use std::cell::Cell;
 
@@ -1121,7 +1121,7 @@ mod placement_tests {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod animation_tests {
     use crate::Terminal;
 
@@ -1210,7 +1210,7 @@ mod animation_tests {
     }
 }
 
-#[cfg(all(test, not(miri), feature = "kitty-graphics", feature = "png"))]
+#[cfg(all(test, feature = "kitty-graphics", feature = "png"))]
 mod png_decoder_tests {
     use super::*;
     use crate::alloc::testing::Capped;

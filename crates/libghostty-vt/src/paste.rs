@@ -392,7 +392,7 @@ impl Write for PasteWriter {
     }
 }
 
-#[cfg(all(test, not(miri)))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Error, effect::ClipboardReadError, mode::Mode};

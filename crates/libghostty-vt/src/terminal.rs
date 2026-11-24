@@ -2170,203 +2170,126 @@ mod tests {
     }
 }
 
-/// Soundness regression tests for
-/// <https://github.com/Uzaaft/libghostty-rs/issues/74>.
-///
-/// These tests are gated on `cfg(miri)` because they construct the exact
-/// shapes the C API produces and feed them into the safe wrappers, which was
-/// UB before the wrappers stopped building slices and `&str` from unvalidated
-/// FFI input. The module also holds tests that need the mock C API to produce
-/// shapes real libghostty can't yet (e.g. unknown upstream tags). Run with:
-///
-/// ```sh
-/// cargo +nightly miri test -p libghostty-vt miri_soundness
-/// ```
-#[cfg(all(test, miri))]
-mod miri_soundness {
+#[cfg(test)]
+mod soundness_tests {
     use super::*;
 
-    // Miri cannot run Zig. These shims implement only native handle ownership
-    // and synchronous callback dispatch; the constructor, registration,
-    // trampolines and destructor under test are the actual Rust wrapper.
-    struct MockTerminal {
-        userdata: *mut std::ffi::c_void,
-        write: ffi::TerminalWritePtyFn,
-        read: ffi::TerminalClipboardReadFn,
-        resize: ffi::TerminalResizeWindowFn,
-        unknown: ffi::TerminalUnknownSequenceFn,
-    }
+    // Only model handle ownership, callback registration and synchronous
+    // dispatch for the two regressions below. There is no parser, getter
+    // implementation or success fallback for other FFI operations.
+    #[cfg(miri)]
+    mod boundary {
+        use super::*;
+        use std::ffi::c_void;
 
-    #[unsafe(no_mangle)]
-    unsafe extern "C" fn ghostty_terminal_new(
-        _: *const ffi::Allocator,
-        out: *mut ffi::Terminal,
-        _: u16,
-        _: u16,
-    ) -> ffi::Result::Type {
-        let terminal = Box::new(MockTerminal {
-            userdata: std::ptr::null_mut(),
-            write: None,
-            read: None,
-            resize: None,
-            unknown: None,
-        });
-        // SAFETY: The constructor supplies a writable out parameter.
-        unsafe { *out = Box::into_raw(terminal).cast() };
-        ffi::Result::SUCCESS
-    }
-
-    #[unsafe(no_mangle)]
-    unsafe extern "C" fn ghostty_terminal_free(terminal: ffi::Terminal) {
-        // SAFETY: The wrapper frees the handle from new exactly once.
-        unsafe { drop(Box::from_raw(terminal.cast::<MockTerminal>())) };
-    }
-
-    #[unsafe(no_mangle)]
-    unsafe extern "C" fn ghostty_terminal_set(
-        terminal: ffi::Terminal,
-        option: ffi::TerminalOption::Type,
-        value: *const std::ffi::c_void,
-    ) -> ffi::Result::Type {
-        // SAFETY: Registration supplies a live handle with exclusive access.
-        let terminal = unsafe { &mut *terminal.cast::<MockTerminal>() };
-        match option {
-            ffi::TerminalOption::USERDATA => terminal.userdata = value.cast_mut(),
-            ffi::TerminalOption::WRITE_PTY => {
-                // SAFETY: The wrapper supplies the matching callback ABI.
-                terminal.write = Some(unsafe { std::mem::transmute(value) });
-            }
-            ffi::TerminalOption::CLIPBOARD_READ => {
-                // SAFETY: The wrapper supplies the matching callback ABI.
-                terminal.read = Some(unsafe { std::mem::transmute(value) });
-            }
-            ffi::TerminalOption::RESIZE_WINDOW => {
-                // SAFETY: The wrapper supplies the matching callback ABI.
-                terminal.resize = Some(unsafe { std::mem::transmute(value) });
-            }
-            ffi::TerminalOption::UNKNOWN_SEQUENCE => {
-                // SAFETY: The wrapper supplies the matching callback ABI.
-                terminal.unknown = Some(unsafe { std::mem::transmute(value) });
-            }
-            _ => return ffi::Result::INVALID_VALUE,
+        struct Handle {
+            userdata: *mut c_void,
+            write: ffi::TerminalWritePtyFn,
+            read: ffi::TerminalClipboardReadFn,
         }
-        ffi::Result::SUCCESS
-    }
 
-    unsafe extern "C" fn reply_to_read(
-        read: *const ffi::ClipboardRead,
-        _: *const ffi::ClipboardReadReply,
-    ) {
-        // SAFETY: The synchronous request stores the live mock handle in ctx.
-        let terminal = unsafe { (*read).ctx.cast_mut().cast::<ffi::TerminalImpl>() };
-        // SAFETY: This models a clipboard reply's nested pty write dispatch.
-        unsafe { ghostty_terminal_vt_write(terminal, b"reply".as_ptr(), 5) };
-    }
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn ghostty_terminal_new(
+            alloc: *const ffi::Allocator,
+            out: *mut ffi::Terminal,
+            _: u16,
+            _: u16,
+        ) -> ffi::Result::Type {
+            assert!(
+                alloc.is_null(),
+                "test boundary only supports the default allocator"
+            );
+            let handle = Box::new(Handle {
+                userdata: std::ptr::null_mut(),
+                write: None,
+                read: None,
+            });
+            // SAFETY: Terminal::new supplies a writable out parameter.
+            unsafe { out.write(Box::into_raw(handle).cast()) };
+            ffi::Result::SUCCESS
+        }
 
-    #[unsafe(no_mangle)]
-    unsafe extern "C" fn ghostty_terminal_vt_write(
-        terminal: ffi::Terminal,
-        data: *const u8,
-        len: usize,
-    ) {
-        let (userdata, write, read, resize, unknown) = {
-            // SAFETY: The wrapper supplies a live handle. End this borrow
-            // before dispatch, since a clipboard reply can dispatch again.
-            let mock = unsafe { &*terminal.cast::<MockTerminal>() };
-            (
-                mock.userdata,
-                mock.write,
-                mock.read,
-                mock.resize,
-                mock.unknown,
-            )
-        };
-        // SAFETY: vt_write supplies initialized bytes for this call.
-        let bytes = unsafe { std::slice::from_raw_parts(data, len) };
-        if let Some(kind) = bytes.strip_prefix(b"resize:") {
-            // The libghostty these bindings build against only sends tags
-            // they know, so a kind added upstream later can only be faked
-            // here. The input picks the tag.
-            let known = kind == b"grid";
-            // Write only the tag and the active field, leaving the rest of the
-            // union (and struct padding) uninitialized, so miri flags any
-            // read of bytes upstream never wrote. An unknown kind has no
-            // field we know, so its whole union stays uninitialized and miri
-            // also flags a grid read before the tag is checked.
-            let mut request = MaybeUninit::<ffi::TerminalResizeWindow>::uninit();
-            let p = request.as_mut_ptr();
-            // SAFETY: `p` points to writable, aligned storage for the struct,
-            // and `&raw mut` makes no reference to the uninitialized memory.
-            // This matches `lib.TaggedUnion.cval`, whose `@unionInit` leaves
-            // the rest of the union undefined.
-            unsafe {
-                if known {
-                    (&raw mut (*p).tag).write(ffi::TerminalResizeWindowTag::GRID);
-                    (&raw mut (*p).value.grid).write(ffi::TerminalResizeWindowGrid {
-                        rows: 30,
-                        columns: 100,
-                    });
-                } else {
-                    (&raw mut (*p).tag).write(ffi::TerminalResizeWindowTag::GRID + 1);
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn ghostty_terminal_free(terminal: ffi::Terminal) {
+            // SAFETY: Terminal drops the handle from new exactly once.
+            unsafe { drop(Box::from_raw(terminal.cast::<Handle>())) };
+        }
+
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn ghostty_terminal_set(
+            terminal: ffi::Terminal,
+            option: ffi::TerminalOption::Type,
+            value: *const c_void,
+        ) -> ffi::Result::Type {
+            // SAFETY: Registration has exclusive access to the live handle.
+            let handle = unsafe { &mut *terminal.cast::<Handle>() };
+            match option {
+                ffi::TerminalOption::USERDATA => handle.userdata = value.cast_mut(),
+                ffi::TerminalOption::WRITE_PTY => {
+                    // SAFETY: on_pty_write supplies the matching callback ABI.
+                    handle.write = unsafe {
+                        std::mem::transmute::<*const c_void, ffi::TerminalWritePtyFn>(value)
+                    };
                 }
-            }
-            // SAFETY: Registration provided this callback and its userdata;
-            // the request remains live throughout synchronous dispatch.
-            unsafe { resize.unwrap()(terminal, userdata, p.cast_const()) };
-        } else if let Some(kind) = bytes.strip_prefix(b"unknown:") {
-            // Like `resize:` above, the input picks the shape and only the tag
-            // and the active field are written. `future` is a kind added
-            // upstream later, so its whole union stays uninitialized;
-            // `osc-badterm` is an OSC with a terminator added upstream later.
-            let content = b"payload";
-            let content = ffi::String {
-                ptr: content.as_ptr(),
-                len: content.len(),
-            };
-            let mut sequence = MaybeUninit::<ffi::TerminalUnknownSequence>::uninit();
-            let p = sequence.as_mut_ptr();
-            // SAFETY: As for `resize:` above.
-            unsafe {
-                match kind {
-                    b"apc" => {
-                        (&raw mut (*p).tag).write(ffi::TerminalUnknownSequenceTag::APC);
-                        (&raw mut (*p).value.apc).write(ffi::TerminalUnknownStringSequence {
-                            truncated: true,
-                            content,
-                        });
-                    }
-                    b"osc" | b"osc-badterm" => {
-                        let terminator = if kind == b"osc" {
-                            ffi::OscTerminator::BEL
-                        } else {
-                            ffi::OscTerminator::BEL + 1
-                        };
-                        (&raw mut (*p).tag).write(ffi::TerminalUnknownSequenceTag::OSC);
-                        (&raw mut (*p).value.osc).write(ffi::TerminalUnknownOscSequence {
-                            truncated: false,
-                            content,
-                            terminator,
-                        });
-                    }
-                    _ => (&raw mut (*p).tag).write(ffi::TerminalUnknownSequenceTag::OSC + 1),
+                ffi::TerminalOption::CLIPBOARD_READ => {
+                    // SAFETY: on_clipboard_read supplies the matching callback ABI.
+                    handle.read = unsafe {
+                        std::mem::transmute::<*const c_void, ffi::TerminalClipboardReadFn>(value)
+                    };
                 }
+                _ => panic!("unexpected option in Miri test boundary: {option}"),
             }
-            // SAFETY: Registration provided this callback and its userdata;
-            // the sequence and its static content remain live throughout
-            // synchronous dispatch.
-            unsafe { unknown.unwrap()(terminal, userdata, p.cast_const()) };
-        } else if bytes == b"clipboard" {
-            let request = ffi::ClipboardRead {
-                ctx: terminal.cast(),
-                reply: Some(reply_to_read),
-                ..ffi::ClipboardRead::default()
+            ffi::Result::SUCCESS
+        }
+
+        unsafe extern "C" fn reply(
+            request: *const ffi::ClipboardRead,
+            _: *const ffi::ClipboardReadReply,
+        ) {
+            // SAFETY: Dispatch stores the live handle in ctx for this call.
+            let terminal = unsafe { (*request).ctx.cast_mut().cast::<ffi::TerminalImpl>() };
+            let (userdata, write) = {
+                // SAFETY: End the handle borrow before invoking user code.
+                let handle = unsafe { &*terminal.cast::<Handle>() };
+                (handle.userdata, handle.write.unwrap())
             };
-            // SAFETY: Registration provided this callback and its userdata;
-            // the request remains live throughout synchronous dispatch.
-            unsafe { read.unwrap()(terminal, userdata, &raw const request) };
-        } else {
-            // SAFETY: Registration provided this callback and its userdata.
-            unsafe { write.unwrap()(terminal, userdata, data, len) };
+            let bytes = b"\x1b]52;c;\x1b\\";
+            // SAFETY: Registration supplied the callback and its userdata;
+            // the static response lives throughout this nested dispatch.
+            unsafe { write(terminal, userdata, bytes.as_ptr(), bytes.len()) };
+        }
+
+        #[unsafe(no_mangle)]
+        unsafe extern "C" fn ghostty_terminal_vt_write(
+            terminal: ffi::Terminal,
+            data: *const u8,
+            len: usize,
+        ) {
+            let (userdata, write, read) = {
+                // SAFETY: vt_write supplies a live handle. Keep no borrow
+                // across callbacks, which can dispatch a nested pty write.
+                let handle = unsafe { &*terminal.cast::<Handle>() };
+                (handle.userdata, handle.write, handle.read)
+            };
+            // SAFETY: vt_write supplies initialized input for this call.
+            match unsafe { std::slice::from_raw_parts(data, len) } {
+                b"\x1b[5n" => {
+                    let bytes = b"\x1b[0n";
+                    // SAFETY: Registration supplied the callback/userdata.
+                    unsafe { write.unwrap()(terminal, userdata, bytes.as_ptr(), bytes.len()) };
+                }
+                b"\x1b]52;c;?\x1b\\" => {
+                    let request = ffi::ClipboardRead {
+                        ctx: terminal.cast(),
+                        reply: Some(reply),
+                        ..ffi::ClipboardRead::default()
+                    };
+                    // SAFETY: Registration supplied the callback/userdata;
+                    // request remains live for the synchronous callback.
+                    unsafe { read.unwrap()(terminal, userdata, &raw const request) };
+                }
+                _ => panic!("unexpected input in Miri test boundary"),
+            }
         }
     }
 
@@ -2382,7 +2305,7 @@ mod miri_soundness {
         fn dispatch<'alloc: 'cb, 'cb>(
             mut terminal: Terminal<'alloc, 'cb>,
         ) -> Terminal<'alloc, 'cb> {
-            terminal.vt_write(b"reply");
+            terminal.vt_write(b"\x1b[5n");
             terminal
         }
 
@@ -2394,7 +2317,7 @@ mod miri_soundness {
         terminal
             .on_pty_write(move |_, bytes| {
                 let _guard = &first;
-                assert_eq!(bytes, b"reply");
+                assert_eq!(bytes, b"\x1b[0n");
                 observed.set(observed.get() + 1);
             })
             .unwrap();
@@ -2406,7 +2329,7 @@ mod miri_soundness {
         terminal
             .on_pty_write(move |_, bytes| {
                 let _guard = &second;
-                assert_eq!(bytes, b"reply");
+                assert_eq!(bytes, b"\x1b[0n");
                 observed.set(observed.get() + 10);
             })
             .unwrap();
@@ -2419,11 +2342,15 @@ mod miri_soundness {
 
     #[test]
     fn moved_terminal_nested_clipboard_reply() {
+        fn dispatch(mut terminal: Terminal<'_, '_>) {
+            terminal.vt_write(b"\x1b]52;c;?\x1b\\");
+        }
+
         let order = std::cell::RefCell::new(Vec::new());
         let mut terminal = Terminal::new(8, 2).unwrap();
         terminal
             .on_pty_write(|_, bytes| {
-                assert_eq!(bytes, b"reply");
+                assert_eq!(bytes, b"\x1b]52;c;\x1b\\");
                 order.borrow_mut().push(2);
             })
             .unwrap();
@@ -2434,9 +2361,6 @@ mod miri_soundness {
                 order.borrow_mut().push(3);
             })
             .unwrap();
-        fn dispatch(mut terminal: Terminal<'_, '_>) {
-            terminal.vt_write(b"clipboard");
-        }
         dispatch(terminal);
         assert_eq!(*order.borrow(), [1, 2, 3]);
     }

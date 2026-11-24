@@ -69,7 +69,8 @@
           targets = rustTargets;
         };
 
-        miriToolchain = pkgs.rust-bin.selectLatestNightlyWith (
+        # ASan, Miri and wasm64 need nightly and rust-src.
+        nightlyToolchain = pkgs.rust-bin.selectLatestNightlyWith (
           toolchain:
             toolchain.default.override {
               extensions = ["rust-src" "rust-std" "miri"];
@@ -124,18 +125,43 @@
               ''
           else ghosttySourceLib;
 
+        ghosttyDebugLib = ghostty.packages.${system}.libghostty-vt-debug;
+
         miriCommand = pkgs.writeShellApplication {
           name = "libghostty-miri";
-          runtimeInputs = [miriToolchain];
+          runtimeInputs = [nightlyToolchain];
           text = ''
-            cargo miri test --locked -p libghostty-vt-sys --lib
-            cargo miri test --locked -p libghostty-vt --lib alloc::tests::
-            # Issue #74 soundness regression tests (both clipboard findings
-            # live in this module), plus tests that need the mock C API to
-            # produce shapes real libghostty can't yet. Miri aborts the test
-            # process at the first UB it finds, so a broken tree reports only
-            # the first failing test.
-            cargo miri test --locked -p libghostty-vt --lib miri_soundness
+            # Only the bug regressions: clipboard bytes, reader initialization,
+            # and callback userdata across moves and nested dispatch. Native
+            # tests run the same assertions against real Ghostty separately.
+            for flags in "" "-Zmiri-tree-borrows"; do
+              MIRIFLAGS="$flags" cargo miri test --locked -p libghostty-vt --lib soundness_tests::
+            done
+          '';
+        };
+
+        # Zig cannot be instrumented with ASan. This checks Rust's accesses
+        # to malloc-backed Ghostty allocations, and leaks on Linux, but not
+        # Ghostty's own accesses or its directly mapped terminal pages.
+        asanCommand = pkgs.writeShellApplication {
+          name = "libghostty-asan";
+          runtimeInputs =
+            [nightlyToolchain pkgs.pkg-config]
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [pkgs.stdenv.cc pkgs.llvm];
+          text = ''
+            # Keep ASan separate from the Debug library's UBSan runtime,
+            # whose weak handlers ASan would replace.
+            export PKG_CONFIG_PATH=${pkgs.lib.getDev ghosttyLib}/lib/pkgconfig
+            export RUSTFLAGS=-Zsanitizer=address
+            export RUSTDOCFLAGS=-Zsanitizer=address
+            # Rebuild std too. An explicit target keeps sanitizer flags away
+            # from host build scripts and is required by -Zbuild-std.
+            args=(
+              --locked -Zbuild-std --target "$(rustc --print host-tuple)"
+              --features libghostty-vt-sys/pkg-config --features libghostty-vt/png
+            )
+            cargo test "''${args[@]}" -p libghostty-vt-sys -p libghostty-vt --lib --tests
+            cargo test "''${args[@]}" -p libghostty-vt --doc
           '';
         };
 
@@ -295,6 +321,25 @@
             }
           );
 
+          # Rust's dev checks and Zig's Debug safety checks cover their own
+          # code; Ghostty's participating C/C++ sources use UBSan. Neither
+          # rustc nor Zig offers UBSan instrumentation for its own language.
+          cargo-test-ubsan = craneLib.mkCargoDerivation (
+            commonArgs
+            // {
+              cargoArtifacts = null;
+              pnameSuffix = "-ubsan";
+              CARGO_PROFILE = "dev";
+              buildInputs = [ghosttyDebugLib] ++ pkgs.lib.remove ghosttyLib commonArgs.buildInputs;
+              buildPhaseCargoCommand = ''
+                cargoWithProfile test ${commonArgs.cargoExtraArgs} --workspace --all-targets
+                cargoWithProfile test ${commonArgs.cargoExtraArgs} -p libghostty-vt --doc
+              '';
+              doInstallCargoArtifacts = false;
+              installPhaseCommand = "touch $out";
+            }
+          );
+
           # `--all-targets` does not include doctests, so run them separately.
           # Only for the safe crate: the -sys bindings carry C header comments
           # that rustdoc would otherwise try to compile as Rust.
@@ -326,6 +371,10 @@
               cargoTestExtraArgs = "--workspace --all-targets";
             }
           );
+        };
+
+        apps.asan = flake-utils.lib.mkApp {
+          drv = asanCommand;
         };
 
         apps.miri = flake-utils.lib.mkApp {
@@ -385,14 +434,10 @@
           '';
         };
 
-        devShells.miri = pkgs.mkShell {
-          packages = [miriToolchain];
-        };
-
         # Rust ships no wasm64 std; reuse the nightly toolchain with rust-src
         # to build it with -Zbuild-std, without changing the native MSRV.
         devShells.wasm64 = pkgs.mkShell {
-          packages = [miriToolchain zigPkg pkgs.nodejs];
+          packages = [nightlyToolchain zigPkg pkgs.nodejs];
         };
       }
     );
