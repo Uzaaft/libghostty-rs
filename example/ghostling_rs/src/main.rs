@@ -8,7 +8,6 @@
 
 #![deny(unsafe_code)] // Well, almost.
 use std::{
-    cell::Cell,
     collections::HashMap,
     time::{Duration, Instant},
 };
@@ -25,16 +24,13 @@ use nix::sys::wait;
 use libghostty_vt::{
     alloc::Bytes,
     build_info, color,
-    effect::{
-        ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
-        PrimaryDeviceAttributes, SecondaryDeviceAttributes, TertiaryDeviceAttributes,
-    },
+    effect,
     key::{self, Key},
     kitty::graphics::{self, Graphics},
     mouse,
     point::{Coordinate, Point},
     render::{CellIterator, ImageIterator, ImageLayer, ImageProtocol, RenderState, RowIterator},
-    report::SizeReportSize,
+    report::{ColorScheme, SizeReportSize},
     selection::gesture::{DragEvent, Geometry, Gesture, PressEvent, ReleaseEvent},
     terminal::{ScrollViewport, Terminal},
     sys::{self, DecodePng, DecodedImage},
@@ -69,6 +65,79 @@ const CELL_GAP: f32 = 0.0;
 /// Vertical gap between rows.
 const ROW_GAP: f32 = 12.0;
 
+struct Handler {
+    cols: u16,
+    rows: u16,
+    dims: Dimensions,
+    pty: Pty,
+}
+
+/// pty_write effect — the terminal calls this whenever a VT sequence
+/// requires a response back to the application (device status reports,
+/// mode queries, device attributes, etc.).  Without this, programs like
+/// vim and tmux that probe terminal capabilities would hang.
+impl effect::OnPtyWrite for Handler {
+    fn on_pty_write(&mut self, _terminal: &Terminal<'_>, data: &[u8]) {
+        self.pty.write(data);
+    }
+}
+
+/// size effect — responds to XTWINOPS size queries (CSI 14/16/18 t)
+/// so programs can discover the terminal geometry in cells and pixels.
+impl effect::OnSize for Handler {
+    fn on_size(&mut self, _terminal: &Terminal<'_>) -> Option<SizeReportSize> {
+        Some(SizeReportSize {
+            rows: self.rows,
+            columns: self.cols,
+            cell_width: self.dims.cell_width as u32,
+            cell_height: self.dims.cell_height as u32,
+        })
+    }
+}
+
+/// device_attributes effect — responds to DA1/DA2/DA3 queries so
+/// terminal applications can identify the terminal's capabilities.
+/// We report VT220-level conformance with a modest feature set.
+impl effect::OnDeviceAttributes for Handler {
+    fn on_device_attributes(&mut self, _terminal: &Terminal<'_>) -> Option<effect::DeviceAttributes> {
+        Some(effect::DeviceAttributes {
+            // DA1: VT220-level with a few common features.
+            primary: effect::PrimaryDeviceAttributes::new(
+                effect::ConformanceLevel::VT220,
+                &[
+                    effect::DeviceAttributeFeature::COLUMNS_132,
+                    effect::DeviceAttributeFeature::SELECTIVE_ERASE,
+                    effect::DeviceAttributeFeature::ANSI_COLOR,
+                ],
+            ),
+            // DA2: VT220-type, version 1, no ROM cartridge.
+            secondary: effect::SecondaryDeviceAttributes {
+                device_type: effect::DeviceType::VT220,
+                firmware_version: 1,
+                rom_cartridge: 0,
+            },
+            // DA3: default unit id (0).
+            tertiary: effect::TertiaryDeviceAttributes::default(),
+        })
+    }
+}
+
+/// xtversion effect — responds to CSI > q with our application name.
+impl effect::OnXtversion for Handler {
+    fn on_xtversion<'t>(&mut self, _terminal: &'t Terminal<'_>) -> Option<&'t [u8]> {
+        Some(b"ghostling-rs")
+    }
+}
+
+/// color_scheme effect — responds to CSI ? 996 n.
+/// We don't have any API to query the OS color scheme, so we return
+/// `None` to silently ignore the query rather than guessing.
+impl effect::OnColorScheme for Handler {
+    fn on_color_scheme<'t>(&mut self, _terminal: &'t Terminal<'_>) -> Option<ColorScheme> {
+        None
+    }
+}
+
 #[macroquad::main(macroquad_conf)]
 async fn main() -> Result<()> {
     // Initialize tracing with default log level set to info.
@@ -87,14 +156,6 @@ async fn main() -> Result<()> {
     // and measured cell metrics.
     let mut dims = Dimensions::new(Some(&font));
     let (cols, rows) = dims.grid_size();
-
-    // Track window size so we only recalculate the grid on actual changes.
-    //
-    // This is kept in a Cell<T> since the terminal effect handler
-    // has to keep a reference to it, and we also want to modify it in the
-    // main loop below. Don't worry, this is completely safe and is just
-    // here to make the Rust compiler happy.
-    let grid_size = Cell::new((cols, rows));
 
     // Spawn a child shell connected to a pseudo-terminal.
     let (pty, mut child) = Pty::new(dims)?;
@@ -135,55 +196,12 @@ async fn main() -> Result<()> {
     // sequences are silently dropped and those programs may hang or
     // fall back to degraded behavior.
     terminal
-        // write_pty effect — the terminal calls this whenever a VT sequence
-        // requires a response back to the application (device status reports,
-        // mode queries, device attributes, etc.).  Without this, programs like
-        // vim and tmux that probe terminal capabilities would hang.
-        .on_pty_write(|_t, data| pty.write(data))?
-        // size effect — responds to XTWINOPS size queries (CSI 14/16/18 t)
-        // so programs can discover the terminal geometry in cells and pixels.
-        .on_size({
-            let gs = &grid_size;
-            move |_term| {
-                let (columns, rows) = gs.get();
-                Some(SizeReportSize {
-                    rows,
-                    columns,
-                    cell_width: dims.cell_width as u32,
-                    cell_height: dims.cell_height as u32,
-                })
-            }
-        })?
-        // device_attributes effect — responds to DA1/DA2/DA3 queries so
-        // terminal applications can identify the terminal's capabilities.
-        // We report VT220-level conformance with a modest feature set.
-        .on_device_attributes(|_term| {
-            Some(DeviceAttributes {
-                // DA1: VT220-level with a few common features.
-                primary: PrimaryDeviceAttributes::new(
-                    ConformanceLevel::VT220,
-                    &[
-                        DeviceAttributeFeature::COLUMNS_132,
-                        DeviceAttributeFeature::SELECTIVE_ERASE,
-                        DeviceAttributeFeature::ANSI_COLOR,
-                    ],
-                ),
-                // DA2: VT220-type, version 1, no ROM cartridge.
-                secondary: SecondaryDeviceAttributes {
-                    device_type: DeviceType::VT220,
-                    firmware_version: 1,
-                    rom_cartridge: 0,
-                },
-                // DA3: default unit id (0).
-                tertiary: TertiaryDeviceAttributes::default(),
-            })
-        })?
-        // xtversion effect — responds to CSI > q with our application name.
-        .on_xtversion(|_term| Some("ghostling-rs"))?
-        // color_scheme effect — responds to CSI ? 996 n.
-        // We don't have any API to query the OS color scheme, so we return
-        // false to silently ignore the query rather than guessing.
-        .on_color_scheme(|_term| None)?;
+        .register_effects(Handler { cols, rows, dims, pty })?
+        .with_on_pty_write()?
+        .with_on_size()?
+        .with_on_device_attributes()?
+        .with_on_xtversion()?
+        .with_on_color_scheme()?;
 
     // Create the objects used in rendering the terminal, including the
     // render state and various reusable iterators.
@@ -224,9 +242,11 @@ async fn main() -> Result<()> {
         // can send SIGWINCH to its foreground process group).
         if dims.update() {
             let (cols, rows) = dims.grid_size();
-            grid_size.set((cols, rows));
+            let handler = terminal.effect_handler_mut::<Handler>()?;
+            handler.cols = cols;
+            handler.rows = rows;
+            handler.pty.resize(dims);
             terminal.resize(cols, rows, dims.cell_width as u32, dims.cell_height as u32)?;
-            pty.resize(dims);
         }
 
         // Do different things based on whether the child process
@@ -245,11 +265,13 @@ async fn main() -> Result<()> {
 
                 // Write the composed response back to the PTY,
                 // and clear it in preparation of the next frame.
-                pty.write(&input.response);
+                let handler = terminal.effect_handler_mut::<Handler>()?;
+                handler.pty.write(&input.response);
                 input.response.clear();
 
-                match pty.read(&mut terminal) {
-                    Ok(()) => {}
+                let mut buf = [0u8; 4096];
+                match handler.pty.read(&mut buf) {
+                    Ok(len) => terminal.vt_write(&buf[..len]),
                     Err(PtyError::EndOfStream) => {
                         // EOF — the child's side of the pty is closed.
                         child = Child::Exited(pid);
@@ -373,7 +395,7 @@ impl<'alloc> Renderer<'alloc> {
     /// font_size is the logical font size (before DPI scaling).
     fn render_terminal(
         &mut self,
-        terminal: &Terminal<'alloc, '_>,
+        terminal: &Terminal<'alloc>,
         dims: Dimensions,
         font: Option<&Font>,
     ) -> Result<()> {
@@ -833,7 +855,7 @@ impl<'alloc> Input<'alloc> {
     /// to the pty.  The encoder respects terminal modes (cursor key
     /// application mode, Kitty keyboard protocol, etc.) so we don't need
     /// to maintain our own escape-sequence tables.
-    fn handle_keyboard_input(&mut self, terminal: &Terminal<'alloc, '_>) -> Result<()> {
+    fn handle_keyboard_input(&mut self, terminal: &Terminal<'alloc>) -> Result<()> {
         // Drain printable characters from macroquad's input queue.  We collect
         // them into a single UTF-8 buffer so the encoder can attach text
         // to the key event.
@@ -918,7 +940,7 @@ impl<'alloc> Input<'alloc> {
     /// based on what the terminal application has requested.
     fn handle_mouse_input(
         &mut self,
-        terminal: &mut Terminal<'alloc, '_>,
+        terminal: &mut Terminal<'alloc>,
         dims: Dimensions,
     ) -> Result<()> {
         // Track whether any button is currently held — the encoder uses
@@ -1068,7 +1090,7 @@ impl<'alloc> Input<'alloc> {
     /// tracking get normal events, but Shift provides the common terminal-emulator
     /// escape hatch for selecting text anyway.
     fn selection_allowed_with_mods(
-        terminal: &Terminal<'alloc, '_>,
+        terminal: &Terminal<'alloc>,
         mods: key::Mods,
     ) -> Result<bool> {
         let mouse_tracking = terminal.is_mouse_tracking()?;
@@ -1082,7 +1104,7 @@ impl<'alloc> Input<'alloc> {
     /// Convert the current mouse position to a clamped viewport grid point.
     /// Clamping lets users start or continue a drag slightly outside the padded
     /// terminal area while still extending to the nearest visible cell.
-    fn mouse_viewport_point(terminal: &Terminal<'alloc, '_>, dims: Dimensions) -> Result<Point> {
+    fn mouse_viewport_point(terminal: &Terminal<'alloc>, dims: Dimensions) -> Result<Point> {
         let cols = terminal.cols()?;
         let rows = terminal.rows()?;
         let (xpos, ypos) = mouse_position();
@@ -1105,7 +1127,7 @@ impl<'alloc> Input<'alloc> {
     // Blank cells are included because terminal selections can start in empty grid
     // space; the check is about selectable geometry, not text contents.
     fn mouse_over_selectable_text(
-        terminal: &Terminal<'alloc, '_>,
+        terminal: &Terminal<'alloc>,
         dims: Dimensions,
     ) -> Result<bool> {
         // Test the real terminal grid bounds rather than using the window dimensions:
@@ -1429,7 +1451,6 @@ mod pty {
         process::Command,
     };
 
-    use libghostty_vt::Terminal;
     use nix::{
         errno::Errno,
         fcntl::{self, OFlag},
@@ -1503,18 +1524,17 @@ mod pty {
         ///
         /// Because the fd is non-blocking, read() returns an error with
         /// EAGAIN once the kernel buffer is empty, at which point we stop.
-        pub fn read(&self, term: &mut Terminal) -> Result<(), PtyError> {
-            let mut buf = [0u8; 4096];
+        pub fn read(&self, buf: &mut [u8]) -> Result<usize, PtyError> {
             loop {
-                match nix::unistd::read(&self.0, &mut buf) {
+                match nix::unistd::read(&self.0, buf) {
                     // EOF -- the child closed its side of the pty.
                     // On Linux, the slave closing often produces EIO rather
                     // than a clean EOF (read returning 0). Treat it the same.
                     Ok(0) | Err(Errno::EIO) => return Err(PtyError::EndOfStream),
-                    Ok(len) => term.vt_write(&buf[..len]),
+                    Ok(len) => return Ok(len),
 
                     // Distinguish "no data right now" from real errors.
-                    Err(Errno::EAGAIN) => return Ok(()),
+                    Err(Errno::EAGAIN) => return Ok(0),
                     Err(Errno::EINTR) => {}, // retry the read
                     Err(err) => return Err(PtyError::OtherError(err)),
                 }

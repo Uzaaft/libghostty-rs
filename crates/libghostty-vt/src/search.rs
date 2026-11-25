@@ -835,12 +835,26 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn search_can_be_dropped_from_an_effect_callback() {
         let alloc = crate::alloc::testing::Guard::allocator();
-        let slot = std::cell::RefCell::new(None);
+
+        struct Handler {
+            search: Option<Search<'static>>,
+        }
+        impl crate::effect::OnBell for Handler {
+            fn on_bell(&mut self, _terminal: &Terminal<'_>) {
+                drop(self.search.take());
+            }
+        }
+
         let mut terminal = Terminal::new_in(&alloc, 10, 3).unwrap();
         terminal
-            .on_bell(|_| drop(slot.borrow_mut().take()))
+            .register_effects(Handler { search: None })
+            .unwrap()
+            .with_on_bell()
             .unwrap();
-        *slot.borrow_mut() = Some(history_search(&mut terminal));
+
+        let search = history_search(&mut terminal);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        handler.search = Some(search);
 
         // Release the search's tracked pins in the middle of a write that
         // keeps growing the scrollback.
@@ -849,7 +863,9 @@ mod tests {
             input.extend_from_slice(b"hit\r\n");
         }
         terminal.vt_write(&input);
-        assert!(slot.borrow().is_none());
+
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert!(handler.search.is_none());
 
         // The terminal's remaining tracked state is intact.
         let mut search = Search::new(&terminal).unwrap();

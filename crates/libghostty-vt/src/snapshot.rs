@@ -959,7 +959,7 @@ mod tests {
     /// A snapshot without Kitty images has only pages after READY, and with a
     /// single (primary) screen they form one HISTORY sequence, so `remaining`
     /// counts down by one per page and reaches zero on the last.
-    fn decode_pages(incremental: &mut IncrementalDecoder<'_, '_, '_>) -> usize {
+    fn decode_pages(incremental: &mut IncrementalDecoder<'_, '_>) -> usize {
         let mut rows = 0;
         let mut last_remaining = None;
         while let Some(progress) = incremental.next().unwrap() {

@@ -11,9 +11,10 @@
 //! result back, you can skip this module.
 //!
 //! # Example
+//!
 //! ```rust
 //! use libghostty_vt::{effect, Terminal};
-//! # let mut terminal = Terminal::new(80, 24).unwrap();
+//! # use libghostty_vt::error::Error;
 //!
 //! struct Handler;
 //! impl effect::OnBell for Handler {
@@ -22,9 +23,12 @@
 //!     }
 //! }
 //!
+//! # fn main() -> Result<(), Error> {
+//! # let mut terminal = Terminal::new(80, 24)?;
 //! terminal
-//!     .register_effects(Handler)?;
-//!     .on_bell()?;
+//!     .register_effects(Handler)?
+//!     .with_on_bell()?;
+//! # Ok(()) }
 //! ```
 //!
 //! See the [Effects] guide for how to register them, the rules for callbacks,
@@ -402,24 +406,24 @@ effect! {
     /// # use libghostty_vt::{error::Error, Terminal};
     /// use libghostty_vt::effect::*;
     ///
-    /// # fn main() -> Result<(), Error> {
-    /// # let mut terminal = Terminal::new(80, 24)?;
-    /// terminal.on_device_attributes(|_term| {
-    ///     const FEATURES: [DeviceAttributeFeature; 2] = [
-    ///         DeviceAttributeFeature::ANSI_COLOR,
-    ///         DeviceAttributeFeature::CLIPBOARD,
-    ///     ];
-    ///     Some(DeviceAttributes {
-    ///         primary: PrimaryDeviceAttributes::new(ConformanceLevel::VT220, &FEATURES),
-    ///         secondary: SecondaryDeviceAttributes {
-    ///             device_type: DeviceType::VT220,
-    ///             firmware_version: 0,
-    ///             rom_cartridge: 0,
-    ///         },
-    ///         tertiary: TertiaryDeviceAttributes::default(),
-    ///     })
-    /// })?;
-    /// # Ok(()) }
+    /// struct Handler;
+    /// impl OnDeviceAttributes for Handler {
+    ///     fn on_device_attributes(&mut self, _terminal: &Terminal<'_>) -> Option<DeviceAttributes> {
+    ///         const FEATURES: [DeviceAttributeFeature; 2] = [
+    ///             DeviceAttributeFeature::ANSI_COLOR,
+    ///             DeviceAttributeFeature::CLIPBOARD,
+    ///         ];
+    ///         Some(DeviceAttributes {
+    ///             primary: PrimaryDeviceAttributes::new(ConformanceLevel::VT220, &FEATURES),
+    ///             secondary: SecondaryDeviceAttributes {
+    ///                 device_type: DeviceType::VT220,
+    ///                 firmware_version: 0,
+    ///                 rom_cartridge: 0,
+    ///             },
+    ///             tertiary: TertiaryDeviceAttributes::default(),
+    ///         })
+    ///     }
+    /// }
     /// ```
     ///
     /// [`DeviceAttributes`] is frozen. If a later version of libghostty-vt needs
@@ -599,32 +603,37 @@ effect! {
     /// ```rust
     /// use std::cell::RefCell;
     /// use std::collections::HashMap;
-    /// use libghostty_vt::{Terminal, effect::ProgramStatusState};
+    /// use libghostty_vt::{Terminal, effect};
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// // One record per id. This one keeps only the state and message.
-    /// let records = RefCell::new(HashMap::<Vec<u8>, (ProgramStatusState, Vec<u8>)>::new());
-    /// # let pty = RefCell::new(Vec::new());
+    /// #[derive(Default)]
+    /// struct Handler {
+    ///     /// One record per id. This one keeps only the state and message.
+    ///     records: HashMap<Vec<u8>, (effect::ProgramStatusState, Vec<u8>)>,
+    /// #   pty: Vec<u8>,
+    /// }
     ///
-    /// let mut terminal = Terminal::new(80, 24)?;
-    /// // Set a pty write callback too, so programs that check for support
-    /// // get a reply.
-    /// terminal
-    ///     .on_pty_write(|_term, bytes| {
+    /// impl effect::OnPtyWrite for Handler {
+    ///     fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
     ///         // Write `bytes` back to the pty.
-    /// #       pty.borrow_mut().extend_from_slice(bytes);
-    ///     })?
-    ///     .on_program_status(|_term, report| {
+    /// #       self.pty.extend_from_slice(data);
+    ///     }
+    /// }
+    ///
+    /// impl effect::OnProgramStatus for Handler {
+    ///     fn on_program_status<'t>(
+    ///         &mut self,
+    ///         _terminal: &'t Terminal<'_>,
+    ///         report: effect::ProgramStatus,
+    ///     ) {
     ///         // A panic in the callback aborts the process, so ignore a
     ///         // state these bindings don't know instead of unwrapping.
     ///         let Ok(state) = report.state() else { return };
-    ///         let mut records = records.borrow_mut();
     ///
-    ///         if state == ProgramStatusState::Clear {
+    ///         if state == effect::ProgramStatusState::Clear {
     ///             // Remove this record and every record beneath it. An empty
     ///             // id removes every record.
     ///             let id = report.id();
-    ///             records.retain(|key, _| {
+    ///             self.records.retain(|key, _| {
     ///                 let beneath = key
     ///                     .strip_prefix(id)
     ///                     .is_some_and(|rest| rest.is_empty() || rest.starts_with(b"/"));
@@ -635,40 +644,61 @@ effect! {
     ///
     ///         // Replace the whole record. The strings are only valid during
     ///         // this call, so copy them.
-    ///         records.insert(report.id().to_vec(), (state, report.message().to_vec()));
-    ///     })?;
-    /// # let ids = || {
-    /// #     let mut ids: Vec<_> = records.borrow().keys().cloned().collect();
+    ///         self.records.insert(
+    ///             report.id().to_vec(),
+    ///             (state, report.message().to_vec())
+    ///         );
+    ///     }
+    /// }
+    ///
+    /// # fn ids(terminal: &Terminal<'_>) -> Vec<Vec<u8>> {
+    /// #     let handler = terminal.effect_handler::<Handler>().unwrap();
+    /// #     let mut ids: Vec<_> = handler.records.keys().cloned().collect();
     /// #     ids.sort();
     /// #     ids
     /// # };
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut terminal = Terminal::new(80, 24)?;
+    ///
+    /// terminal
+    ///     .register_effects(Handler::default())?
+    ///     // Set a pty write callback too, so programs that check for support
+    ///     // get a reply.
+    ///     .with_on_pty_write()?
+    ///     .with_on_program_status()?;
+    ///
     ///
     /// // A root record and a few beneath it. "QnVpbGRpbmc=" is "Building".
     /// terminal.vt_write(b"\x1b]7501;state=working:app=cargo:msg=QnVpbGRpbmc=\x1b\\");
     /// terminal.vt_write(b"\x1b]7501;state=working:id=build\x1b\\");
     /// terminal.vt_write(b"\x1b]7501;state=blocked:kind=question:id=build/test\x1b\\");
     /// terminal.vt_write(b"\x1b]7501;state=done:id=buildx\x1b\\");
-    /// # assert_eq!(ids(), [&b""[..], b"build", b"build/test", b"buildx"]);
+    /// # assert_eq!(ids(&terminal), [&b""[..], b"build", b"build/test", b"buildx"]);
+    /// # let handler = terminal.effect_handler::<Handler>().unwrap();
     /// # assert_eq!(
-    /// #     records.borrow()[&b""[..]],
-    /// #     (ProgramStatusState::Working, b"Building".to_vec()),
+    /// #     handler.records[&b""[..]],
+    /// #     (effect::ProgramStatusState::Working, b"Building".to_vec()),
     /// # );
     ///
     /// // A report replaces its record completely, so the message is gone.
     /// terminal.vt_write(b"\x1b]7501;state=done\x1b\\");
-    /// # assert_eq!(records.borrow()[&b""[..]], (ProgramStatusState::Done, Vec::new()));
+    /// # let handler = terminal.effect_handler::<Handler>().unwrap();
+    /// # assert_eq!(handler.records[&b""[..]], (effect::ProgramStatusState::Done, Vec::new()));
     ///
     /// // Clearing "build" also removes "build/test", but not "buildx".
     /// terminal.vt_write(b"\x1b]7501;state=clear:id=build\x1b\\");
-    /// # assert_eq!(ids(), [&b""[..], b"buildx"]);
+    /// # assert_eq!(ids(&terminal), [&b""[..], b"buildx"]);
     ///
     /// // A program checking for support gets a reply through the pty.
     /// terminal.vt_write(b"\x1b]7501;?\x1b\\");
-    /// # assert!(pty.borrow().starts_with(b"\x1b]7501;?:states="));
+    /// # let handler = terminal.effect_handler::<Handler>().unwrap();
+    /// # assert!(handler.pty.starts_with(b"\x1b]7501;?:states="));
     ///
     /// // A full reset removes every record.
     /// terminal.vt_write(b"\x1bc");
-    /// # assert!(records.borrow().is_empty());
+    /// # let handler = terminal.effect_handler::<Handler>().unwrap();
+    /// # assert!(handler.records.is_empty());
     /// # Ok(())
     /// # }
     /// ```
@@ -781,26 +811,45 @@ effect! {
     /// Without this callback, resize requests are ignored.
     ///
     /// ```rust
-    /// use std::{cell::Cell, num::NonZeroU16};
-    /// use libghostty_vt::{Terminal, effect::ResizeWindow};
+    /// use std::num::NonZeroU16;
+    /// use libghostty_vt::{Terminal, effect};
+    ///
+    /// #[derive(Default)]
+    /// struct Handler {
+    ///     requested: Option<(Option<NonZeroU16>, Option<NonZeroU16>)>,
+    /// }
+    ///
+    /// impl effect::OnResizeWindow for Handler {
+    ///     fn on_resize_window(
+    ///         &mut self,
+    ///         _terminal: &Terminal<'_>,
+    ///         request: effect::ResizeWindow
+    ///     ) {
+    ///         match request {
+    ///             effect::ResizeWindow::Grid { rows, columns } => {
+    ///                 self.requested = Some((rows, columns))
+    ///             },
+    ///             // Ignore kinds of requests you don't handle.
+    ///             _ => {}
+    ///         }
+    ///     }
+    /// }
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let requested = Cell::new(None);
-    ///
     /// let mut terminal = Terminal::new(80, 24)?;
-    /// terminal.on_resize_window(|_term, request| match request {
-    ///     ResizeWindow::Grid { rows, columns } => requested.set(Some((rows, columns))),
-    ///     // Ignore kinds of requests you don't handle.
-    ///     _ => {}
-    /// })?;
     ///
+    /// terminal
+    ///     .register_effects(Handler::default())?
+    ///     .with_on_resize_window()?;
     /// terminal.vt_write(b"\x1b[8;30;100t");
-    /// # assert_eq!(requested.get(), Some((NonZeroU16::new(30), NonZeroU16::new(100))));
+    /// # let effects = terminal.effect_handler::<Handler>()?;
+    /// # assert_eq!(effects.requested, Some((NonZeroU16::new(30), NonZeroU16::new(100))));
     ///
     /// // The terminal itself keeps its size. Apply the request yourself
     /// // (`None` means keep the current size of that dimension).
     /// # assert_eq!((terminal.cols()?, terminal.rows()?), (80, 24));
-    /// if let Some((rows, columns)) = requested.take() {
+    /// let effects = terminal.effect_handler::<Handler>()?;
+    /// if let Some((rows, columns)) = effects.requested {
     ///     let rows = rows.map_or(terminal.rows()?, NonZeroU16::get);
     ///     let cols = columns.map_or(terminal.cols()?, NonZeroU16::get);
     ///     terminal.resize(cols, rows, 8, 16)?;
@@ -2126,35 +2175,56 @@ impl From<TertiaryDeviceAttributes> for ffi::DeviceAttributesTertiary {
     }
 }
 
+/// Mocking a PTY by just collecting all the bytes sent to the PTY.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct MockPty {
+    pub pty: Vec<u8>,
+}
+
+#[cfg(test)]
+impl crate::effect::OnPtyWrite for MockPty {
+    fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+        self.pty.extend_from_slice(data);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RenderState, terminal::Boundary};
-    use std::{
-        cell::{Cell, RefCell},
-        mem::ManuallyDrop,
-    };
+    use crate::terminal::Boundary;
+    use std::mem::ManuallyDrop;
+
+    struct CountingHandler {
+        callback_count: usize,
+    }
+
+    impl OnDeviceAttributes for CountingHandler {
+        fn on_device_attributes(&mut self, _terminal: &Terminal<'_>) -> Option<DeviceAttributes> {
+            self.callback_count += 1;
+            Some(DeviceAttributes {
+                primary: PrimaryDeviceAttributes::new(
+                    ConformanceLevel::VT220,
+                    &[DeviceAttributeFeature::ANSI_COLOR],
+                ),
+                secondary: SecondaryDeviceAttributes {
+                    device_type: DeviceType::VT220,
+                    firmware_version: 1,
+                    rom_cartridge: 0,
+                },
+                tertiary: TertiaryDeviceAttributes { unit_id: 0 },
+            })
+        }
+    }
 
     #[inline(never)]
-    fn build_terminal(callback_count: &RefCell<usize>) -> Terminal<'static, '_> {
+    fn build_terminal() -> Terminal<'static> {
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
-            .on_device_attributes(move |_term| {
-                *callback_count.borrow_mut() += 1;
-                Some(DeviceAttributes {
-                    primary: PrimaryDeviceAttributes::new(
-                        ConformanceLevel::VT220,
-                        &[DeviceAttributeFeature::ANSI_COLOR],
-                    ),
-                    secondary: SecondaryDeviceAttributes {
-                        device_type: DeviceType::VT220,
-                        firmware_version: 1,
-                        rom_cartridge: 0,
-                    },
-                    tertiary: TertiaryDeviceAttributes { unit_id: 0 },
-                })
-            })
+            .register_effects(CountingHandler { callback_count: 0 })
+            .expect("callback should register")
+            .with_on_device_attributes()
             .expect("callback should register");
 
         terminal
@@ -2201,17 +2271,17 @@ mod tests {
     }
 
     /// Explicitly relocate the Terminal into distinct storage, then verify the
-    /// callback still fires through the stable `VTable` userdata pointer.
+    /// callback still fires through the stable effect handler pointer.
     #[test]
     fn callbacks_survive_explicit_relocation() {
-        let callback_count = RefCell::new(0usize);
-        let terminal = build_terminal(&callback_count);
+        let terminal = build_terminal();
         let (mut terminal, addr_before, addr_after) = relocate_into_new_box(terminal);
         assert_ne!(addr_before, addr_after);
 
         // Primary DA request (CSI c) should invoke on_device_attributes.
         terminal.vt_write(b"\x1b[c");
-        assert_eq!(*callback_count.borrow(), 1);
+        let handler = terminal.effect_handler::<CountingHandler>().unwrap();
+        assert_eq!(handler.callback_count, 1);
     }
 
     /// What a clipboard read callback observed about its request.
@@ -2231,19 +2301,30 @@ mod tests {
     ///
     /// Assertions happen outside the callback: a panic inside it would
     /// abort the whole test binary instead of failing the test.
-    fn clipboard_read(
-        input: &[u8],
-        answer: impl Fn(ClipboardRead<'_>),
-    ) -> (Vec<SeenRead>, Vec<u8>) {
-        let seen = RefCell::new(Vec::new());
-        let output = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
-        terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
-        terminal
-            .on_clipboard_read(|_term, request| {
-                seen.borrow_mut().push(SeenRead {
+    fn clipboard_read<F>(input: &[u8], answer: F) -> (Vec<SeenRead>, Vec<u8>)
+    where
+        F: Fn(ClipboardRead<'_>) + 'static,
+    {
+        struct Handler<F: 'static> {
+            answer: F,
+            seen: Vec<SeenRead>,
+            output: Vec<u8>,
+        }
+        impl<F> OnPtyWrite for Handler<F> {
+            fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+                self.output.extend_from_slice(data);
+            }
+        }
+        impl<F> OnClipboardRead for Handler<F>
+        where
+            F: Fn(ClipboardRead<'_>),
+        {
+            fn on_clipboard_read<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                request: ClipboardRead<'t>,
+            ) {
+                self.seen.push(SeenRead {
                     location: Some(request.location()),
                     mimes: request.mimes().map(<[u8]>::to_vec).collect(),
                     list: request.list(),
@@ -2251,12 +2332,28 @@ mod tests {
                     granted: request.granted(),
                     can_remember: request.can_remember(),
                 });
-                answer(request);
+                (self.answer)(request);
+            }
+        }
+
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .register_effects(Handler {
+                answer,
+                seen: vec![],
+                output: vec![],
             })
+            .expect("callback should register")
+            .with_on_pty_write()
+            .expect("callback should register")
+            .with_on_clipboard_read()
             .expect("callback should register");
         terminal.vt_write(input);
-        drop(terminal);
-        (seen.into_inner(), output.into_inner())
+
+        let handler = terminal.effect_handler_mut::<Handler<F>>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
+        let output = std::mem::take(&mut handler.output);
+        (seen, output)
     }
 
     #[test]
@@ -2404,7 +2501,7 @@ mod tests {
         ] {
             let (_, output) = clipboard_read(
                 b"\x1b]5522;type=read:id=x;dGV4dC9wbGFpbg==\x1b\\",
-                |request| request.reply(Err(error)).finish(),
+                move |request| request.reply(Err(error)).finish(),
             );
             let expected = format!("\x1b]5522;type=read:status={status}:id=x\x1b\\");
             assert_eq!(output, expected.as_bytes(), "{error:?}");
@@ -2444,21 +2541,35 @@ mod tests {
     // ASCII never reaches it.
     #[test]
     fn clipboard_write_decodes_base64() {
-        let written = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 3).unwrap();
-        terminal
-            .on_clipboard_write(|_, request| {
+        struct Handler {
+            written: Vec<Vec<u8>>,
+        }
+
+        impl OnClipboardWrite for Handler {
+            fn on_clipboard_write<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                write: ClipboardWrite<'t>,
+            ) {
                 // Record rather than assert here: a panic in a callback
                 // aborts the whole test binary.
-                for content in request.contents() {
-                    written.borrow_mut().push(content.data.to_vec());
+                for content in write.contents() {
+                    self.written.push(content.data.to_vec());
                 }
-                request.reply(Ok(())).finish();
-            })
+                write.reply(Ok(())).finish();
+            }
+        }
+
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .register_effects(Handler { written: vec![] })
+            .unwrap()
+            .with_on_clipboard_write()
             .unwrap();
 
         terminal.vt_write(b"\x1b]52;c;//4=\x1b\\");
-        assert_eq!(*written.borrow(), [vec![0xff, 0xfe]]);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.written, [vec![0xff, 0xfe]]);
     }
 
     #[test]
@@ -2513,24 +2624,44 @@ mod tests {
             "\x1b]5522;type=wdata\x1b\\",
         );
         let run = |limit| {
-            let written = RefCell::new(Vec::new());
-            let output = RefCell::new(Vec::new());
+            #[derive(Default)]
+            struct Handler {
+                written: Vec<Vec<u8>>,
+                output: Vec<u8>,
+            }
+            impl OnPtyWrite for Handler {
+                fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+                    self.output.extend_from_slice(data);
+                }
+            }
+            impl OnClipboardWrite for Handler {
+                fn on_clipboard_write<'t>(
+                    &mut self,
+                    _terminal: &'t Terminal<'_>,
+                    write: ClipboardWrite<'t>,
+                ) {
+                    self.written
+                        .extend(write.contents().map(|c| c.data.to_vec()));
+                    write.reply(Ok(())).finish();
+                }
+            }
+
             let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
             terminal
-                .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+                .register_effects(Handler::default())
                 .unwrap()
-                .on_clipboard_write(|_term, request| {
-                    written
-                        .borrow_mut()
-                        .extend(request.contents().map(|c| c.data.to_vec()));
-                    request.reply(Ok(())).finish();
-                })
+                .with_on_pty_write()
                 .unwrap()
-                .set_clipboard_write_max_bytes(Some(limit))
+                .with_on_clipboard_write()
                 .unwrap();
+            terminal.set_clipboard_write_max_bytes(Some(limit)).unwrap();
             terminal.vt_write(write.as_bytes());
+
+            let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+            let output = std::mem::take(&mut handler.output);
+            let written = std::mem::take(&mut handler.written);
             drop(terminal);
-            (output.into_inner(), written.into_inner())
+            (output, written)
         };
 
         // Exceeding the limit fails the transaction and never reaches the callback.
@@ -2547,23 +2678,36 @@ mod tests {
     fn render_hold_reports_start_and_end_in_pairs() {
         // Mirrors upstream's "set render_hold callback" test in
         // src/terminal/c/terminal.zig.
-        let events = RefCell::new(Vec::new());
-        let take = || std::mem::take(&mut *events.borrow_mut());
+
+        #[derive(Default)]
+        struct Handler {
+            events: Vec<bool>,
+        }
+        impl OnRenderHold for Handler {
+            fn on_render_hold(&mut self, _terminal: &Terminal<'_>, held: bool) {
+                self.events.push(held);
+            }
+        }
+
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_render_hold(|_term, held| events.borrow_mut().push(held))
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_render_hold()
             .expect("callback should register");
 
         // A set during a hold and a reset without a hold are ignored.
         terminal.vt_write(b"\x1b[?2026h\x1b[?2026hA\x1b[?2026l\x1b[?2026l");
-        assert_eq!(take(), [true, false]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), [true, false]);
 
         // Neither a reset nor a resize reports anything without a hold.
         terminal.reset();
         terminal
             .resize(100, 30, 8, 16)
             .expect("resize should succeed");
-        assert_eq!(take(), []);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), []);
 
         // Reset and resize end an active hold, and so does a resize that
         // keeps the dimensions: upstream turns synchronized output off
@@ -2579,7 +2723,11 @@ mod tests {
         terminal
             .resize(80, 24, 8, 16)
             .expect("resize should succeed");
-        assert_eq!(take(), [true, false, true, false, true, false]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(
+            std::mem::take(&mut handler.events),
+            [true, false, true, false, true, false]
+        );
         assert!(!terminal.mode(Mode::SYNC_OUTPUT).unwrap());
 
         // A resize that fails leaves the mode, and so the hold, in place.
@@ -2587,7 +2735,8 @@ mod tests {
         assert!(terminal.resize(0, 24, 8, 16).is_err());
         assert!(terminal.mode(Mode::SYNC_OUTPUT).unwrap());
         terminal.vt_write(b"\x1b[?2026l");
-        assert_eq!(take(), [true, false]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), [true, false]);
 
         // Changing the mode ourselves, e.g. when a hold times out, is never
         // reported in either direction. The hold is simply over, so the
@@ -2602,10 +2751,12 @@ mod tests {
             .expect("mode should be settable")
             .set_mode(Mode::SYNC_OUTPUT, false)
             .expect("mode should be settable");
-        assert_eq!(take(), [true]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), [true]);
         // ...and the program can start a new hold afterwards.
         terminal.vt_write(b"\x1b[?2026h");
-        assert_eq!(take(), [true]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), [true]);
     }
 
     /// Read the text of the first row of a render state snapshot.
@@ -2625,72 +2776,22 @@ mod tests {
     }
 
     #[test]
-    fn render_hold_captures_frame_before_hold() {
-        // A renderer that refreshes its render state whenever a hold starts
-        // or ends, recording the first row it captured each time. Failures
-        // are recorded as `None` instead of panicking, since a panic here
-        // would abort the whole test binary.
-        let render_state =
-            RefCell::new(RenderState::new().expect("render state should initialize"));
-        let frames = RefCell::new(Vec::new());
-        let take = || std::mem::take(&mut *frames.borrow_mut());
-        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
-        terminal
-            .on_render_hold(|term, held| {
-                let text = render_state.try_borrow_mut().ok().and_then(|mut state| {
-                    let snapshot = state.update(term).ok()?;
-                    first_row_text(&snapshot).ok()
-                });
-                frames.borrow_mut().push((held, text));
-            })
-            .expect("callback should register");
-
-        // The hold starts before `B` is processed, even though it's in the
-        // same write, so the captured frame only has `A`.
-        terminal.vt_write(b"A\x1b[?2026hB");
-        assert_eq!(take(), [(true, Some("A".to_owned()))]);
-        // The terminal itself has moved on, though.
-        {
-            let mut state = render_state.borrow_mut();
-            let snapshot = state.update(&terminal).expect("render state should update");
-            assert_eq!(first_row_text(&snapshot).unwrap(), "AB");
-        }
-        terminal.vt_write(b"\x1b[?2026l");
-        assert_eq!(take(), [(false, Some("AB".to_owned()))]);
-
-        // Updating the render state also works when the hold ends from
-        // `resize` and `reset`, which invoke the callback while the outer
-        // call holds `&mut Terminal`.
-        terminal.vt_write(b"\x1b[?2026hC");
-        terminal
-            .resize(100, 30, 8, 16)
-            .expect("resize should succeed");
-        assert_eq!(
-            take(),
-            [
-                (true, Some("AB".to_owned())),
-                (false, Some("ABC".to_owned()))
-            ]
-        );
-        terminal.vt_write(b"\x1b[?2026hD");
-        terminal.reset();
-        assert_eq!(
-            take(),
-            [(true, Some("ABC".to_owned())), (false, Some(String::new()))]
-        );
-    }
-
-    #[test]
     fn unknown_sequences_are_reported() {
         use osc::Terminator::{Bel, St};
 
-        let seen = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_unknown_sequence(|_term, sequence| {
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<(Vec<u8>, bool, Option<osc::Terminator>)>,
+        }
+        impl OnUnknownSequence for Handler {
+            fn on_unknown_sequence<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                sequence: UnknownSequence<'t>,
+            ) {
                 // Record rather than assert: a panic in a callback aborts the
                 // whole test binary.
-                seen.borrow_mut().push(match sequence {
+                self.seen.push(match sequence {
                     UnknownSequence::Apc {
                         content, truncated, ..
                     } => (content.to_vec(), truncated, None),
@@ -2701,7 +2802,14 @@ mod tests {
                         ..
                     } => (content.to_vec(), truncated, Some(terminator)),
                 });
-            })
+            }
+        }
+
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_unknown_sequence()
             .unwrap();
         // Registration alone leaves reporting disabled.
         terminal.vt_write(b"\x1b_unknown\x1b\\");
@@ -2715,9 +2823,12 @@ mod tests {
         // callback for them: OSC 7501 is program status, OSC 2 the title.
         terminal.vt_write(b"\x1b]7501;state=working\x1b\\");
         terminal.vt_write(b"\x1b]2;title\x07");
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
         drop(terminal);
         assert_eq!(
-            seen.into_inner(),
+            seen,
             [
                 (b"unkn".to_vec(), true, None),
                 (b"7400".to_vec(), true, Some(Bel)),
@@ -2731,82 +2842,110 @@ mod tests {
     /// correct value inside the `on_title_changed` callback.
     #[test]
     fn title_changed_callback_returns_correct_title() {
-        // The callback bound on `on_title_changed` is `'cb`, not `'static`,
-        // so the closure can borrow stack locals directly – no Rc needed.
-        let captured_title: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-        let callback_count: Cell<usize> = Cell::new(0);
+        #[derive(Default)]
+        struct Handler {
+            captured_title: Vec<u8>,
+            callback_count: usize,
+        }
+        impl OnTitleChanged for Handler {
+            fn on_title_changed(&mut self, terminal: &Terminal<'_>) {
+                self.callback_count += 1;
+                let title = terminal
+                    .title()
+                    .expect("title() should succeed inside callback");
+                self.captured_title = title.to_owned();
+            }
+        }
 
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
-            .on_title_changed(|term| {
-                callback_count.set(callback_count.get() + 1);
-                let title = term
-                    .title()
-                    .expect("title() should succeed inside callback");
-                *captured_title.borrow_mut() = title.to_owned();
-            })
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_title_changed()
             .expect("callback should register");
 
         // OSC 2 (set title) should invoke on_title_changed.
         terminal.vt_write(b"\x1b]2;Hello Effects\x1b\\");
-        assert_eq!(callback_count.get(), 1);
-        assert_eq!(*captured_title.borrow(), b"Hello Effects");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 1);
+        assert_eq!(handler.captured_title, b"Hello Effects");
 
         // A second title change should fire the callback again.
         terminal.vt_write(b"\x1b]2;Second Title\x1b\\");
-        assert_eq!(callback_count.get(), 2);
-        assert_eq!(*captured_title.borrow(), b"Second Title");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
+        assert_eq!(handler.captured_title, b"Second Title");
     }
 
     /// Send an OSC 7 current-directory sequence, then verify `term.pwd()`
     /// returns the correct value inside the `on_pwd_changed` callback.
     #[test]
     fn pwd_changed_callback_returns_correct_pwd() {
-        let captured_pwd: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-        let callback_count: Cell<usize> = Cell::new(0);
+        #[derive(Default)]
+        struct Handler {
+            captured_pwd: Vec<u8>,
+            callback_count: usize,
+        }
+        impl OnPwdChanged for Handler {
+            fn on_pwd_changed(&mut self, terminal: &Terminal<'_>) {
+                self.callback_count += 1;
+                let pwd = terminal
+                    .pwd()
+                    .expect("pwd() should succeed inside callback");
+                self.captured_pwd = pwd.to_owned();
+            }
+        }
 
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
-            .on_pwd_changed(|term| {
-                callback_count.set(callback_count.get() + 1);
-                let pwd = term.pwd().expect("pwd() should succeed inside callback");
-                *captured_pwd.borrow_mut() = pwd.to_owned();
-            })
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_pwd_changed()
             .expect("callback should register");
 
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/project\x1b\\");
-        assert_eq!(callback_count.get(), 1);
-        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/project");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 1);
+        assert_eq!(handler.captured_pwd, b"file://localhost/tmp/project");
 
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/other\x1b\\");
-        assert_eq!(callback_count.get(), 2);
-        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/other");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
+        assert_eq!(handler.captured_pwd, b"file://localhost/tmp/other");
 
         // libghostty stores the pwd bytes as-is, so non-UTF-8 input must come
         // back verbatim instead of being rejected.
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/\xff\x1b\\");
-        assert_eq!(callback_count.get(), 3);
-        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/\xff");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 3);
+        assert_eq!(handler.captured_pwd, b"file://localhost/tmp/\xff");
     }
 
     /// Only a full reset sent by the program (RIS) fires `on_reset`, and the
     /// terminal has already reset itself by then.
     #[test]
     fn reset_callback_fires_only_on_ris() {
-        let callback_count: Cell<usize> = Cell::new(0);
-        let title_in_callback: RefCell<Option<Vec<u8>>> = RefCell::new(None);
-
+        #[derive(Default)]
+        struct Handler {
+            callback_count: usize,
+            title_in_callback: Option<Vec<u8>>,
+        }
+        impl OnReset for Handler {
+            fn on_reset(&mut self, terminal: &Terminal<'_>) {
+                self.callback_count += 1;
+                // Record rather than assert here: a panic in a callback
+                // aborts the whole test binary.
+                self.title_in_callback = terminal.title().ok().map(<[u8]>::to_owned);
+            }
+        }
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
-            .on_reset(|term| {
-                callback_count.set(callback_count.get() + 1);
-                // Record rather than assert here: a panic in a callback
-                // aborts the whole test binary.
-                *title_in_callback.borrow_mut() = term.title().ok().map(<[u8]>::to_owned);
-            })
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_reset()
             .expect("callback should register");
 
         // Set a title first so we can tell whether RIS already cleared it
@@ -2819,42 +2958,62 @@ mod tests {
         // sibling's option instead.
         terminal.vt_write(b"\x1b]9;4;1;50\x1b\\");
         terminal.vt_write(b"\x1b]7501;state=working:id=build\x1b\\");
-        assert_eq!(callback_count.get(), 0);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 0);
         terminal.vt_write(b"\x1bc");
-        assert_eq!(callback_count.get(), 1);
-        assert_eq!(*title_in_callback.borrow(), Some(Vec::new()));
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 1);
+        assert_eq!(handler.title_in_callback, Some(Vec::new()));
 
         // `vt_write_until` feeds the same stream, so it fires too.
         terminal.vt_write(b"\x1b");
         terminal.vt_write_until(b"c", Boundary::GROUND).unwrap();
-        assert_eq!(callback_count.get(), 2);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
 
         // A soft reset (DECSTR) doesn't count as a full reset.
         terminal.vt_write(b"\x1b[!p");
-        assert_eq!(callback_count.get(), 2);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
 
         // Upstream's `ghostty_terminal_reset` resets the terminal directly
         // and only the stream handling `ESC c` calls the callback.
         terminal.reset();
-        assert_eq!(callback_count.get(), 2);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
     }
 
     /// OSC 9 and OSC 777 carry the program's raw bytes, which libghostty
     /// passes on unvalidated. They used to be exposed as `&str`.
     #[test]
     fn desktop_notifications_are_not_assumed_to_be_utf8() {
-        let seen = RefCell::new(Vec::new());
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<(Vec<u8>, Vec<u8>)>,
+        }
+        impl OnDesktopNotification for Handler {
+            fn on_desktop_notification<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                notif: DesktopNotification<'t>,
+            ) {
+                self.seen
+                    .push((notif.title().to_vec(), notif.body().to_vec()));
+            }
+        }
+
         let mut terminal = Terminal::new(8, 3).unwrap();
         terminal
-            .on_desktop_notification(|_, notification| {
-                seen.borrow_mut()
-                    .push((notification.title().to_vec(), notification.body().to_vec()));
-            })
-            .unwrap();
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_desktop_notification()
+            .expect("callback should register");
         terminal.vt_write(b"\x1b]9;\xff\xfe\x07");
         terminal.vt_write(b"\x1b]777;notify;\xc3\x28;ok\x07");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+
         assert_eq!(
-            *seen.borrow(),
+            handler.seen,
             [
                 (b"".to_vec(), b"\xff\xfe".to_vec()),
                 (b"\xc3\x28".to_vec(), b"ok".to_vec()),
@@ -2900,14 +3059,23 @@ mod tests {
     /// Assertions happen outside the callback: a panic inside it would
     /// abort the whole test binary instead of failing the test.
     fn program_status(input: &[u8]) -> (Vec<SeenStatus>, Vec<u8>) {
-        let seen = RefCell::new(Vec::new());
-        let output = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 3).unwrap();
-        terminal
-            .on_pty_write(|_, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .unwrap()
-            .on_program_status(|_, report| {
-                seen.borrow_mut().push(SeenStatus {
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<SeenStatus>,
+            output: Vec<u8>,
+        }
+        impl OnPtyWrite for Handler {
+            fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+                self.output.extend_from_slice(data);
+            }
+        }
+        impl OnProgramStatus for Handler {
+            fn on_program_status<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                report: ProgramStatus<'t>,
+            ) {
+                self.seen.push(SeenStatus {
                     state: report.state().ok(),
                     kind: report.kind().ok(),
                     progress: report.progress(),
@@ -2916,11 +3084,25 @@ mod tests {
                     title: report.title().to_vec(),
                     message: report.message().to_vec(),
                 });
-            })
-            .unwrap();
+            }
+        }
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_pty_write()
+            .expect("callback should register")
+            .with_on_program_status()
+            .expect("callback should register");
+
         terminal.vt_write(input);
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
+        let output = std::mem::take(&mut handler.output);
+
         drop(terminal);
-        (seen.into_inner(), output.into_inner())
+        (seen, output)
     }
 
     #[test]
@@ -3031,28 +3213,45 @@ mod tests {
 
     #[test]
     fn program_status_is_not_cleared_by_reset() {
+        struct Handler {
+            seen: Vec<(Option<ProgramStatusState>, Vec<u8>)>,
+        }
+        impl OnProgramStatus for Handler {
+            fn on_program_status<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                report: ProgramStatus<'t>,
+            ) {
+                self.seen.push((report.state().ok(), report.id().to_vec()));
+            }
+        }
+
         // Upstream's `ghostty_terminal_reset` only resets the terminal; the
         // clear report comes from the stream handling `ESC c`.
-        let seen = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(8, 3).unwrap();
         terminal
-            .on_program_status(|_, report| {
-                seen.borrow_mut()
-                    .push((report.state().ok(), report.id().to_vec()));
-            })
+            .register_effects(Handler { seen: vec![] })
+            .unwrap()
+            .with_on_program_status()
             .unwrap();
 
         terminal.vt_write(b"\x1b]7501;state=error:id=x\x07");
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
         assert_eq!(
-            seen.take(),
+            std::mem::take(&mut handler.seen),
             [(Some(ProgramStatusState::Error), b"x".to_vec())]
         );
 
         terminal.reset();
-        assert!(seen.borrow().is_empty());
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert!(handler.seen.is_empty());
 
         terminal.vt_write(b"\x1bc");
-        assert_eq!(seen.take(), [(Some(ProgramStatusState::Clear), Vec::new())]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(
+            std::mem::take(&mut handler.seen),
+            [(Some(ProgramStatusState::Clear), Vec::new())]
+        );
     }
 
     #[test]
@@ -3068,14 +3267,17 @@ mod tests {
 
         // Without the callback the query goes unanswered, so the program
         // sees the protocol as unsupported.
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(8, 3).unwrap();
         terminal
-            .on_pty_write(|_, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .register_effects(MockPty::default())
+            .unwrap()
+            .with_on_pty_write()
             .unwrap();
         terminal.vt_write(b"\x1b]7501;?\x1b\\");
+        let handler = terminal.effect_handler_mut::<MockPty>().unwrap();
+        let output = std::mem::take(&mut handler.pty);
         drop(terminal);
-        assert_eq!(output.into_inner(), [] as [u8; 0]);
+        assert_eq!(output, [] as [u8; 0]);
     }
 
     /// What a semantic prompt callback observed about one event, copied out
@@ -3114,22 +3316,36 @@ mod tests {
     /// Assertions happen outside the callback: a panic inside it would
     /// abort the whole test binary instead of failing the test.
     fn semantic_prompt(input: &[u8]) -> Vec<SeenPrompt> {
-        let seen = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 3).unwrap();
-        terminal
-            .on_semantic_prompt(|_, event| {
-                seen.borrow_mut().push(SeenPrompt {
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<SeenPrompt>,
+        }
+        impl OnSemanticPrompt for Handler {
+            fn on_semantic_prompt<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                event: SemanticPrompt<'t>,
+            ) {
+                self.seen.push(SeenPrompt {
                     kind: event.kind().ok(),
                     prompt_kind: event.prompt_kind().ok(),
                     exit_code: event.exit_code(),
                     command: event.command().to_vec(),
                     error: event.error().to_vec(),
                 });
-            })
+            }
+        }
+
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_semantic_prompt()
             .unwrap();
         terminal.vt_write(input);
-        drop(terminal);
-        seen.into_inner()
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        std::mem::take(&mut handler.seen)
     }
 
     #[test]
@@ -3224,15 +3440,28 @@ mod tests {
     /// Assertions happen outside the callback: a panic inside it would
     /// abort the whole test binary instead of failing the test.
     fn resize_window(input: &[u8]) -> (Vec<ResizeWindow>, (u16, u16)) {
-        let seen = RefCell::new(Vec::new());
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<ResizeWindow>,
+        }
+        impl OnResizeWindow for Handler {
+            fn on_resize_window(&mut self, _terminal: &Terminal<'_>, request: ResizeWindow) {
+                self.seen.push(request);
+            }
+        }
+
         let mut terminal = Terminal::new(80, 24).unwrap();
         terminal
-            .on_resize_window(|_, request| seen.borrow_mut().push(request))
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_resize_window()
             .unwrap();
         terminal.vt_write(input);
         let size = (terminal.cols().unwrap(), terminal.rows().unwrap());
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
         drop(terminal);
-        (seen.into_inner(), size)
+        (seen, size)
     }
 
     #[test]

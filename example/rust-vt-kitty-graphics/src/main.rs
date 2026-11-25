@@ -1,5 +1,6 @@
 use libghostty_vt::{
     alloc::{Allocator, Bytes},
+    effect,
     error::Error,
     kitty::graphics::Graphics,
     render::{ImageIterator, ImageProtocol, RenderState, Snapshot},
@@ -148,7 +149,7 @@ fn run_animation(terminal: &mut Terminal<'_>) -> Result<(), Error> {
 fn draw_images<'alloc>(
     snapshot: &Snapshot<'alloc, '_>,
     images: &mut ImageIterator<'alloc>,
-    terminal: &Terminal<'alloc, '_>,
+    terminal: &Terminal<'alloc>,
 ) -> Result<usize, Error> {
     // Fill the iterator from the last update.
     let mut image_it = images.update(snapshot)?;
@@ -274,9 +275,14 @@ fn main() -> Result<(), Error> {
     // Install write_pty to see the protocol response.
     // The Kitty graphics protocol sends an APC response back to the pty
     // when an image is loaded (unless suppressed with q=2).
-    terminal.on_pty_write(|_term, data| {
-        println!("  response ({} bytes): {}", data.len(), data.escape_ascii());
-    })?;
+    struct Handler;
+
+    impl effect::OnPtyWrite for Handler {
+        fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+            println!("  response ({} bytes): {}", data.len(), data.escape_ascii());
+        }
+    }
+    terminal.register_effects(Handler)?.with_on_pty_write()?;
 
     // Move the cursor to row 10 so the images have room to scroll up.
     terminal.vt_write(b"\x1b[10;1H");

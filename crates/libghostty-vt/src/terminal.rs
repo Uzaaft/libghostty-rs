@@ -1339,10 +1339,10 @@ pub struct ScreenMemoryUsage {
 mod tests {
     use super::*;
     use crate::RenderState;
+    use crate::effect::MockPty;
     use crate::grid_ref::TrackedGridRef;
     use crate::point::{self, Point};
     use crate::terminal::CursorStyle;
-    use std::cell::RefCell;
 
     #[test]
     fn scroll_viewport_delta_prompt() {
@@ -1396,15 +1396,15 @@ mod tests {
     /// Feed `input` to a terminal configured by `setup`, returning what it
     /// wrote back to the pty.
     fn pty_output(setup: impl FnOnce(&mut Terminal<'_>), input: &[u8]) -> Vec<u8> {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         setup(&mut terminal);
         terminal.vt_write(input);
-        drop(terminal);
-        output.into_inner()
+        terminal.effect_handler::<MockPty>().unwrap().pty.clone()
     }
 
     /// A ground stop carries no string, so every string field is `None`.
@@ -1841,7 +1841,7 @@ mod tests {
         assert_eq!(terminal.mouse_shape().unwrap(), mouse::Shape::Text);
     }
 
-    fn tiny_terminal() -> Terminal<'static, 'static> {
+    fn tiny_terminal() -> Terminal<'static> {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
 
@@ -1988,45 +1988,47 @@ mod tests {
     const DECRQCRA: &[u8] = b"\x1b[7;1;1;1;1;4*y";
 
     /// Write a DECRQCRA and return whatever the terminal replied.
-    fn request_checksum(terminal: &mut Terminal<'_>, output: &RefCell<Vec<u8>>) -> Vec<u8> {
-        output.borrow_mut().clear();
+    fn request_checksum(terminal: &mut Terminal<'_>) -> Vec<u8> {
+        let handler = terminal.effect_handler_mut::<MockPty>().unwrap();
+        handler.pty.clear();
         terminal.vt_write(DECRQCRA);
-        output.borrow().clone()
+
+        let handler = terminal.effect_handler::<MockPty>().unwrap();
+        handler.pty.clone()
     }
 
     #[test]
     fn xt_checksum_report_requires_opt_in() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         terminal.vt_write(CHECKSUM_SCREEN);
 
         // Disabled by default.
-        assert_eq!(request_checksum(&mut terminal, &output), b"");
+        assert_eq!(request_checksum(&mut terminal), b"");
 
         terminal
             .set_xt_checksum_report_enabled(true)
             .expect("enabling checksum reports should succeed");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FEBA\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FEBA\x1b\\");
 
         terminal
             .set_xt_checksum_report_enabled(false)
             .expect("disabling checksum reports should succeed");
-        assert_eq!(request_checksum(&mut terminal, &output), b"");
+        assert_eq!(request_checksum(&mut terminal), b"");
     }
 
     #[test]
     fn xt_checksum_xtchecksum_ignored_while_disabled() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         terminal.vt_write(CHECKSUM_SCREEN);
 
         // XTCHECKSUM 1 (don't negate) while reporting is off is dropped, so
@@ -2035,26 +2037,21 @@ mod tests {
         terminal
             .set_xt_checksum_report_enabled(true)
             .expect("enabling checksum reports should succeed");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FEBA\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FEBA\x1b\\");
 
         // Once enabled, the same XTCHECKSUM takes effect: 0x146 unnegated.
         terminal.vt_write(b"\x1b[1#y");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~0146\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~0146\x1b\\");
     }
 
     #[test]
     fn xt_checksum_extension_changes_calculation() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         terminal.vt_write(CHECKSUM_SCREEN);
         terminal
             .set_xt_checksum_report_enabled(true)
@@ -2064,20 +2061,14 @@ mod tests {
         terminal
             .set_xt_checksum_extension(XtChecksumExtension::NO_ATTRIBUTES)
             .expect("valid extension should be accepted");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FF3A\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FF3A\x1b\\");
 
         // Keeping blanks adds the space: 0x146 + 0x20 = 0x166, negated to
         // 0xFE9A.
         terminal
             .set_xt_checksum_extension(XtChecksumExtension::NO_OMIT_BLANKS)
             .expect("valid extension should be accepted");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FE9A\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FE9A\x1b\\");
 
         // The extension also applies after a full reset (RIS), which clears
         // the screen, so rewrite it.
@@ -2086,36 +2077,28 @@ mod tests {
             .expect("valid extension should be accepted");
         terminal.vt_write(b"\x1bc");
         terminal.vt_write(CHECKSUM_SCREEN);
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~0146\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~0146\x1b\\");
 
         // The empty set restores the DEC calculation.
         terminal
             .set_xt_checksum_extension(XtChecksumExtension::empty())
             .expect("empty extension should be accepted");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FEBA\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FEBA\x1b\\");
 
         // Bits above 31 are rejected and leave the calculation unchanged.
         let result = terminal.set_xt_checksum_extension(XtChecksumExtension::from_bits_retain(32));
         assert!(matches!(result, Err(Error::InvalidValue)));
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FEBA\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FEBA\x1b\\");
     }
 
     #[test]
     fn xt_checksum_extension_unwritten_and_full_codepoints() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         terminal
             .set_xt_checksum_report_enabled(true)
             .expect("enabling checksum reports should succeed");
@@ -2126,9 +2109,11 @@ mod tests {
         // left on so we'd notice it leaking into the unwritten cell.
         terminal.vt_write("\x1b[2;1H\u{1D400}\x1b[1;2H\x1b[1mX".as_bytes());
         let request = |terminal: &mut Terminal<'_>, req: &[u8]| {
-            output.borrow_mut().clear();
+            let handler = terminal.effect_handler_mut::<MockPty>().unwrap();
+            handler.pty.clear();
             terminal.vt_write(req);
-            output.borrow().clone()
+            let handler = terminal.effect_handler::<MockPty>().unwrap();
+            handler.pty.clone()
         };
 
         // Row 1, columns 1 through 2. Bold `X` is 0x58 + 0x80 = 0xD8.
@@ -2373,7 +2358,7 @@ mod miri_soundness {
                 self.0.set(self.0.get() + 1);
             }
         }
-        fn dispatch<'alloc: 'cb, 'cb>(mut terminal: Terminal<'alloc>) -> Terminal<'alloc> {
+        fn dispatch<'alloc>(mut terminal: Terminal<'alloc>) -> Terminal<'alloc> {
             terminal.vt_write(b"reply");
             terminal
         }
