@@ -138,7 +138,7 @@ impl<'alloc> Encoder<'alloc> {
     /// [`Self::set_track_last_cell`], so the next motion event is
     /// written even if it's in that cell. If neither differs, the encoder keeps
     /// the remembered cell. You can call this before every event.
-    pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> &mut Self {
+    pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_>) -> &mut Self {
         crate::sys::GATE.freeze();
 
         unsafe {

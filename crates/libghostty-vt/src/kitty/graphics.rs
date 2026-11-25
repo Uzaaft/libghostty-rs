@@ -68,7 +68,7 @@ pub struct PlacementIteration<'t, 'alloc> {
 }
 
 /// Methods related to the [Kitty graphics protocol](crate::kitty::graphics).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// The Kitty graphics image storage for the active screen.
     ///
     /// Returns a borrowed reference to the image storage.
@@ -557,7 +557,7 @@ impl<'t> PlacementIteration<'t, '_> {
     pub fn pixel_size(
         &self,
         image: &Image<'t>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<PixelSize> {
         crate::sys::GATE.freeze();
         let mut size = PixelSize::default();
@@ -579,7 +579,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// Takes into account the placement's source rectangle, specified
     /// columns/rows, and aspect ratio to calculate the final rendered pixel
     /// dimensions.
-    pub fn grid_size(&self, image: &Image<'t>, terminal: &'t Terminal<'_, '_>) -> Result<GridSize> {
+    pub fn grid_size(&self, image: &Image<'t>, terminal: &'t Terminal<'_>) -> Result<GridSize> {
         crate::sys::GATE.freeze();
         let mut size = GridSize::default();
         let result = unsafe {
@@ -617,7 +617,7 @@ impl<'t> PlacementIteration<'t, '_> {
     pub fn viewport_pos(
         &self,
         image: &Image<'t>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<Option<ViewportPos>> {
         crate::sys::GATE.freeze();
         let mut pos = ViewportPos::default();
@@ -667,7 +667,7 @@ impl<'t> PlacementIteration<'t, '_> {
     pub fn rect(
         &self,
         image: &Image<'t>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<Option<Selection<'t>>> {
         // BUG: Upstream doesn't check if the given terminal is the same
         // terminal as the one that created the graphics storage...
@@ -708,7 +708,7 @@ impl<'t> PlacementIteration<'t, '_> {
     pub fn render_info(
         &self,
         image: &Image<'t>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<PlacementRenderInfo> {
         crate::sys::GATE.freeze();
         let mut info = ffi::sized!(ffi::KittyGraphicsPlacementRenderInfo);
@@ -1137,7 +1137,7 @@ mod animation_tests {
     }
 
     /// The first pixel and the generation of image 1.
-    fn image(terminal: &Terminal<'_, '_>) -> ([u8; 4], u64) {
+    fn image(terminal: &Terminal<'_>) -> ([u8; 4], u64) {
         let graphics = terminal.kitty_graphics().unwrap();
         let image = graphics.image(1).unwrap();
         let pixels = image.data().unwrap().unwrap();

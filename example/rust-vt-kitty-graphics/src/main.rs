@@ -91,7 +91,7 @@ fn print_image(graphics: &Graphics<'_>, image_id: u32) {
 ///
 /// A real app waits for the delay that tick_animations() returns. To keep
 /// this example quick, a pretend clock jumps ahead by that delay instead.
-fn run_animation(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
+fn run_animation(terminal: &mut Terminal<'_>) -> Result<(), Error> {
     // These commands set up the animation:
     //
     //   a=T  Send a red 1x1 RGBA image with ID 2 and display it.
@@ -220,7 +220,7 @@ fn draw_images<'alloc>(
 /// so it keeps the list it has. Before the third frame, new output
 /// scrolls the screen by two rows, which moves both images, so the third
 /// frame reads the list again.
-fn run_frames(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
+fn run_frames(terminal: &mut Terminal<'_>) -> Result<(), Error> {
     // Create the render state and the image iterator once, and reuse them.
     let mut state = RenderState::new()?;
     let mut images = ImageIterator::new()?;

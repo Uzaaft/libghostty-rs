@@ -26,7 +26,7 @@ use crate::{
 };
 
 /// Methods related to [snapshots](crate::snapshot).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// Encode a complete terminal snapshot to a writer.
     ///
     /// The terminal's persistent VT stream supplies the continuation bytes
@@ -375,7 +375,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// poisons the decoder, after which it must be dropped. An invalid
     /// argument or lifecycle error detected before the operation consumes
     /// input does not poison it.    
-    pub fn decode<'cb>(self) -> Result<Terminal<'alloc, 'cb>> {
+    pub fn decode<'cb>(self) -> Result<Terminal<'alloc>> {
         crate::sys::GATE.freeze();
 
         let mut raw: ffi::Terminal = std::ptr::null_mut();
@@ -408,7 +408,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// poisons the decoder, after which it must be dropped. An invalid
     /// argument or lifecycle error detected before the operation consumes
     /// input does not poison it.    
-    pub fn ready<'cb>(self) -> Result<IncrementalDecoder<'alloc, 'r, 'cb>> {
+    pub fn ready(self) -> Result<IncrementalDecoder<'alloc, 'r>> {
         crate::sys::GATE.freeze();
 
         let mut raw: ffi::Terminal = std::ptr::null_mut();
@@ -626,11 +626,11 @@ impl Drop for Decoder<'_, '_> {
 /// while obtaining ownership of the terminal requires halting the decode
 /// process via [`IncrementalDecoder::into_terminal`].
 #[derive(Debug)]
-pub struct IncrementalDecoder<'alloc, 'r, 'cb> {
+pub struct IncrementalDecoder<'alloc, 'r> {
     // Drop order is significant here.
     // First drop the decoder, then the terminal.
     decoder: Decoder<'alloc, 'r>,
-    terminal: Terminal<'alloc, 'cb>,
+    terminal: Terminal<'alloc>,
     // The identity of the terminal returned by READY. libghostty retains its
     // handle inside the decoder and writes history into it on every `next`
     // call, but `terminal_mut` lets safe code swap `terminal` for another one
@@ -647,7 +647,7 @@ pub struct IncrementalDecoder<'alloc, 'r, 'cb> {
     finished: bool,
 }
 
-impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
+impl<'alloc, 'r> IncrementalDecoder<'alloc, 'r> {
     /// Decode one history page, or the pixels of one Kitty graphics image,
     /// into the terminal returned by READY.
     ///
@@ -811,19 +811,19 @@ impl<'alloc, 'r, 'cb> IncrementalDecoder<'alloc, 'r, 'cb> {
     }
     /// Return a shared reference to the terminal being decoded.
     #[must_use]
-    pub fn terminal(&self) -> &Terminal<'alloc, 'cb> {
+    pub fn terminal(&self) -> &Terminal<'alloc> {
         &self.terminal
     }
     /// Return an exclusive reference to the terminal being decoded.
     ///
     /// Replacing the terminal behind this reference makes
     /// [`IncrementalDecoder::next`] fail until the original is put back.
-    pub fn terminal_mut(&mut self) -> &mut Terminal<'alloc, 'cb> {
+    pub fn terminal_mut(&mut self) -> &mut Terminal<'alloc> {
         &mut self.terminal
     }
     /// Stop decoding and obtain the final, fully decoded terminal.
     #[must_use]
-    pub fn into_terminal(self) -> Terminal<'alloc, 'cb> {
+    pub fn into_terminal(self) -> Terminal<'alloc> {
         self.terminal
     }
 }
@@ -935,7 +935,7 @@ mod tests {
         bytes
     }
 
-    fn continuation(terminal: &Terminal<'_, '_>) -> Option<Vec<u8>> {
+    fn continuation(terminal: &Terminal<'_>) -> Option<Vec<u8>> {
         let mut buf = [0; 16];
         let len = terminal.continuation_buf(&mut buf).unwrap()?;
         Some(buf[..len].to_vec())

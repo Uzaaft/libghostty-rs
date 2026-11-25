@@ -250,7 +250,7 @@ impl Default for Options {
 }
 
 /// Methods related to [pasting](crate::paste).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// Paste into the terminal according to its current state: a Kitty
     /// clipboard protocol paste event if [`Mode::PASTE_EVENTS`] is enabled and
     /// a [clipboard read callback](Self::on_clipboard_read) is installed,
@@ -405,7 +405,7 @@ mod tests {
     /// The reader only records: a panic inside it would abort the whole test
     /// binary instead of failing the test.
     fn paste(
-        terminal: &mut Terminal<'_, '_>,
+        terminal: &mut Terminal<'_>,
         output: &RefCell<Vec<u8>>,
         options: Options,
         mimes: &[ClipboardMime<'_>],

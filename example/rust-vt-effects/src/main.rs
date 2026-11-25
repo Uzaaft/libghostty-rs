@@ -2,65 +2,56 @@
 //! the bell, title changes, OSC 52 clipboard reads and writes, and unknown
 //! sequences. You need these as soon as a real program runs in the terminal.
 use libghostty_vt::{
-    effect::{ClipboardReplyContent, UnknownSequence},
+    effect::{self, ClipboardReplyContent, UnknownSequence},
     osc::Terminator,
     Terminal,
 };
-use std::{cell::Cell, error::Error};
+use std::error::Error;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // ANCHOR: effects-state-lifetime
-    // Specific to the Rust bindings: any state borrowed by the callbacks
-    // mutably is held mutably for the entire lifetime of the terminal,
-    // which means that it cannot be accessed by other parties, including
-    // other callbacks. They must therefore also outlive the terminal.
-    //
-    // To prevent this, use a type with _interior mutability_ which allows
-    // the value inside to be safely mutated by an immutable, shared reference.
-    // In this case, `usize` is a simple `Copy` type, so we can use `Cell`s
-    // here. Non-copy types need to use `RefCell`s instead.
-    let bell_count = Cell::new(0usize);
-    // ANCHOR_END: effects-state-lifetime
+struct Handler {
+    bell_count: usize,
+}
 
-    // Create a terminal
-    let mut terminal = Terminal::new(80, 24)?;
-
-    // Register effect callbacks
-    // ANCHOR: effects-write-pty
-    terminal.on_pty_write(|_term, data| {
+// ANCHOR: effects-write-pty
+impl effect::OnPtyWrite for Handler {
+    fn on_pty_write(&mut self, _terminal: &Terminal<'_>, data: &[u8]) {
         println!(
             "  pty_write ({} bytes): {}",
             data.len(),
             data.escape_ascii()
         );
-    })?;
-    // ANCHOR_END: effects-write-pty
+    }
+}
+// ANCHOR_END: effects-write-pty
 
-    // ANCHOR: effects-bell
-    terminal.on_bell({
-        // Explicitly borrow the bell count, or otherwise `move`
-        // will attempt to capture the entire `Cell` and cause a
-        // compiler error
-        let bell_count = &bell_count;
-        move |_term| {
-            bell_count.update(|v| v + 1);
-            println!("  bell! (count={})", bell_count.get());
-        }
-    })?;
-    // ANCHOR_END: effects-bell
+// ANCHOR: effects-bell
+impl effect::OnBell for Handler {
+    fn on_bell(&mut self, _terminal: &Terminal<'_>) {
+        self.bell_count += 1;
+        println!("  bell! (count={})", self.bell_count);
+    }
+}
+// ANCHOR_END: effects-bell
 
-    // ANCHOR: effects-title-changed
-    terminal.on_title_changed(|term| {
+// ANCHOR: effects-title-changed
+impl effect::OnTitleChanged for Handler {
+    fn on_title_changed(&mut self, terminal: &Terminal<'_>) {
         // The new title is already set, so you can read it here with
         // `Terminal::title`. This example reads the cursor position
         // to show that the terminal can be queried from a callback.
-        let col = term.cursor_x().unwrap();
+        let col = terminal.cursor_x().unwrap();
         println!("  title changed (cursor at col {col})");
-    })?;
-    // ANCHOR_END: effects-title-changed
+    }
+}
+// ANCHOR_END: effects-title-changed
 
-    // ANCHOR: effects-clipboard-write
-    terminal.on_clipboard_write(|_term, write| {
+// ANCHOR: effects-clipboard-write
+impl effect::OnClipboardWrite for Handler {
+    fn on_clipboard_write<'t>(
+        &mut self,
+        _terminal: &'t Terminal<'_>,
+        write: effect::ClipboardWrite<'t>,
+    ) {
         // The write is synchronous: a real embedder would ask the user for
         // permission here (unless `write.granted()`) and the VT stream waits until
         // this callback returns. The replied result is sent to the program
@@ -90,11 +81,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         write.reply(Ok(())).finish();
-    })?;
-    // ANCHOR_END: effects-clipboard-write
+    }
+}
+// ANCHOR_END: effects-clipboard-write
 
-    // ANCHOR: effects-clipboard-read
-    terminal.on_clipboard_read(|_term, read| {
+// ANCHOR: effects-clipboard-read
+impl effect::OnClipboardRead for Handler {
+    fn on_clipboard_read<'t>(
+        &mut self,
+        _terminal: &'t Terminal<'_>,
+        read: effect::ClipboardRead<'t>,
+    ) {
         // The read is synchronous: a real embedder would ask the user for
         // permission here (unless read->granted) and the VT stream waits until
         // this callback returns. The reply is sent to the program through the
@@ -118,12 +115,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             b"Hello from the clipboard",
         )]))
         .finish();
-    })?;
-    // ANCHOR_END: effects-clipboard-read
+    }
+}
+// ANCHOR_END: effects-clipboard-read
 
-    // ANCHOR: effects-unknown-sequence
-    terminal
-        .on_unknown_sequence(|_term, seq| match seq {
+// ANCHOR: effects-unknown-sequence
+impl effect::OnUnknownSequence for Handler {
+    fn on_unknown_sequence<'t>(
+        &mut self,
+        _terminal: &'t Terminal<'_>,
+        seq: effect::UnknownSequence<'t>,
+    ) {
+        match seq {
             UnknownSequence::Apc {
                 content, truncated, ..
             } => {
@@ -157,13 +160,31 @@ fn main() -> Result<(), Box<dyn Error>> {
                 );
             }
             _ => {}
-        })?
-        // Unknown sequence capture is independently bounded and disabled by
-        // default. This limit will apply to every supported unknown sequence type.
-        .set_unknown_max_bytes(256)?;
-    // ANCHOR_END: effects-unknown-sequence
+        }
+    }
+}
+// ANCHOR_END: effects-unknown-sequence
+
+fn main() -> Result<(), Box<dyn Error>> {
+    // Create a terminal
+    let mut terminal = Terminal::new(80, 24)?;
 
     // ANCHOR: effects-register
+    // Register effect callbacks
+    terminal
+        .register_effects(Handler { bell_count: 0 })?
+        .with_on_pty_write()?
+        .with_on_bell()?
+        .with_on_title_changed()?
+        .with_on_clipboard_write()?
+        .with_on_clipboard_read()?
+        .with_on_unknown_sequence()?;
+
+    // Unknown sequence capture is independently bounded and disabled by
+    // default. This limit will apply to every supported unknown sequence type.
+    terminal.set_unknown_max_bytes(256)?;
+    // ANCHOR_END: effects-register
+
     // Feed VT data that triggers effects:
 
     // 1. Bell (BEL = 0x07)
@@ -198,7 +219,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Sending another BEL:");
     terminal.vt_write(b"\x07");
 
-    println!("Total bells: {}", bell_count.get());
+    let handler = terminal.effect_handler::<Handler>()?;
+    println!("Total bells: {}", handler.bell_count);
     // ANCHOR_END: effects-register
     Ok(())
 }

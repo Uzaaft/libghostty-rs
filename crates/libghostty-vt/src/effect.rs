@@ -12,9 +12,19 @@
 //!
 //! # Example
 //! ```rust
-//! # use libghostty_vt::Terminal;
+//! use libghostty_vt::{effect, Terminal};
 //! # let mut terminal = Terminal::new(80, 24).unwrap();
-//! terminal.on_bell(|_term| println!("Bell rang!"));
+//!
+//! struct Handler;
+//! impl effect::OnBell for Handler {
+//!     fn on_bell(&mut self, _terminal: &Terminal<'_>) {
+//!         println!("Bell rang!")
+//!     }
+//! }
+//!
+//! terminal
+//!     .register_effects(Handler)?;
+//!     .on_bell()?;
 //! ```
 //!
 //! See the [Effects] guide for how to register them, the rules for callbacks,
@@ -24,231 +34,195 @@
 use std::{marker::PhantomData, num::NonZeroU16};
 
 use crate::{
+    Terminal,
     error::{Error, Result},
     ffi, osc,
     report::{ColorScheme, SizeReportSize},
 };
 
-#[allow(unused, reason = "only referenced in docs")]
-use crate::{Terminal, mode::Mode};
+#[expect(unused, reason = "only referenced in docs")]
+use crate::mode::Mode;
 
-/// You might be wondering just what the heck this is.
+impl<'alloc> Terminal<'alloc> {
+    /// Register [effect handlers](crate::effect) for the terminal.
+    ///
+    /// The handler type `H` is a user-defined type that can implement one or more
+    /// traits associated with effects, such as [`OnBell`].
+    ///
+    /// When registering, you need to call the method on this type that corresponds
+    /// to the trait, such as [`Effects::with_on_bell`] for [`OnBell`], otherwise
+    /// the effect handler would not be registered with libghostty. In advanced
+    /// use cases this may be used to conditionally register effect handlers.
+    ///
+    /// The effect handler can be retrieved later through
+    /// [`Terminal::effect_handler`] or [`Terminal::effect_handler_mut`].
+    ///
+    /// See the [Effects guide].
+    ///
+    #[doc = crate::guide_ref!("Effects guide", "effects")]
+    pub fn register_effects<H: 'static>(&mut self, effs: H) -> Result<Effects<'_, 'alloc, H>> {
+        let effs = self.effect_handler.insert(Box::new(effs));
+
+        // SAFETY: Let's talk about how this is safe aliasing-wise.
+        // The only situations where a mutable reference is created are either
+        // in the effect callback trampolines (which are triggered by mutable
+        // terminal methods like `vt_write`) or `effect_handler_mut`. Both
+        // cases already require exclusive access over the terminal and by
+        // extension the effect handler. I therefore consider this safe.
+        let effs = Box::as_mut_ptr(effs) as *const std::ffi::c_void;
+
+        self.set_ptr(ffi::TerminalOption::USERDATA, effs)?;
+        Ok(Effects {
+            terminal: self,
+            _phan: PhantomData,
+        })
+    }
+
+    /// Borrow the current effect handler immutably.
+    ///
+    /// # Error
+    ///
+    /// Returns [`Error::InvalidValue`] if an effect handler hasn't been
+    /// installed or the current handler is not of type `H`.
+    pub fn effect_handler<H: 'static>(&self) -> Result<&H> {
+        self.effect_handler
+            .as_ref()
+            .and_then(|h| h.downcast_ref::<H>())
+            .ok_or(Error::InvalidValue)
+    }
+
+    /// Borrow the current effect handler mutably.
+    ///
+    /// # Error
+    ///
+    /// Returns [`Error::InvalidValue`] if an effect handler hasn't been
+    /// installed or the current handler is not of type `H`.
+    pub fn effect_handler_mut<H: 'static>(&mut self) -> Result<&mut H> {
+        self.effect_handler
+            .as_mut()
+            .and_then(|h| h.downcast_mut::<H>())
+            .ok_or(Error::InvalidValue)
+    }
+}
+
+/// Builder for adding [effect handlers](crate::effect) to a terminal.
 ///
-/// Truth to be told, you don't need to understand how it works
-/// in order to use it. It does a bunch of voodoo behind the scenes
-/// that make sure all the invariants of the C API are upheld, while
-/// providing a convenient API for Rust users.
-///
-/// Each handler is defined in this following format:
-/// ```ignore
-/// pub fn on_foobar(
-///     &mut self,
-///     // The corresponding GhosttyTerminalOption
-///     tag = FOOBAR,
-///
-///     // The name of the original function type in C,
-///     // along with the extra C parameters and the expected C return type
-///     from = TerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
-///
-///     // The name of mapped Rust function type,
-///     // along with the Rust parameters and return type.
-///     //
-///     // `<'t>` is used to tie the return value to the lifetime of the
-///     // terminal. The name is arbitrary - any lifetime marker will do.
-///     to = <'t>FoobarFn(&'t [u8]) -> bool,
-/// ) |term, func| {
-///     // `term` is the terminal and `func` is the Rust callback.
-///     // Both names are arbitrary.
-///
-///     // Convert the raw parameters into Rust types.
-///     // This is just to illustrate how.
-///     let slice = unsafe { std::slice::from_raw_parts(foo, bar) };
-///
-///     // Call into user logic and return.
-///     func(&terminal, slice)
-/// }
-/// ```
-macro_rules! handlers {
+/// Returned by [`Terminal::register_effects`].
+#[doc = crate::guide_ref!("Effects guide", "effect")]
+#[derive(Debug)]
+pub struct Effects<'t, 'alloc, H> {
+    terminal: &'t mut Terminal<'alloc>,
+    _phan: PhantomData<H>,
+}
+
+macro_rules! effect {
     {
-        $(
-            $(#[$fmeta:meta])*
-            $vis:vis fn $name:ident(
-                &mut self,
-                tag = $tag:ident,
-                from = $rawfnty:ident( $($rfname:ident: $rfty:ty),*$(,)? ) $(-> $rawrty:ty)?,
-                $(#[$tmeta:meta])*
-                to = $(<$lf:lifetime>)? $fnty:ident( $($fty:ty),*$(,)? ) $(-> $rty:ty)?,
-            ) |$t:ident, $func:ident| $block:block
-        )*
-    } => {
-        /// Methods for registering [effect handlers](crate::effect).
-        impl<'alloc, 'cb> $crate::terminal::Terminal<'alloc, 'cb> {$(
-            $(#[$fmeta])*
-            ///
-            /// See [Effects](crate::effect) for more details.
-            $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
-                unsafe extern "C" fn callback(
-                    t: $crate::ffi::Terminal,
-                    ud: *mut std::ffi::c_void,
-                    $($rfname: $rfty),*
-                ) $(-> $rawrty)? {
-                    // SAFETY: USERDATA is the owning raw VTable pointer
-                    // returned by Box::into_raw, unchanged by Terminal moves,
-                    // before the callback is registered. ghostty invokes
-                    // callbacks synchronously from vt_write, vt_write_until,
-                    // reset, resize and paste (which writes to the pty). All
-                    // five take `&mut self`, so the VTable outlives this call
-                    // and nothing outside the callbacks touches it meanwhile.
-                    // Callbacks only get a `&Terminal`, so they can't reach
-                    // any of those entry points.
-                    //
-                    // Dispatch nests in one place: `ClipboardRead::reply`
-                    // writes the answer to the pty right away, so the pty
-                    // write callback runs inside the clipboard read callback.
-                    // That is still sound, since neither trampoline keeps a
-                    // reference into the VTable across the user's closure:
-                    // `vtable` is only used to pick out the closure, which
-                    // lives in its own box, and different callbacks use
-                    // different boxes.
-                    let vtable = unsafe { &mut *ud.cast::<VTable<'_, '_>>() };
+        $(#[$meta:meta])*
+        $vis:vis trait $trait:ident {
+            const OPTION = $opt:ident;
+            type Raw = $rawfn:ident($($rawarg:ident: $rawty: ty),*) $(-> $rawret:ty)? ;
 
-                    let obj = $crate::alloc::Object::new(t).expect("received null terminal ptr in callback - this is a bug!");
+            fn $fn:ident$(<$lf:lifetime>)?(
+                $($arg:ident: $ty:ty),*
+            ) $(-> $ret:ty)? |$handler:ident, $term:ident| $block:block
+
+            fn $regfn:ident();
+        }
+    } => {
+        $(#[$meta])*
+        $vis trait $trait: 'static {
+            #[doc = concat!("Handler function for the [`", stringify!($trait), "`] effect.")]
+            fn $fn$(<$lf>)?(
+                &mut self,
+                terminal: &$($lf)? Terminal<'_>,
+                $($arg: $ty),*
+            ) $(-> $ret)?;
+        }
+
+        impl<H: $trait> Effects<'_, '_, H> {
+            #[doc = concat!("Register the [`", stringify!($trait), "`] effect handler.")]
+            ///
+            /// This function **must** be called to register the effect handler.
+            /// Just implementing the correct trait does not automatically
+            /// register it. This also means that registration is optional if
+            /// that is required.
+            pub fn $regfn(self) -> Result<Self> {
+                unsafe extern "C" fn trampoline<H: $trait + 'static>(
+                    terminal: $crate::ffi::Terminal,
+                    userdata: *mut ::core::ffi::c_void,
+                    $($rawarg: $rawty),*
+                ) $(-> $rawret)? {
+                    // SAFETY: The C terminal state calls callbacks synchronously
+                    // and different callbacks cannot access the userdata simultaneously.
+                    // We can thus assume we have exclusive access over the userdata.
+                    // Similarly, `effect_handler_mut` cannot be called when
+                    // the terminal is being mutated and effect callbacks are
+                    // called.
+                    let $handler = unsafe { &mut *(userdata as *mut H) };
+
+                    let obj = $crate::alloc::Object::new(terminal)
+                        .expect("received null terminal ptr in callback - this is a bug!");
+
                     // Build a temporary borrowed Terminal view for the callback
                     // without taking ownership of the underlying ghostty terminal.
-                    //
-                    // The view must carry the real terminal's id, not a
-                    // placeholder: checks such as `PlacementIteration::rect`
-                    // compare ids to tell terminals apart, and a shared
-                    // placeholder would make views of different terminals
-                    // look like the same one.
-                    let term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
+                    let term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_> {
                         inner: obj,
-                        vtable: ud.cast(),
-                        id: vtable.id,
+                        // TODO: Is this safe? Do we need to find a way to
+                        // elegantly smuggle in the terminal ID?
+                        id: 0,
+                        effect_handler: None,
                     });
-                    let $t: &$crate::terminal::Terminal = &term;
-                    let $func = vtable.$name.as_deref_mut()
-                        .expect("no handler set but callback is still called - this is a bug!");
+
+                    let $term = &term;
                     $block
                 }
 
-                // SAFETY: Registration has exclusive access to the terminal;
-                // no callback is active and the VTable allocation is live.
-                unsafe { (*self.vtable).$name = Some(::std::boxed::Box::new(f)); }
+                let func: $crate::ffi::$rawfn = Some(trampoline::<H> as _);
 
-                // USERDATA is a raw pointer option: pass the heap allocation
-                // itself, not the address of the Box smart pointer field stored
-                // inline in Terminal.
-                //
-                // Reuse the owning pointer, not a pointer derived from a
-                // temporary mutable reference into the VTable.
-                let userdata = self.vtable.cast::<::std::ffi::c_void>().cast_const();
-                self.set_ptr($crate::ffi::TerminalOption::USERDATA, userdata)?;
-
-                // The callback must be coerced into a function *pointer*
-                // and not a function *item* (which is a ZST whose address is meaningless).
-                // :)
-                // Type-check against the generated C callback alias so ABI changes
-                // cannot silently pass through the type-erased option setter.
-                let _: $crate::ffi::$rawfnty = Some(callback);
-
-                let callback_ptr: unsafe extern "C" fn(
-                    $crate::ffi::Terminal,
-                    *mut ::std::ffi::c_void,
-                    $($rfty),*
-                ) $(-> $rawrty)? = callback;
-
-                $crate::sys::GATE.freeze();
-
-                let result = unsafe {
-                    $crate::ffi::ghostty_terminal_set(
-                        self.inner.as_raw(),
-                        $crate::ffi::TerminalOption::$tag,
-                        callback_ptr as *const ::std::ffi::c_void
-                    )
-                };
-                $crate::error::from_result(result)?;
-                Ok(self)
-            }
-        )*}
-        $(
-            #[doc = concat!(
-                "[Effect] callback type for [`Terminal::",
-                stringify!($name),
-                "`](Terminal::",
-                stringify!($name),
-                ").\n"
-            )]
-            #[doc = $crate::guide_ref!("Effect", "effects")]
-            $(#[$tmeta])*
-            pub trait $fnty<'alloc, 'cb>:
-                $(for<$lf>)? FnMut(
-                    &$($lf)? $crate::terminal::Terminal<'alloc, 'cb>,
-                    $($fty),*
-                ) $(-> $rty)? + 'cb {}
-
-            impl<'alloc, 'cb, F> $fnty<'alloc, 'cb> for F
-            where
-                F: $(for<$lf>)? FnMut(
-                    &$($lf)? $crate::terminal::Terminal<'alloc, 'cb>,
-                    $($fty),*
-                ) $(-> $rty)? + 'cb
-            {}
-        )*
-
-        pub(crate) struct VTable<'alloc, 'cb> {
-            // The `Terminal::id` of the terminal owning this VTable, for the
-            // callback views. See the trampoline above.
-            id: u64,
-            $($name: Option<::std::boxed::Box<dyn $fnty<'alloc, 'cb>>>),*
-        }
-
-        impl ::core::fmt::Debug for VTable<'_, '_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                f.write_str("VTable {..}")
+                self.terminal.set_ptr(
+                    $crate::ffi::TerminalOption::$opt,
+                    match func {
+                        Some(f) => f as *const ::core::ffi::c_void,
+                        None => ::core::ptr::null(),
+                    }
+                )?;
+                ::core::result::Result::Ok(self)
             }
         }
-
-        impl VTable<'_, '_> {
-            pub(crate) fn new(id: u64) -> Self {
-                Self {
-                    id,
-                    $($name: None),*
-                }
-            }
-        }
-    };
+    }
 }
 
-handlers! {
-    /// Call the given function when the terminal needs to write data back
-    /// to the pty (e.g. in response to a DECRQM query, device status report,
-    /// or VT-driven mode 2048 enable).
-    pub fn on_pty_write(
-        &mut self,
-        tag = WRITE_PTY,
-        from = TerminalWritePtyFn(ptr: *const u8, len: usize),
-        to = <'t>PtyWriteFn(&'t [u8]),
-    ) |term, func| {
-        // SAFETY: We trust libghostty to return valid memory given we
-        // uphold all lifetime invariants (e.g. no `vt_write` calls
-        // during this callback, which is guaranteed via the mutable reference).
-        let data = unsafe { std::slice::from_raw_parts(ptr, len) };
-        func(term, data);
-    }
+effect! {
+    /// Effect handler for when the terminal eneds to write data back to the
+    /// pty (e.g. in response to a DECRQM query, device status report, or
+    /// VT-driven mode 2048 enable).
+    pub trait OnPtyWrite {
+        const OPTION = WRITE_PTY;
+        type Raw = TerminalWritePtyFn(data: *const u8, len: usize);
 
-    /// Call the given function when the terminal receives
+        fn on_pty_write<'t>(data: &'t [u8]) |h, term| {
+            let data = unsafe { std::slice::from_raw_parts(data, len) };
+            h.on_pty_write(term, data);
+        }
+        fn with_on_pty_write();
+    }
+}
+effect! {
+    /// Effect handler for when the given function when the terminal receives
     /// a BEL character (0x07).
-    pub fn on_bell(
-        &mut self,
-        tag = BELL,
-        from = TerminalBellFn(),
-        to = BellFn(),
-    ) |term, func| {
-        func(term);
-    }
+    pub trait OnBell {
+        const OPTION = BELL;
+        type Raw = TerminalBellFn();
 
-    /// Call the given function when the running program asks the terminal to
+        fn on_bell() |h, term| {
+            h.on_bell(term);
+        }
+        fn with_on_bell();
+    }
+}
+
+effect! {
+    /// Effect handler for when the running program asks the terminal to
     /// stop updating the screen, and again when it lets the screen update again.
     /// We call the time in between a "render hold". See [Render holds] for what
     /// to do about one.
@@ -276,56 +250,68 @@ handlers! {
     /// panic-safe. Any panic will terminate the entire process.
     ///
     #[doc = crate::guide_ref!("Safety", "rendering", "holds-safety")]
-    pub fn on_render_hold(
-        &mut self,
-        tag = RENDER_HOLD,
-        from = TerminalRenderHoldFn(held: bool),
-        to = RenderHoldFn(bool),
-    ) |term, func| {
-        func(term, held);
-    }
+    pub trait OnRenderHold {
+        const OPTION = RENDER_HOLD;
+        type Raw = TerminalRenderHoldFn(held: bool);
 
-    /// Call the given function when the terminal receives
+        fn on_render_hold(held: bool) |h, term| {
+            h.on_render_hold(term, held);
+        }
+        fn with_on_render_hold();
+    }
+}
+
+effect! {
+    /// Effect handler for when the terminal receives
     /// an ENQ character (0x05).
     ///
     /// Return `None` to report nothing.
-    pub fn on_enquiry(
-        &mut self,
-        tag = ENQUIRY,
-        from = TerminalEnquiryFn() -> ffi::String,
-        to = <'t>EnquiryFn() -> Option<&'t str>,
-    ) |term, func| {
-        func(term).unwrap_or("").as_bytes().into()
-    }
+    pub trait OnEnquiry {
+        const OPTION = ENQUIRY;
+        type Raw = TerminalEnquiryFn() -> ffi::String;
 
-    /// Call the given function when the terminal receives an XTVERSION
+        fn on_enquiry<'t>() -> Option<&'t [u8]> |h, term| {
+            h.on_enquiry(term).unwrap_or(b"").into()
+        }
+        fn with_on_enquiry();
+    }
+}
+
+effect! {
+    /// Effect handler for when the terminal receives an XTVERSION
     /// query (CSI > q), and respond with the resulting version string
     /// (e.g. "myterm 1.0").
     ///
     /// Return `None` to report the default "libghostty" version.
-    pub fn on_xtversion(
-        &mut self,
-        tag = XTVERSION,
-        from = TerminalXtversionFn() -> ffi::String,
-        to = <'t>XtversionFn() -> Option<&'t str>,
-    ) |term, func| {
-        func(term).unwrap_or("").as_bytes().into()
-    }
+    pub trait OnXtversion {
+        const OPTION = XTVERSION;
+        type Raw = TerminalXtversionFn() -> ffi::String;
 
-    /// Call the given function when the terminal title changes
+        fn on_xtversion<'t>() -> Option<&'t [u8]> |h, term| {
+            h.on_xtversion(term).unwrap_or(b"").into()
+        }
+        fn with_on_xtversion();
+    }
+}
+
+effect! {
+    /// Effect handler for when the terminal title changes
     /// via escape sequences (e.g. OSC 0 or OSC 2).
     ///
     /// Use [`Terminal::title()`] inside the callback to read the new value.
-    pub fn on_title_changed(
-        &mut self,
-        tag = TITLE_CHANGED,
-        from = TerminalTitleChangedFn(),
-        to = TitleChangedFn(),
-    ) |term, func| {
-        func(term);
-    }
+    pub trait OnTitleChanged {
+        const OPTION = TITLE_CHANGED;
+        type Raw = TerminalTitleChangedFn();
 
-    /// Call the given function when the terminal pwd (current working
+        fn on_title_changed() |h, term| {
+            h.on_title_changed(term);
+        }
+        fn with_on_title_changed();
+    }
+}
+
+effect! {
+    /// Effect handler for when the terminal pwd (current working
     /// directory) changes via escape sequences: OSC 7 (file:// URI),
     /// OSC 9 (ConEmu CurrentDir), or OSC 1337 CurrentDir (iTerm2).
     /// Use [`Terminal::pwd()`] inside the callback to read the new value.
@@ -337,17 +323,19 @@ handlers! {
     ///
     /// The callback also fires when the shell clears the pwd (e.g. an empty
     /// OSC 7). In that case [`Terminal::pwd()`] returns a zero-length slice.
-    pub fn on_pwd_changed(
-        &mut self,
-        tag = PWD_CHANGED,
-        from = TerminalPwdChangedFn(),
-        to = PwdChangedFn(),
-    ) |term, func| {
-        func(term);
+    pub trait OnPwdChanged {
+        const OPTION = PWD_CHANGED;
+        type Raw = TerminalPwdChangedFn();
+
+        fn on_pwd_changed() |h, term| {
+            h.on_pwd_changed(term);
+        }
+        fn with_on_pwd_changed();
     }
+}
 
-
-    /// Call this given function in response to XTWINOPS size queries (CSI
+effect! {
+    /// Effect handler in response to XTWINOPS size queries (CSI
     /// 14/16/18/19 t) and when VT input enables in-band size reports (mode
     /// 2048). Return `Some` with the current terminal geometry, or return
     /// `None` to suppress the report.
@@ -355,45 +343,48 @@ handlers! {
     /// [`SizeReportSize`] is frozen. If a later version of libghostty-vt needs
     /// more fields, it adds a new callback, and keeps calling this callback
     /// forever. A callback keeps working with every later version of the library.
-    pub fn on_size(
-        &mut self,
-        tag = SIZE,
-        from = TerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
-        to = SizeFn() -> Option<SizeReportSize>,
-    ) |term, func| {
-        if let Some(size) = func(term) {
-            // SAFETY: Out pointer is assumed to be valid.
-            unsafe { *out = size };
-            true
-        } else {
-            false
+    pub trait OnSize {
+        const OPTION = SIZE;
+        type Raw = TerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool;
+
+        fn on_size() -> Option<SizeReportSize> |h, term| {
+            if let Some(size) = h.on_size(term) {
+                // SAFETY: Out pointer is assumed to be valid.
+                unsafe { *out = size };
+                true
+            } else {
+                false
+            }
         }
+        fn with_on_size();
     }
+}
 
-
-
-    /// Call this given function for color scheme queries (CSI ? 996 n).
+effect! {
+    /// Effect handler for color scheme queries (CSI ? 996 n).
     ///
     /// Called when the terminal receives a color scheme device status report
     /// query. Return `Some` with the current color scheme, or return false to
     /// silently ignore the query.
-    pub fn on_color_scheme(
-        &mut self,
-        tag = COLOR_SCHEME,
-        from = TerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
-        to = ColorSchemeFn() -> Option<ColorScheme>,
-    ) |term, func| {
-        if let Some(size) = func(term) {
-            // SAFETY: Out pointer is assumed to be valid.
-            unsafe { *out = size.into() };
-            true
-        } else {
-            false
+    pub trait OnColorScheme {
+        const OPTION = COLOR_SCHEME;
+        type Raw = TerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool;
+
+        fn on_color_scheme() -> Option<ColorScheme> |h, term| {
+            if let Some(size) = h.on_color_scheme(term) {
+                // SAFETY: Out pointer is assumed to be valid.
+                unsafe { *out = size.into() };
+                true
+            } else {
+                false
+            }
         }
+        fn with_on_color_scheme();
     }
+}
 
-
-    /// Call this given function for device attributes queries (DA1/DA2/DA3).
+effect! {
+    /// Effect handler for device attributes queries (DA1/DA2/DA3).
     ///
     /// Called when the terminal receives a device attributes query (CSI c,
     /// CSI > c, or CSI = c). Return `Some` with the response data, or return
@@ -434,22 +425,25 @@ handlers! {
     /// [`DeviceAttributes`] is frozen. If a later version of libghostty-vt needs
     /// more fields, it adds a new callback, and keeps calling this callback
     /// forever. A callback keeps working with every later version of the library.
-    pub fn on_device_attributes(
-        &mut self,
-        tag = DEVICE_ATTRIBUTES,
-        from = TerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
-        to = DeviceAttributesFn() -> Option<DeviceAttributes>,
-    ) |term, func| {
-        if let Some(size) = func(term) {
-            // SAFETY: Out pointer is assumed to be valid.
-            unsafe { *out = size.into() };
-            true
-        } else {
-            false
-        }
-    }
+    pub trait OnDeviceAttributes {
+        const OPTION = DEVICE_ATTRIBUTES;
+        type Raw = TerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool;
 
-    /// Call the given function when the running program performs a clipboard write.
+        fn on_device_attributes() -> Option<DeviceAttributes> |h, term| {
+            if let Some(size) = h.on_device_attributes(term) {
+                // SAFETY: Out pointer is assumed to be valid.
+                unsafe { *out = size.into() };
+                true
+            } else {
+                false
+            }
+        }
+        fn with_on_device_attributes();
+    }
+}
+
+effect! {
+    /// Effect handler for when the running program performs a clipboard write.
     ///
     /// OSC 52, iTerm2 OSC 1337 Copy, and Kitty clipboard (OSC 5522) writes
     /// are normalized to an atomic set of decoded MIME representations.
@@ -469,20 +463,21 @@ handlers! {
     ///
     /// Clipboard read requests (OSC 52 `"?"` and OSC 5522 reads) are delivered to
     /// [`Terminal::on_clipboard_read`] instead.
-    pub fn on_clipboard_write(
-        &mut self,
-        tag = CLIPBOARD_WRITE,
-        from = TerminalClipboardWriteFn(
-            write: *const ffi::ClipboardWrite
-        ),
-        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>),
-    ) |term, func| {
-        // SAFETY: The request is only borrowed for the callback duration,
-        // which `ClipboardWrite`'s lifetime enforces.
-        func(term, unsafe { ClipboardWrite::from_raw(write) });
-    }
+    pub trait OnClipboardWrite {
+        const OPTION = CLIPBOARD_WRITE;
+        type Raw = TerminalClipboardWriteFn(write: *const ffi::ClipboardWrite);
 
-    /// Call the given function when the running program requests clipboard
+        fn on_clipboard_write<'t>(write: ClipboardWrite<'t>) |h, term| {
+            // SAFETY: The request is only borrowed for the callback duration,
+            // which `ClipboardWrite`'s lifetime enforces.
+            h.on_clipboard_write(term, unsafe { ClipboardWrite::from_raw(write) });
+        }
+        fn with_on_clipboard_write();
+    }
+}
+
+effect! {
+    /// Effect handler for when the running program requests clipboard
     /// contents via OSC 52 with a "?" payload or a Kitty clipboard (OSC 5522)
     /// read. The read is synchronous and must be answered before the
     /// callback returns.
@@ -508,44 +503,53 @@ handlers! {
     /// [`Terminal::paste`] sends the program an event instead of the text,
     /// and the program's follow-up read arrives here with granted set since
     /// the user already pasted. See [`Terminal::paste`].
-    pub fn on_clipboard_read(
-        &mut self,
-        tag = CLIPBOARD_READ,
-        from = TerminalClipboardReadFn(read: *const ffi::ClipboardRead),
-        to = <'t>ClipboardReadFn(ClipboardRead<'t>),
-    ) |term, func| {
-        // SAFETY: The request is only borrowed for the callback duration,
-        // which `ClipboardRead`'s lifetime enforces.
-        func(term, unsafe { ClipboardRead::from_raw(read) });
-    }
+    pub trait OnClipboardRead {
+        const OPTION = CLIPBOARD_READ;
+        type Raw = TerminalClipboardReadFn(read: *const ffi::ClipboardRead);
 
-    /// Call the given function when the running program requests a desktop
+        fn on_clipboard_read<'t>(read: ClipboardRead<'t>) |h, term| {
+            // SAFETY: The request is only borrowed for the callback duration,
+            // which `ClipboardRead`'s lifetime enforces.
+            h.on_clipboard_read(term, unsafe { ClipboardRead::from_raw(read) });
+        }
+        fn with_on_clipboard_read();
+    }
+}
+
+effect! {
+    /// Effect handler for when the running program requests a desktop
     /// notification via OSC 9 or OSC 777.
-    pub fn on_desktop_notification(
-        &mut self,
-        tag = DESKTOP_NOTIFICATION,
-        from = TerminalDesktopNotificationFn(
+    pub trait OnDesktopNotification {
+        const OPTION = DESKTOP_NOTIFICATION;
+        type Raw = TerminalDesktopNotificationFn(
             notif: *const ffi::TerminalDesktopNotification
-        ),
-        to = <'t>DesktopNotificationFn(DesktopNotification<'t>),
-    ) |term, func| {
-        func(term, unsafe { DesktopNotification::from_raw(notif) });
-    }
+        );
 
-    /// Call the given function when the running program reports progress
+        fn on_desktop_notification<'t>(notif: DesktopNotification<'t>) |h, term| {
+            h.on_desktop_notification(term, unsafe { DesktopNotification::from_raw(notif) });
+        }
+        fn with_on_desktop_notification();
+    }
+}
+
+effect! {
+    /// Effect handler for when the running program reports progress
     /// via OSC 9;4.
-    pub fn on_progress_report(
-        &mut self,
-        tag = PROGRESS_REPORT,
-        from = TerminalProgressReportFn(
+    pub trait OnProgressReport {
+        const OPTION = PROGRESS_REPORT;
+        type Raw = TerminalProgressReportFn(
             progress: *const ffi::TerminalProgressReport
-        ),
-        to = <'t>ProgressReportFn(ProgressReport<'t>),
-    ) |term, func| {
-        func(term, unsafe { ProgressReport::from_raw(progress) });
-    }
+        );
 
-    /// Call the given function when the running program sends a program
+        fn on_progress_report<'t>(progress: ProgressReport<'t>) |h, term| {
+            h.on_progress_report(term, unsafe { ProgressReport::from_raw(progress) });
+        }
+        fn with_on_progress_report();
+    }
+}
+
+effect! {
+    /// Effect handler for when the running program sends a program
     /// status report via OSC 7501.
     ///
     /// The terminal doesn't store reports, so your application keeps them.
@@ -568,7 +572,6 @@ handlers! {
     ///   running in the terminal exits, remove `working` and
     ///   `blocked` records. You may remove `idle` records too. Keep `done`
     ///   and `error` records until the user has seen them, for example until
-
     ///   they next focus the terminal.
     /// - Keep at most 256 records, and allow at least 64. When a new record
     ///   would go over your limit, remove the one that was updated longest
@@ -684,20 +687,23 @@ handlers! {
     /// that asks sees the protocol as unsupported. Asking is optional, so
     /// programs may send reports anyway. Those are dropped. Set a pty write
     /// callback too, or programs never see the reply.
-    pub fn on_program_status(
-        &mut self,
-        tag = PROGRAM_STATUS,
-        from = TerminalProgramStatusFn(
+    pub trait OnProgramStatus {
+        const OPTION = PROGRAM_STATUS;
+        type Raw = TerminalProgramStatusFn(
             report: *const ffi::TerminalProgramStatus
-        ),
-        to = <'t>ProgramStatusFn(ProgramStatus<'t>),
-    ) |term, func| {
-        // SAFETY: The report and its strings are only valid during the
-        // callback, which `ProgramStatus`'s lifetime enforces.
-        func(term, unsafe { ProgramStatus::from_raw(report) });
-    }
+        );
 
-    /// Call the given function when the shell reports a step of a command.
+        fn on_program_status<'t>(report: ProgramStatus<'t>) |h, term| {
+            // SAFETY: The report and its strings are only valid during the
+            // callback, which `ProgramStatus`'s lifetime enforces.
+            h.on_program_status(term, unsafe { ProgramStatus::from_raw(report) });
+        }
+        fn with_on_program_status();
+    }
+}
+
+effect! {
+    /// Effect handler for when the shell reports a step of a command.
     ///
     /// Each command goes through four steps, in this order: the prompt starts,
     /// input starts, output starts, and the command ends. Then the next
@@ -711,20 +717,23 @@ handlers! {
     ///
     /// The terminal has already updated its screen when this is called.
     /// A sequence the terminal rejects as malformed is never reported.
-    pub fn on_semantic_prompt(
-        &mut self,
-        tag = SEMANTIC_PROMPT,
-        from = TerminalSemanticPromptFn(
+    pub trait OnSemanticPrompt {
+        const OPTION = SEMANTIC_PROMPT;
+        type Raw = TerminalSemanticPromptFn(
             event: *const ffi::TerminalSemanticPrompt
-        ),
-        to = <'t>SemanticPromptFn(SemanticPrompt<'t>),
-    ) |term, func| {
-        // SAFETY: The event and its strings are only valid during the
-        // callback, which `SemanticPrompt`'s lifetime enforces.
-        func(term, unsafe { SemanticPrompt::from_raw(event) });
-    }
+        );
 
-    /// Call the given function when the running program performs a full
+        fn on_semantic_prompt<'t>(event: SemanticPrompt<'t>) |h, term| {
+            // SAFETY: The event and its strings are only valid during the
+            // callback, which `SemanticPrompt`'s lifetime enforces.
+            h.on_semantic_prompt(term, unsafe { SemanticPrompt::from_raw(event) });
+        }
+        fn with_on_semantic_prompt();
+    }
+}
+
+effect! {
+    /// Effect handler for when the running program performs a full
     /// reset (RIS, `ESC c`).
     ///
     /// A full reset clears the screen and scrollback, returns modes to their
@@ -746,16 +755,19 @@ handlers! {
     /// [`Terminal::reset`] doesn't call this either: only a reset the
     /// running program sends through [`Terminal::vt_write`] or
     /// [`Terminal::vt_write_until`] does.
-    pub fn on_reset(
-        &mut self,
-        tag = RESET,
-        from = TerminalResetFn(),
-        to = ResetFn(),
-    ) |term, func| {
-        func(term);
-    }
+    pub trait OnReset {
+        const OPTION = RESET;
+        type Raw = TerminalResetFn();
 
-    /// Call the given function when the running program asks to resize the
+        fn on_reset() |h, term| {
+            h.on_reset(term);
+        }
+        fn with_on_reset();
+    }
+}
+
+effect! {
+    /// Effect handler for when the running program asks to resize the
     /// window, such as with CSI 8 ; rows ; columns t.
     ///
     /// More kinds of requests may be reported in later versions; see
@@ -797,27 +809,30 @@ handlers! {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn on_resize_window(
-        &mut self,
-        tag = RESIZE_WINDOW,
-        from = TerminalResizeWindowFn(request: *const ffi::TerminalResizeWindow),
-        to = ResizeWindowFn(ResizeWindow),
-    ) |term, func| {
-        // SAFETY: We trust libghostty to give us a valid, non-NULL request
-        // that lives for the callback duration, with the tag and its
-        // matching payload written. For a payload-less kind the union may be
-        // left unwritten, which is why `from_raw` checks the tag before
-        // reading anything else, instead of us copying the struct out.
-        let request = unsafe { ResizeWindow::from_raw(request) };
-        // Upstream asks callbacks to ignore tags they don't handle. A tag
-        // these bindings don't know has no Rust value, so the closure isn't
-        // called for it.
-        if let Some(request) = request {
-            func(term, request);
-        }
-    }
+    pub trait OnResizeWindow {
+        const OPTION = RESIZE_WINDOW;
+        type Raw = TerminalResizeWindowFn(request: *const ffi::TerminalResizeWindow);
 
-    /// Called once for each complete sequence that libghostty-vt does not
+        fn on_resize_window(request: ResizeWindow) |h, term| {
+            // SAFETY: We trust libghostty to give us a valid, non-NULL request
+            // that lives for the callback duration, with the tag and its
+            // matching payload written. For a payload-less kind the union may be
+            // left unwritten, which is why `from_raw` checks the tag before
+            // reading anything else, instead of us copying the struct out.
+            let request = unsafe { ResizeWindow::from_raw(request) };
+            // Upstream asks callbacks to ignore tags they don't handle. A tag
+            // these bindings don't know has no Rust value, so the closure isn't
+            // called for it.
+            if let Some(request) = request {
+                h.on_resize_window(term, request);
+            }
+        }
+        fn with_on_resize_window();
+    }
+}
+
+effect! {
+    /// Effect handler for each complete sequence that libghostty-vt does not
     /// implement. Match on [`UnknownSequence`] first, because more kinds of
     /// sequences may be reported in later versions.
     ///
@@ -836,16 +851,17 @@ handlers! {
     /// Nothing is reported until [`Self::set_unknown_max_bytes`] is also set
     /// to a nonzero value. Installing the callback by itself keeps no sequence
     /// data and allocates no sequence-capture buffers.
-    pub fn on_unknown_sequence(
-        &mut self,
-        tag = UNKNOWN_SEQUENCE,
-        from = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence),
-        to = <'t>UnknownSequenceFn(UnknownSequence<'t>),
-    ) |term, func| {
-        // SAFETY: Sequence data only lasts as long as the callback.
-        if let Some(sequence) = unsafe { UnknownSequence::from_raw(sequence) } {
-            func(term, sequence);
+    pub trait OnUnknownSequence {
+        const OPTION = UNKNOWN_SEQUENCE;
+        type Raw = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence);
+
+        fn on_unknown_sequence<'t>(sequence: UnknownSequence<'t>) |h, term| {
+            // SAFETY: Sequence data only lasts as long as the callback.
+            if let Some(sequence) = unsafe { UnknownSequence::from_raw(sequence) } {
+                h.on_unknown_sequence(term, sequence);
+            }
         }
+        fn with_on_unknown_sequence();
     }
 }
 

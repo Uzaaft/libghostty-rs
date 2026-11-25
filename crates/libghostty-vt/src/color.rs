@@ -23,7 +23,7 @@ use std::{ffi::CStr, mem::MaybeUninit, slice};
 use crate::{Terminal, error::Result, ffi};
 
 /// Methods related to [colors](crate::color).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// The effective foreground color (override or default).
     pub fn fg_color(&self) -> Result<Option<Rgb>> {
         self.get_optional::<ffi::ColorRgb>(ffi::TerminalData::COLOR_FOREGROUND)

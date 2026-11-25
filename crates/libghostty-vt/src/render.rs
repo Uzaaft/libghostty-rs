@@ -782,7 +782,7 @@ impl<'alloc> RenderState<'alloc> {
     /// allocation and that allocation fails.
     pub fn update<'cb>(
         &mut self,
-        terminal: &Terminal<'alloc, 'cb>,
+        terminal: &Terminal<'alloc>,
     ) -> Result<Snapshot<'alloc, '_>> {
         crate::sys::GATE.freeze();
 
@@ -813,7 +813,7 @@ impl<'alloc> RenderState<'alloc> {
     /// internal render state update path.
     pub fn begin_update<'cb>(
         &mut self,
-        terminal: &Terminal<'alloc, 'cb>,
+        terminal: &Terminal<'alloc>,
     ) -> Result<Update<'alloc, '_>> {
         crate::sys::GATE.freeze();
 

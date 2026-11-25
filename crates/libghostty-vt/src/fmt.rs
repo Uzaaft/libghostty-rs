@@ -40,9 +40,9 @@ use crate::{
 
 /// Formatter that formats terminal content.
 #[derive(Debug)]
-pub struct Formatter<'t, 'alloc: 'cb, 'cb: 't> {
+pub struct Formatter<'t, 'alloc> {
     inner: Object<'alloc, ffi::FormatterImpl>,
-    terminal: &'t Terminal<'alloc, 'cb>,
+    terminal: &'t Terminal<'alloc>,
 }
 
 bitflags::bitflags! {
@@ -88,12 +88,12 @@ impl Default for Extras {
     }
 }
 
-impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
+impl<'t, 'alloc> Formatter<'t, 'alloc> {
     /// Create a formatter for a terminal's active screen.
     ///
     /// A new formatter emits plain text with trailing whitespace trimmed,
     /// without unwrapping, and with [`Extras::DEFAULT`].
-    pub fn new(terminal: &'t Terminal<'alloc, 'cb>) -> Result<Self> {
+    pub fn new(terminal: &'t Terminal<'alloc>) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_inner(std::ptr::null(), terminal) }
     }
@@ -105,7 +105,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
-        terminal: &'t Terminal<'alloc, 'cb>,
+        terminal: &'t Terminal<'alloc>,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(alloc.to_raw(), terminal) }
@@ -116,7 +116,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     /// `alloc` must be NULL or point to an allocator valid for `'alloc`.
     unsafe fn new_inner(
         alloc: *const ffi::Allocator,
-        terminal: &'t Terminal<'alloc, 'cb>,
+        terminal: &'t Terminal<'alloc>,
     ) -> Result<Self> {
         crate::sys::GATE.freeze();
 
@@ -341,7 +341,7 @@ impl<'t, 'alloc: 'cb, 'cb: 't> Formatter<'t, 'alloc, 'cb> {
     }
 }
 
-impl Drop for Formatter<'_, '_, '_> {
+impl Drop for Formatter<'_, '_> {
     fn drop(&mut self) {
         crate::sys::GATE.freeze();
         unsafe { ffi::ghostty_formatter_free(self.inner.as_raw()) }
@@ -394,14 +394,14 @@ mod tests {
     }
 
     fn format_write<W: std::io::Write>(
-        formatter: &mut Formatter<'_, '_, '_>,
+        formatter: &mut Formatter<'_, '_>,
         writer: &mut W,
     ) -> Result<()> {
         // SAFETY: None of the test writers touch the terminal.
         unsafe { formatter.format_write(writer) }
     }
 
-    fn format_buf(formatter: &mut Formatter<'_, '_, '_>) -> Vec<u8> {
+    fn format_buf(formatter: &mut Formatter<'_, '_>) -> Vec<u8> {
         let mut buf = vec![0; formatter.format_len().unwrap()];
         let len = formatter.format_buf(&mut buf).unwrap();
         buf.truncate(len);

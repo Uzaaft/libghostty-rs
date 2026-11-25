@@ -9,14 +9,14 @@ use libghostty_vt::{
 use std::io::Write;
 
 // ANCHOR: selection-main
-fn ref_at<'t>(terminal: &'t Terminal<'_, '_>, x: u16, y: u32) -> GridRef<'t> {
+fn ref_at<'t>(terminal: &'t Terminal<'_>, x: u16, y: u32) -> GridRef<'t> {
     terminal
         .grid_ref(Point::Active(Coordinate { x, y }))
         .expect("ref should exist")
 }
 
 fn print_selection<'t>(
-    terminal: &'t Terminal<'_, '_>,
+    terminal: &'t Terminal<'_>,
     label: &str,
     selection: Selection<'t>,
 ) -> Result<(), Error> {

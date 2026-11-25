@@ -25,11 +25,10 @@
 #![doc = crate::guide_ref!("Scrollback", "scrollback")]
 #![doc = crate::guide_ref!("Custom Sequences", "custom-sequences")]
 
-use std::mem::MaybeUninit;
+use std::{any::Any, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
-    effect::VTable,
     error::{Error, Result, from_optional_result, from_optional_result_uninit, from_result},
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
     key, mouse,
@@ -42,12 +41,8 @@ pub use ffi::TerminalScrollbar as Scrollbar;
 
 /// Opaque handle to a terminal instance.
 #[derive(Debug)]
-pub struct Terminal<'alloc: 'cb, 'cb> {
+pub struct Terminal<'alloc> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
-    // Own the allocation through a raw pointer so moving Terminal does not
-    // retag a Box and invalidate the userdata pointer retained by C. Drop
-    // reconstructs the Box only after freeing the native terminal.
-    pub(crate) vtable: *mut VTable<'alloc, 'cb>,
     // Unique for the life of the process, unlike the handle's address, which
     // the allocator may hand to a later terminal. Every handle carries the id
     // of the terminal it refers to, including the borrowed views passed to
@@ -56,9 +51,11 @@ pub struct Terminal<'alloc: 'cb, 'cb> {
     // still holds the terminal it decodes into, and Kitty placement rects use
     // it to tell whether a placement belongs to the terminal they're given.
     pub(crate) id: u64,
+
+    pub(crate) effect_handler: Option<Box<dyn Any>>,
 }
 
-impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
+impl<'alloc> Terminal<'alloc> {
     /// Create a new terminal instance.
     ///
     /// The terminal starts with various reasonable defaults e.g. around
@@ -100,11 +97,8 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
         let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
             inner,
-            // The VTable keeps a copy of the id so the callback trampolines,
-            // which only get the raw handle and the VTable, can give the
-            // views they build the same id as this terminal.
-            vtable: Box::into_raw(Box::new(VTable::new(id))),
             id,
+            effect_handler: None,
         })
     }
 
@@ -769,7 +763,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 }
 
 /// Methods related to history and scrollback.
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// The total number of rows in the active screen including scrollback.
     pub fn total_rows(&self) -> Result<usize> {
         self.get(Data::TOTAL_ROWS)
@@ -871,7 +865,7 @@ impl Terminal<'_, '_> {
 }
 
 /// Methods related to the cursor.
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// Get the cursor column position (0-indexed).
     pub fn cursor_x(&self) -> Result<u16> {
         self.get(Data::CURSOR_X)
@@ -922,13 +916,13 @@ impl Terminal<'_, '_> {
     }
 }
 
-impl Drop for Terminal<'_, '_> {
+impl Drop for Terminal<'_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_terminal_free(self.inner.as_raw()) }
         // SAFETY: This terminal owns the allocation from Box::into_raw.
         // The native handle can no longer use its userdata. Borrowed callback
         // views are ManuallyDrop and never reach this destructor.
-        unsafe { drop(Box::from_raw(self.vtable)) }
+        // unsafe { drop(Box::from_raw(self.vtable)) }
     }
 }
 
@@ -1401,7 +1395,7 @@ mod tests {
 
     /// Feed `input` to a terminal configured by `setup`, returning what it
     /// wrote back to the pty.
-    fn pty_output(setup: impl FnOnce(&mut Terminal<'_, '_>), input: &[u8]) -> Vec<u8> {
+    fn pty_output(setup: impl FnOnce(&mut Terminal<'_>), input: &[u8]) -> Vec<u8> {
         let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
@@ -1851,7 +1845,7 @@ mod tests {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
 
-    fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> char {
+    fn codepoint_at_tracked_ref(terminal: &Terminal<'_>, tracked: &TrackedGridRef) -> char {
         let snapshot = tracked
             .snapshot(terminal)
             .expect("tracked snapshot should not fail")
@@ -1994,7 +1988,7 @@ mod tests {
     const DECRQCRA: &[u8] = b"\x1b[7;1;1;1;1;4*y";
 
     /// Write a DECRQCRA and return whatever the terminal replied.
-    fn request_checksum(terminal: &mut Terminal<'_, '_>, output: &RefCell<Vec<u8>>) -> Vec<u8> {
+    fn request_checksum(terminal: &mut Terminal<'_>, output: &RefCell<Vec<u8>>) -> Vec<u8> {
         output.borrow_mut().clear();
         terminal.vt_write(DECRQCRA);
         output.borrow().clone()
@@ -2131,7 +2125,7 @@ mod tests {
         // Row 1: column 1 is never written, column 2 is a bold `X`. Bold is
         // left on so we'd notice it leaking into the unwritten cell.
         terminal.vt_write("\x1b[2;1H\u{1D400}\x1b[1;2H\x1b[1mX".as_bytes());
-        let request = |terminal: &mut Terminal<'_, '_>, req: &[u8]| {
+        let request = |terminal: &mut Terminal<'_>, req: &[u8]| {
             output.borrow_mut().clear();
             terminal.vt_write(req);
             output.borrow().clone()
@@ -2379,9 +2373,7 @@ mod miri_soundness {
                 self.0.set(self.0.get() + 1);
             }
         }
-        fn dispatch<'alloc: 'cb, 'cb>(
-            mut terminal: Terminal<'alloc, 'cb>,
-        ) -> Terminal<'alloc, 'cb> {
+        fn dispatch<'alloc: 'cb, 'cb>(mut terminal: Terminal<'alloc>) -> Terminal<'alloc> {
             terminal.vt_write(b"reply");
             terminal
         }
@@ -2434,7 +2426,7 @@ mod miri_soundness {
                 order.borrow_mut().push(3);
             })
             .unwrap();
-        fn dispatch(mut terminal: Terminal<'_, '_>) {
+        fn dispatch(mut terminal: Terminal<'_>) {
             terminal.vt_write(b"clipboard");
         }
         dispatch(terminal);

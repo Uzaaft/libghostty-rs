@@ -7,7 +7,7 @@ use libghostty_vt::{
 
 // ANCHOR: grid-ref-tracked
 fn codepoint_at_tracked_ref(
-    terminal: &Terminal<'_, '_>,
+    terminal: &Terminal<'_>,
     tracked: &TrackedGridRef,
 ) -> Result<char, Error> {
     let snapshot = tracked

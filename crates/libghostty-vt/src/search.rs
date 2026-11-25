@@ -178,7 +178,7 @@ impl<'alloc> Search<'alloc> {
     /// The search starts idle with no needle: it reports [`Status::Complete`]
     /// and finds nothing. Set a needle with [`Self::set_needle`] to start
     /// searching.
-    pub fn new(terminal: &Terminal<'_, '_>) -> Result<Self> {
+    pub fn new(terminal: &Terminal<'_>) -> Result<Self> {
         // SAFETY: A NULL allocator is always valid
         unsafe { Self::new_inner(terminal, std::ptr::null()) }
     }
@@ -190,13 +190,13 @@ impl<'alloc> Search<'alloc> {
     #[doc = crate::book_ref!("Memory", "memory")]
     pub fn new_in<'ctx: 'alloc>(
         alloc: &'alloc Allocator<'ctx>,
-        terminal: &Terminal<'_, '_>,
+        terminal: &Terminal<'_>,
     ) -> Result<Self> {
         // SAFETY: Borrow checking should forbid invalid allocators
         unsafe { Self::new_inner(terminal, alloc.to_raw()) }
     }
 
-    unsafe fn new_inner(terminal: &Terminal<'_, '_>, alloc: *const ffi::Allocator) -> Result<Self> {
+    unsafe fn new_inner(terminal: &Terminal<'_>, alloc: *const ffi::Allocator) -> Result<Self> {
         crate::sys::GATE.freeze();
 
         let mut raw = std::ptr::null_mut();
@@ -211,7 +211,7 @@ impl<'alloc> Search<'alloc> {
         })
     }
 
-    fn check_terminal(&self, terminal: &Terminal<'_, '_>) -> Result<()> {
+    fn check_terminal(&self, terminal: &Terminal<'_>) -> Result<()> {
         if terminal.inner.as_raw() == self.terminal {
             Ok(())
         } else {
@@ -229,7 +229,7 @@ impl<'alloc> Search<'alloc> {
     /// search to idle.
     pub fn set_needle(
         &mut self,
-        terminal: &mut Terminal<'_, '_>,
+        terminal: &mut Terminal<'_>,
         needle: impl AsRef<[u8]>,
     ) -> Result<&mut Self> {
         self.check_terminal(terminal)?;
@@ -281,7 +281,7 @@ impl<'alloc> Search<'alloc> {
     /// use, even after it reports complete.
     ///
     /// Each call does a bounded amount of work.
-    pub fn feed(&mut self, terminal: &Terminal<'_, '_>) -> Result<()> {
+    pub fn feed(&mut self, terminal: &Terminal<'_>) -> Result<()> {
         self.check_terminal(terminal)?;
         crate::sys::GATE.freeze();
         from_result(unsafe { ffi::ghostty_search_feed(self.inner.as_raw()) })
@@ -314,7 +314,7 @@ impl<'alloc> Search<'alloc> {
     /// is [`Status::Complete`]. Searching a large scrollback can take a while,
     /// so interactive embedders should drive [`Self::tick`] and
     /// [`Self::feed`] themselves.
-    pub fn run(&mut self, terminal: &Terminal<'_, '_>) -> Result<()> {
+    pub fn run(&mut self, terminal: &Terminal<'_>) -> Result<()> {
         self.check_terminal(terminal)?;
         crate::sys::GATE.freeze();
         from_result(unsafe { ffi::ghostty_search_run(self.inner.as_raw()) })
@@ -384,7 +384,7 @@ impl<'alloc> Search<'alloc> {
     /// are no matches.
     pub fn select_next<'t>(
         &mut self,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<Option<Match<'_, 't, 'alloc>>> {
         self.check_terminal(terminal)?;
         // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
@@ -405,7 +405,7 @@ impl<'alloc> Search<'alloc> {
     /// [`Self::select_next`].
     pub fn select_prev<'t>(
         &mut self,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<Option<Match<'_, 't, 'alloc>>> {
         self.check_terminal(terminal)?;
         // SAFETY: The exclusive terminal borrow serializes reading and scrolling it.
@@ -423,7 +423,7 @@ impl<'alloc> Search<'alloc> {
 
     fn read_matches<'t>(
         &self,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
         storage: &'t mut MatchBuffer,
         key: ffi::SearchData::Type,
     ) -> Result<Matches<'t>> {
@@ -477,7 +477,7 @@ impl<'alloc> Search<'alloc> {
     /// in use.
     pub fn matches<'t>(
         &self,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
         storage: &'t mut MatchBuffer,
     ) -> Result<Matches<'t>> {
         self.read_matches(terminal, storage, ffi::SearchData::MATCHES)
@@ -496,7 +496,7 @@ impl<'alloc> Search<'alloc> {
     /// Storage is reused and borrowed like with [`Self::matches`].
     pub fn viewport_matches<'t>(
         &self,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
         storage: &'t mut MatchBuffer,
     ) -> Result<Matches<'t>> {
         self.read_matches(terminal, storage, ffi::SearchData::VIEWPORT_MATCHES)
@@ -628,7 +628,7 @@ mod tests {
     use super::*;
 
     /// Drive a search with feeds and ticks, as an interactive embedder would.
-    fn drive(search: &mut Search<'_>, terminal: &mut Terminal<'_, '_>) {
+    fn drive(search: &mut Search<'_>, terminal: &mut Terminal<'_>) {
         loop {
             search.feed(terminal).unwrap();
             let mut status = search.status().unwrap();
@@ -793,7 +793,7 @@ mod tests {
     /// Fill a terminal with enough matching lines that the search has
     /// scrollback history to search, not just the active area.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn history_search(terminal: &mut Terminal<'_, '_>) -> Search<'static> {
+    fn history_search(terminal: &mut Terminal<'_>) -> Search<'static> {
         for _ in 0..5000 {
             terminal.vt_write(b"hit\r\n");
         }

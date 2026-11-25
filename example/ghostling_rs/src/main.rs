@@ -1244,14 +1244,14 @@ impl SelectionState<'_> {
     }
 
     /// Whether we currently have a selection and the mouse is kept down.
-    fn is_selecting(&self, terminal: &Terminal<'_, '_>) -> Result<bool> {
+    fn is_selecting(&self, terminal: &Terminal<'_>) -> Result<bool> {
         Ok(self.gesture.click_count(terminal)? > 0 && is_mouse_button_down(MouseButton::Left))
     }
 
     /// Update the selection state upon a left click.
     fn on_click(
         &mut self,
-        terminal: &Terminal<'_, '_>,
+        terminal: &Terminal<'_>,
         x: f32,
         y: f32,
         dims: Dimensions,
@@ -1270,7 +1270,7 @@ impl SelectionState<'_> {
     }
 
     /// Potentially reset the selection state when the mouse is released.
-    fn on_release(&mut self, terminal: &Terminal<'_, '_>, dims: Dimensions) -> Result<()> {
+    fn on_release(&mut self, terminal: &Terminal<'_>, dims: Dimensions) -> Result<()> {
         let point = Input::mouse_viewport_point(terminal, dims)?;
         // The point might fall outside the grid, which is completely okay in this case.
         let grid_ref = terminal.grid_ref(point).ok();
@@ -1283,7 +1283,7 @@ impl SelectionState<'_> {
     /// Update the selection state during and after a mouse drag.
     fn on_drag(
         &mut self,
-        terminal: &Terminal<'_, '_>,
+        terminal: &Terminal<'_>,
         x: f32,
         y: f32,
         dims: Dimensions,
@@ -1313,7 +1313,7 @@ impl SelectionState<'_> {
     /// changes on hover even when no mouse button event is being processed.
     fn update_mouse_cursor(
         &self,
-        terminal: &Terminal<'_, '_>,
+        terminal: &Terminal<'_>,
         dims: Dimensions,
         input_enabled: bool,
     ) -> Result<()> {

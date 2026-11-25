@@ -69,7 +69,7 @@ impl<'alloc> Gesture<'alloc> {
 
     fn get<T>(
         &self,
-        terminal: &Terminal<'_, '_>,
+        terminal: &Terminal<'_>,
         tag: ffi::SelectionGestureData::Type,
     ) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
@@ -89,22 +89,22 @@ impl<'alloc> Gesture<'alloc> {
     ///
     /// This cancels the active click sequence and releases any tracked terminal
     /// references owned by the gesture without dropping the gesture object.
-    pub fn reset(&mut self, terminal: &Terminal<'_, '_>) {
+    pub fn reset(&mut self, terminal: &Terminal<'_>) {
         unsafe {
             ffi::ghostty_selection_gesture_reset(self.inner.as_raw(), terminal.inner.as_raw());
         }
     }
 
     /// Get the current click count. 0 means inactive.
-    pub fn click_count(&self, terminal: &Terminal<'_, '_>) -> Result<u8> {
+    pub fn click_count(&self, terminal: &Terminal<'_>) -> Result<u8> {
         self.get(terminal, ffi::SelectionGestureData::CLICK_COUNT)
     }
     /// Whether the current/last left-click gesture has dragged.
-    pub fn dragged(&self, terminal: &Terminal<'_, '_>) -> Result<bool> {
+    pub fn dragged(&self, terminal: &Terminal<'_>) -> Result<bool> {
         self.get(terminal, ffi::SelectionGestureData::DRAGGED)
     }
     /// Get the current autoscroll request.
-    pub fn autoscroll(&self, terminal: &Terminal<'_, '_>) -> Result<Autoscroll> {
+    pub fn autoscroll(&self, terminal: &Terminal<'_>) -> Result<Autoscroll> {
         let v = self.get::<ffi::SelectionGestureAutoscroll::Type>(
             terminal,
             ffi::SelectionGestureData::AUTOSCROLL,
@@ -112,7 +112,7 @@ impl<'alloc> Gesture<'alloc> {
         Autoscroll::try_from(v).map_err(|_| Error::Unsupported)
     }
     /// Get the current gesture behavior.
-    pub fn behavior(&self, terminal: &Terminal<'_, '_>) -> Result<Behavior> {
+    pub fn behavior(&self, terminal: &Terminal<'_>) -> Result<Behavior> {
         let v = self.get::<ffi::SelectionGestureBehavior::Type>(
             terminal,
             ffi::SelectionGestureData::BEHAVIOR,
@@ -122,7 +122,7 @@ impl<'alloc> Gesture<'alloc> {
     /// Get the current left-click anchor.
     ///
     /// Returns `None` if there is no valid active anchor.
-    pub fn anchor<'t>(&self, terminal: &'t Terminal<'_, '_>) -> Result<Option<GridRef<'t>>> {
+    pub fn anchor<'t>(&self, terminal: &'t Terminal<'_>) -> Result<Option<GridRef<'t>>> {
         let mut grid_ref = ffi::GridRef::default();
         let result = unsafe {
             ffi::ghostty_selection_gesture_get(
@@ -196,7 +196,7 @@ impl Event<'_> {
     fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<Option<Selection<'t>>> {
         let mut selection = ffi::Selection::default();
 
@@ -329,7 +329,7 @@ impl<'alloc> PressEvent<'alloc> {
     pub fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
         grid_ref: GridRef<'t>,
     ) -> Result<Option<Selection<'t>>> {
         self.base
@@ -371,7 +371,7 @@ impl<'alloc> ReleaseEvent<'alloc> {
     pub fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
         grid_ref: Option<GridRef<'t>>,
     ) -> Result<()> {
         match grid_ref {
@@ -456,7 +456,7 @@ impl<'alloc> DragEvent<'alloc> {
     pub fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
         grid_ref: GridRef<'t>,
         geometry: Geometry,
     ) -> Result<Option<Selection<'t>>> {
@@ -539,7 +539,7 @@ impl<'alloc> AutoscrollTickEvent<'alloc> {
     pub fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
         viewport: point::Coordinate,
         geometry: Geometry,
     ) -> Result<Option<Selection<'t>>> {
@@ -604,7 +604,7 @@ impl<'alloc> DeepPressEvent<'alloc> {
     pub fn apply<'t>(
         &mut self,
         gesture: &mut Gesture<'_>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<Option<Selection<'t>>> {
         self.base.apply(gesture, terminal)
     }

@@ -8,7 +8,7 @@ use libghostty_vt::{
 // ANCHOR: compression-idle-step
 /// Perform one step after the application's idle timer fires. Returning true
 /// asks the application to schedule another step while the terminal is idle.
-fn compression_idle_step(terminal: &mut Terminal<'_, '_>) -> Result<bool, Error> {
+fn compression_idle_step(terminal: &mut Terminal<'_>) -> Result<bool, Error> {
     match terminal.compress(CompressionMode::Incremental)? {
         CompressionResult::Pending => Ok(true),
         CompressionResult::Unsupported | CompressionResult::Complete => Ok(false),
@@ -21,7 +21,7 @@ fn compression_idle_step(terminal: &mut Terminal<'_, '_>) -> Result<bool, Error>
 /// Return the bytes of memory a terminal currently holds. A server hosting
 /// many terminals can compare this figure across terminals to decide which
 /// one to compress or shut down first.
-fn terminal_resident_bytes(terminal: &Terminal<'_, '_>) -> Result<u64, Error> {
+fn terminal_resident_bytes(terminal: &Terminal<'_>) -> Result<u64, Error> {
     let usage = terminal.memory_usage()?;
 
     // Count both screens and any images. The alternate screen reports zero

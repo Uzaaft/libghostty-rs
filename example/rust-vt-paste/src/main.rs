@@ -41,7 +41,7 @@ impl Clipboard {
 // Paste whatever the clipboard holds. The terminal applies its own
 // state: bracketed paste framing (mode 2004) or a Kitty paste event
 // (mode 5522) instead of the text.
-fn paste_clipboard(terminal: &mut Terminal<'_, '_>, text: &'static str) {
+fn paste_clipboard(terminal: &mut Terminal<'_>, text: &'static str) {
     let clipboard = Clipboard { text };
 
     let options = paste::Options::new()
