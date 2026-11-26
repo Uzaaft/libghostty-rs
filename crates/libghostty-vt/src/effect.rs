@@ -3687,7 +3687,7 @@ mod miri_soundness {
 
         drop(terminal);
         assert_eq!(
-            seen.into_inner(),
+            seen,
             [
                 (None, b"payload".to_vec(), true),
                 (Some(osc::Terminator::Bel), b"payload".to_vec(), false),

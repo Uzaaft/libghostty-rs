@@ -1,12 +1,11 @@
 //! Integration checks, separate from the browser example.
 
 use std::{
-    cell::RefCell,
     ffi::CStr,
     mem::{align_of, offset_of, size_of},
 };
 
-use libghostty_vt::{alloc::Allocator, ffi, fmt::Formatter, RenderState, Terminal};
+use libghostty_vt::{alloc::Allocator, effect, ffi, fmt::Formatter, RenderState, Terminal};
 
 /// Exercise the same public Rust API used on native targets.
 /// A failed assertion traps, which makes the host runner fail as well.
@@ -57,7 +56,7 @@ pub extern "C" fn run() {
             .unwrap();
         terminal.vt_write(b"ab\x1b[31mC\x1b[0m\r\nxy\x1b[6n");
 
-        let handler = terminal.effect_handler().unwrap();
+        let handler = terminal.effect_handler::<Handler>().unwrap();
         assert_eq!(handler.response, b"\x1b[2;3R");
         assert_eq!(terminal.cursor_x().unwrap(), 2);
         assert_eq!(terminal.cursor_y().unwrap(), 1);
