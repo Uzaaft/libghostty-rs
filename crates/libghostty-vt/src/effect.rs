@@ -44,9 +44,6 @@ use crate::{
     report::{ColorScheme, SizeReportSize},
 };
 
-#[expect(unused, reason = "only referenced in docs")]
-use crate::mode::Mode;
-
 impl<'alloc> Terminal<'alloc> {
     /// Register [effect handlers](crate::effect) for the terminal.
     ///
@@ -73,7 +70,7 @@ impl<'alloc> Terminal<'alloc> {
         // terminal methods like `vt_write`) or `effect_handler_mut`. Both
         // cases already require exclusive access over the terminal and by
         // extension the effect handler. I therefore consider this safe.
-        let effs = Box::as_mut_ptr(effs) as *const std::ffi::c_void;
+        let effs = (&raw const **effs).cast::<std::ffi::c_void>();
 
         self.set_ptr(ffi::TerminalOption::USERDATA, effs)?;
         Ok(Effects {
@@ -162,7 +159,7 @@ macro_rules! effect {
                     // Similarly, `effect_handler_mut` cannot be called when
                     // the terminal is being mutated and effect callbacks are
                     // called.
-                    let $handler = unsafe { &mut *(userdata as *mut H) };
+                    let $handler = unsafe { &mut *userdata.cast::<H>() };
 
                     let obj = $crate::alloc::Object::new(terminal)
                         .expect("received null terminal ptr in callback - this is a bug!");
@@ -230,7 +227,8 @@ effect! {
     ///
     #[doc = crate::guide_ref!("Render holds", "rendering", "holds")]
     ///
-    /// `held` is true when the program sets mode 2026 ([`Mode::SYNC_OUTPUT`]),
+    /// `held` is true when the program sets mode 2026
+    /// ([`Mode::SYNC_OUTPUT`](crate::mode::Mode::SYNC_OUTPUT)),
     /// which is the only way to start a hold today.
     ///
     /// `held` is false when the hold ends, which happens when:
@@ -2189,7 +2187,7 @@ impl crate::effect::OnPtyWrite for MockPty {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terminal::Boundary;
+    use crate::{mode::Mode, terminal::Boundary};
     use std::mem::ManuallyDrop;
 
     struct CountingHandler {
@@ -3194,8 +3192,9 @@ mod tests {
 
     #[test]
     fn program_status_is_not_cleared_by_reset() {
+        type Seen = (Option<ProgramStatusState>, Vec<u8>);
         struct Handler {
-            seen: Vec<(Option<ProgramStatusState>, Vec<u8>)>,
+            seen: Vec<Seen>,
         }
         impl OnProgramStatus for Handler {
             fn on_program_status<'t>(
@@ -3225,7 +3224,7 @@ mod tests {
 
         terminal.reset();
         let handler = terminal.effect_handler::<Handler>().unwrap();
-        assert!(handler.seen.is_empty());
+        assert_eq!(handler.seen, [] as [Seen; 0]);
 
         terminal.vt_write(b"\x1bc");
         let handler = terminal.effect_handler_mut::<Handler>().unwrap();

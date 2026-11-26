@@ -475,7 +475,7 @@ mod tests {
         let result = terminal.paste(Options::new(), &TEXT, |_, out| out.write_all(b"a\nb"));
         assert!(matches!(result, Err(Error::Rejected)));
         let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
-        assert!(handler.pty.is_empty());
+        assert_eq!(handler.pty, [] as [u8; 0]);
 
         let options = Options::new().with_allow_unsafe(true);
         let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
@@ -493,7 +493,7 @@ mod tests {
         let result = terminal.paste(Options::new(), &TEXT, |_, out| out.write_all(b"a\rb"));
         assert!(matches!(result, Err(Error::Rejected)));
         let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
-        assert!(handler.pty.is_empty());
+        assert_eq!(handler.pty, [] as [u8; 0]);
 
         let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
         handler.pty.clear();
@@ -525,7 +525,7 @@ mod tests {
         });
         assert!(matches!(result, Err(Error::Rejected)));
         let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
-        assert!(handler.pty.is_empty());
+        assert_eq!(handler.pty, [] as [u8; 0]);
 
         // Upstream scans raw bytes and never checks UTF-8: invalid UTF-8 on
         // its own is safe, and the terminator is still caught amid it.
@@ -589,7 +589,7 @@ mod tests {
         });
         assert!(matches!(result, Err(Error::IoError)));
         let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
-        assert!(handler.pty.is_empty());
+        assert_eq!(handler.pty, [] as [u8; 0]);
     }
 
     /// A reader that ignores a refused write must not paste the rest.
@@ -617,7 +617,7 @@ mod tests {
         assert!(after_refused);
         assert!(matches!(result, Err(Error::OutOfMemory)));
         let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
-        assert!(handler.pty.is_empty());
+        assert_eq!(handler.pty, [] as [u8; 0]);
     }
 
     /// Extract the one-time password from a paste event.
@@ -629,6 +629,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines, reason = "it's just a test")]
     fn kitty_paste_events_replace_user_pastes() {
         #[derive(Default)]
         struct Handler {
@@ -637,7 +638,7 @@ mod tests {
         }
         impl effect::OnPtyWrite for Handler {
             fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
-                self.output.extend_from_slice(data)
+                self.output.extend_from_slice(data);
             }
         }
         impl effect::OnClipboardRead for Handler {

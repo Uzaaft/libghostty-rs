@@ -375,7 +375,7 @@ impl<'alloc, 'r> Decoder<'alloc, 'r> {
     /// poisons the decoder, after which it must be dropped. An invalid
     /// argument or lifecycle error detected before the operation consumes
     /// input does not poison it.    
-    pub fn decode<'cb>(self) -> Result<Terminal<'alloc>> {
+    pub fn decode(self) -> Result<Terminal<'alloc>> {
         crate::sys::GATE.freeze();
 
         let mut raw: ffi::Terminal = std::ptr::null_mut();

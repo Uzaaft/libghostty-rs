@@ -834,8 +834,6 @@ mod tests {
     #[test]
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn search_can_be_dropped_from_an_effect_callback() {
-        let alloc = crate::alloc::testing::Guard::allocator();
-
         struct Handler {
             search: Option<Search<'static>>,
         }
@@ -845,6 +843,7 @@ mod tests {
             }
         }
 
+        let alloc = crate::alloc::testing::Guard::allocator();
         let mut terminal = Terminal::new_in(&alloc, 10, 3).unwrap();
         terminal
             .register_effects(Handler { search: None })
