@@ -4,10 +4,7 @@
 // These call into libghostty, which Miri cannot execute.
 #![cfg(not(miri))]
 
-use std::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use libghostty_vt::{
     Error, Terminal,

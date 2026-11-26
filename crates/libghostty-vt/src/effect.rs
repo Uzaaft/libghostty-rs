@@ -171,9 +171,6 @@ macro_rules! effect {
                     // without taking ownership of the underlying ghostty terminal.
                     let term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_> {
                         inner: obj,
-                        // TODO: Is this safe? Do we need to find a way to
-                        // elegantly smuggle in the terminal ID?
-                        id: 0,
                         effect_handler: None,
                     });
 
@@ -2757,22 +2754,6 @@ mod tests {
         terminal.vt_write(b"\x1b[?2026h");
         let handler = terminal.effect_handler_mut::<Handler>().unwrap();
         assert_eq!(std::mem::take(&mut handler.events), [true]);
-    }
-
-    /// Read the text of the first row of a render state snapshot.
-    fn first_row_text(snapshot: &crate::render::Snapshot<'_, '_>) -> Result<String> {
-        let mut rows = crate::render::RowIterator::new()?;
-        let mut cells = crate::render::CellIterator::new()?;
-        let mut row_iter = rows.update(snapshot)?;
-        let Some(row) = row_iter.next() else {
-            return Ok(String::new());
-        };
-        let mut cell_iter = cells.update(row)?;
-        let mut text = String::new();
-        while let Some(cell) = cell_iter.next() {
-            text.extend(cell.graphemes()?);
-        }
-        Ok(text)
     }
 
     #[test]

@@ -43,15 +43,6 @@ pub use ffi::TerminalScrollbar as Scrollbar;
 #[derive(Debug)]
 pub struct Terminal<'alloc> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
-    // Unique for the life of the process, unlike the handle's address, which
-    // the allocator may hand to a later terminal. Every handle carries the id
-    // of the terminal it refers to, including the borrowed views passed to
-    // callbacks (which copy it from the VTable), and distinct terminals never
-    // share one. The incremental snapshot decoder uses it to tell whether it
-    // still holds the terminal it decodes into, and Kitty placement rects use
-    // it to tell whether a placement belongs to the terminal they're given.
-    pub(crate) id: u64,
-
     pub(crate) effect_handler: Option<Box<dyn Any>>,
 }
 
@@ -92,12 +83,8 @@ impl<'alloc> Terminal<'alloc> {
     }
 
     pub(crate) unsafe fn from_raw(raw: ffi::Terminal) -> Result<Self> {
-        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let inner = Object::new(raw)?;
-        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
-            inner,
-            id,
+            inner: Object::new(raw)?,
             effect_handler: None,
         })
     }
