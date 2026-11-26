@@ -67,11 +67,7 @@ impl<'alloc> Gesture<'alloc> {
         })
     }
 
-    fn get<T>(
-        &self,
-        terminal: &Terminal<'_>,
-        tag: ffi::SelectionGestureData::Type,
-    ) -> Result<T> {
+    fn get<T>(&self, terminal: &Terminal<'_>, tag: ffi::SelectionGestureData::Type) -> Result<T> {
         let mut value = MaybeUninit::<T>::zeroed();
         let result = unsafe {
             ffi::ghostty_selection_gesture_get(
