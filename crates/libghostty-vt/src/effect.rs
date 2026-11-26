@@ -131,6 +131,11 @@ macro_rules! effect {
         }
     } => {
         $(#[$meta])*
+        ///
+        #[doc = concat!("Register with [`Effects::", stringify!($regfn), "`].")]
+        ///
+        /// See the [Effects guide] for more details.
+        #[doc = $crate::guide_ref!("Effects guide", "effects")]
         $vis trait $trait: 'static {
             #[doc = concat!("Handler function for the [`", stringify!($trait), "`] effect.")]
             fn $fn$(<$lf>)?(
