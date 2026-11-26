@@ -11,10 +11,10 @@
 //!
 //! - If Kitty clipboard protocol paste events ([`Mode::PASTE_EVENTS`], mode 5522)
 //!   are enabled, the paste was user-initiated ([`Source::Clipboard`]),
-//!   and a [clipboard read callback](Terminal::on_clipboard_read) is
+//!   and a [clipboard read effect](crate::effect::OnClipboardRead) is
 //!   installed, the terminal sends the program a paste event listing the
 //!   clipboard's MIME types with a one-time password instead of the data. The
-//!   program then reads what it wants through the clipboard read callback,
+//!   program then reads what it wants through the clipboard read effect,
 //!   which arrives with [`granted`](crate::effect::ClipboardRead::granted)
 //!   set so no permission prompt is needed. No data is read for the event.
 //! - Otherwise the first text representation is written: unsafe control bytes
@@ -25,7 +25,7 @@
 //! The data is pulled through the reader only when a representation is
 //! actually pasted (so a clipboard holding a large image next to some text
 //! costs nothing), and the encoded bytes stream to the
-//! [pty write callback](Terminal::on_pty_write) in chunks as they are
+//! [pty write effect](crate::effect::OnPtyWrite) in chunks as they are
 //! produced, never in one piece. The callback may be invoked several times for
 //! a single paste; the pieces must be written to the pty in order.
 //!
@@ -195,11 +195,11 @@ pub enum Source {
     /// The user pasted from a clipboard: keybind, menu, middle click.
     #[default]
     Clipboard = ffi::PasteSource::CLIPBOARD,
+
     /// Text inserted some other way: IME commit, drag and drop, scripted
     /// input. Always written as text, never as a paste event, matching kitty.
     /// This is not a way to opt out of paste events; an embedder that doesn't
-    /// want them doesn't install a
-    /// [clipboard read callback](Terminal::on_clipboard_read).
+    /// want them doesn't install a [clipboard read effect](crate::effect::OnClipboardRead).
     Text = ffi::PasteSource::TEXT,
 }
 
@@ -262,12 +262,12 @@ impl Default for Options {
 impl Terminal<'_> {
     /// Paste into the terminal according to its current state: a Kitty
     /// clipboard protocol paste event if [`Mode::PASTE_EVENTS`] is enabled and
-    /// a [clipboard read callback](Self::on_clipboard_read) is installed,
+    /// a [clipboard read effect](crate::effect::OnClipboardRead) is installed,
     /// otherwise the text framed per [`Mode::BRACKETED_PASTE`]. See the
     /// [module documentation](crate::paste) for the full behavior. Output
-    /// streams through the [pty write callback](Self::on_pty_write) in chunks.
-    /// The viewport is not scrolled; that is up to the embedder, as for key
-    /// input.
+    /// streams through the [pty write effect](crate::effect::OnPtyWrite) in
+    /// chunks. The viewport is not scrolled; that is up to the embedder, as
+    /// for key input.
     ///
     /// `mimes` lists the MIME types of the representations available, in
     /// preferred order. A text paste reads and writes the first entry with a
@@ -301,7 +301,7 @@ impl Terminal<'_> {
     ///
     /// - [`Error::Rejected`](crate::Error::Rejected) if the text could inject commands and
     ///   [`Options::with_allow_unsafe`] is not set.
-    /// - [`Error::InvalidValue`](crate::Error::InvalidValue) if no pty write callback is installed.
+    /// - [`Error::InvalidValue`](crate::Error::InvalidValue) if no pty write effect is installed.
     /// - [`Error::IoError`](crate::Error::IoError) if the reader failed, or if there is no secure
     ///   entropy source to mint a paste event password (see
     ///   [crate::sys::SECURE_RANDOM_SOURCE]).
@@ -537,7 +537,7 @@ mod tests {
     fn nothing_to_paste_and_failures_write_nothing() {
         let mut terminal = Terminal::new(80, 24).unwrap();
 
-        // Without a pty write callback there is nowhere to paste to.
+        // Without a pty write effect there is nowhere to paste to.
         let mut reads = Vec::new();
         let result = terminal.paste(Options::new(), &TEXT, |mime, out| {
             reads.push(mime.to_owned());

@@ -6,8 +6,7 @@
 //!
 //! These answer in-band size reports (mode 2048) and XTWINOPS queries
 //! (`CSI 14 t`, `CSI 16 t`, `CSI 18 t`, `CSI 19 t`). A terminal answers those
-//! for you through a [`Terminal::on_size`](crate::Terminal::on_size), so you
-//! only need this without one.
+//! for you through [`crate::effect::OnSize`], so you only need this without one.
 //!
 //! Fill in a [`SizeReportSize`] and pass it to [`SizeReport::encode`].
 //!
@@ -18,7 +17,7 @@
 //! You need this when a program sets mode 2031 and expects to hear when the
 //! scheme changes. Encode the report and write it to the pty yourself. You don't
 //! need it to answer a `CSI ? 996 n` query. A terminal does that for you through
-//! [`Terminal::on_color_scheme`](crate::Terminal::on_color_scheme).
+//! [`crate::effect::OnColorScheme`].
 use crate::{
     error::{Result, from_result_with_len},
     ffi,

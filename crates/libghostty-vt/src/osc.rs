@@ -461,10 +461,9 @@ pub enum CommandType<'p> {
     /// sends to say what it is doing, such as working or waiting on the user.
     ///
     /// The OSC parser only identifies this command. To receive the report's
-    /// contents, use a terminal with [`Terminal::on_program_status`] instead
+    /// contents, use a terminal with [`crate::effect::OnProgramStatus`] instead
     /// (see [`ProgramStatus`]).
     ///
-    /// [`Terminal::on_program_status`]: crate::Terminal::on_program_status
     /// [`ProgramStatus`]: crate::effect::ProgramStatus
     ProgramStatus,
 }
@@ -477,8 +476,7 @@ pub enum CommandType<'p> {
 ///
 /// Newer versions of libghostty may add terminators. A terminator these
 /// bindings don't know yet makes [`Command::command_type`] give
-/// [`CommandType::Invalid`], and makes
-/// [`Terminal::on_unknown_sequence`](crate::Terminal::on_unknown_sequence)
+/// [`CommandType::Invalid`], and makes [`crate::effect::OnUnknownSequence`]
 /// skip the sequence.
 #[repr(i32)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, int_enum::IntEnum)]

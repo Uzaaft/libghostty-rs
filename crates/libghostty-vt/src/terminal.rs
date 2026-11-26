@@ -94,7 +94,7 @@ impl<'alloc> Terminal<'alloc> {
     /// Feeds raw bytes through the terminal's VT stream parser, updating
     /// terminal state accordingly. By default, sequences that require output
     /// (queries, device status reports) are silently ignored.
-    /// Use [`Terminal::on_pty_write`] to install a callback that receives
+    /// Use [`crate::effect::OnPtyWrite`] to install a callback that receives
     /// response data.
     ///
     /// This never fails. Any erroneous input or errors in processing the input
@@ -254,7 +254,7 @@ impl<'alloc> Terminal<'alloc> {
     /// by the spec so that resize results are shown immediately), and sends an
     /// in-band size report if mode 2048 is enabled.
     ///
-    /// If synchronized output was enabled, the [render hold](Self::on_render_hold)
+    /// If synchronized output was enabled, the [render hold](crate::effect::OnRenderHold)
     /// callback is invoked to report that the hold ended.
     pub fn resize(
         &mut self,
@@ -281,10 +281,10 @@ impl<'alloc> Terminal<'alloc> {
     /// including modes, scrollback, scrolling region, and screen contents.
     /// The terminal dimensions are preserved.
     ///
-    /// If synchronized output was enabled, the [render hold](Self::on_render_hold)
+    /// If synchronized output was enabled, the [render hold](crate::effect::OnRenderHold)
     /// callback is invoked to report that the hold ended.
     ///
-    /// This doesn't call the [reset](Self::on_reset) callback.
+    /// This doesn't call the [reset](crate::effect::OnReset) callback.
     pub fn reset(&mut self) {
         unsafe { ffi::ghostty_terminal_reset(self.inner.as_raw()) }
     }
@@ -616,7 +616,7 @@ impl<'alloc> Terminal<'alloc> {
     }
 
     /// Set the most bytes of each unsupported sequence to keep and pass to the
-    /// [unknown sequence callback](Self::on_unknown_sequence). The same limit
+    /// [unknown sequence callback](crate::effect::OnUnknownSequence). The same limit
     /// applies to APC and OSC sequences.
     ///
     /// Zero, the default, turns unsupported sequence reporting off.
@@ -673,7 +673,7 @@ impl<'alloc> Terminal<'alloc> {
     /// Data beyond the limit fails the whole transaction with EFBIG. The
     /// transaction is discarded, later write-related packets are ignored
     /// until a new write begins, and nothing reaches the
-    /// [clipboard write callback](Self::on_clipboard_write).
+    /// [clipboard write callback](crate::effect::OnClipboardWrite).
     ///
     /// Transactions are buffered in memory, so this limit bounds how much
     /// memory a single write can make the terminal allocate. Pass

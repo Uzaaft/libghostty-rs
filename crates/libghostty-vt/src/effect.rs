@@ -461,7 +461,7 @@ effect! {
     /// program will be "granted" and you can skip permission requests.
     ///
     /// Clipboard read requests (OSC 52 `"?"` and OSC 5522 reads) are delivered to
-    /// [`Terminal::on_clipboard_read`] instead.
+    /// [`crate::effect::OnClipboardRead`] instead.
     pub trait OnClipboardWrite {
         const OPTION = CLIPBOARD_WRITE;
         type Raw = TerminalClipboardWriteFn(write: *const ffi::ClipboardWrite);
@@ -567,7 +567,7 @@ effect! {
     ///   one. If the root record has app `"deploy"` and the record
     ///   `"us-east"` has none, show `"us-east"` with app `"deploy"` too.
     /// - When a new shell prompt starts ([`SemanticPromptKind::PromptStart`]
-    ///   from the [`Terminal::on_semantic_prompt`] callback) or the program
+    ///   from the [`crate::effect::OnSemanticPrompt`] callback) or the program
     ///   running in the terminal exits, remove `working` and
     ///   `blocked` records. You may remove `idle` records too. Keep `done`
     ///   and `error` records until the user has seen them, for example until
@@ -578,7 +578,7 @@ effect! {
     ///
     /// A full reset (RIS, `ESC c`) removes every record. When that happens,
     /// the terminal calls this with a [`ProgramStatusState::Clear`] report
-    /// and an empty id, and then calls the [`Terminal::on_reset`] callback.
+    /// and an empty id, and then calls the [`crate::effect::OnReset`] callback.
     /// This only happens when `ESC c` is processed by [`Terminal::vt_write`]
     /// or [`Terminal::vt_write_until`]. [`Terminal::reset`] doesn't
     /// call this, so clear your records yourself after calling it.
@@ -658,7 +658,7 @@ effect! {
     ///
     /// terminal
     ///     .register_effects(Handler::default())?
-    ///     // Set a pty write callback too, so programs that check for support
+    ///     // Set a pty write effect too, so programs that check for support
     ///     // get a reply.
     ///     .with_on_pty_write()?
     ///     .with_on_program_status()?;
@@ -700,7 +700,7 @@ effect! {
     ///
     /// Programs may ask whether the terminal supports the protocol by
     /// sending `OSC 7501 ; ?`. While this callback is set, the terminal
-    /// answers through [`Terminal::on_pty_write`] with `?` followed by the
+    /// answers through [`crate::effect::OnPtyWrite`] with `?` followed by the
     /// states and kinds it accepts:
     ///
     /// ```text
@@ -767,11 +767,11 @@ effect! {
     /// running in the terminal, such as the current command.
     ///
     /// The terminal has already reset itself when this is called. The
-    /// [`Terminal::on_title_changed`] and [`Terminal::on_pwd_changed`]
+    /// [`crate::effect::OnTitleChanged`] and [`crate::effect::OnPwdChanged`]
     /// callbacks are not called for the cleared title and working directory,
     /// so update anything you show for them here. A full reset also removes
     /// any progress report and program status records. If you set
-    /// [`Terminal::on_progress_report`] or [`Terminal::on_program_status`],
+    /// [`crate::effect::OnProgressReport`] or [`crate::effect::OnProgramStatus`],
     /// those callbacks are called before this one.
     ///
     /// A soft reset (DECSTR, `CSI ! p`) keeps the screen, title and working
@@ -888,11 +888,11 @@ effect! {
     ///   malformed.
     /// - Supported protocols that you turned off.
     ///
-    /// The callback runs during [`Self::vt_write`]. It may write a reply to
+    /// The callback runs during [`Terminal::vt_write`]. It may write a reply to
     /// the pty, and that reply stays in order with the terminal's own
-    /// replies. It must not call [`Self::vt_write`] on the same terminal.
+    /// replies. It must not call [`Terminal::vt_write`] on the same terminal.
     ///
-    /// Nothing is reported until [`Self::set_unknown_max_bytes`] is also set
+    /// Nothing is reported until [`Terminal::set_unknown_max_bytes`] is also set
     /// to a nonzero value. Installing the callback by itself keeps no sequence
     /// data and allocates no sequence-capture buffers.
     pub trait OnUnknownSequence {
@@ -1234,7 +1234,7 @@ impl<'t> ClipboardRead<'t> {
     /// permission prompt and serve the read.
     ///
     /// Always false when [`mimes`](Self::mimes) is empty: such a request is
-    /// served without a prompt (see [`Terminal::on_clipboard_read`]), so the
+    /// served without a prompt (see [`crate::effect::OnClipboardRead`]), so the
     /// terminal never consults grants for it and a one-time password is
     /// preserved for the follow-up data read.
     #[must_use]
@@ -1264,9 +1264,9 @@ impl<'t> ClipboardRead<'t> {
     /// `text/plain`.
     ///
     /// The answer is written to the pty before this returns, so the
-    /// [pty write callback](Terminal::on_pty_write) runs inside this call. If
+    /// [pty write effect](crate::effect::OnPtyWrite) runs inside this call. If
     /// both callbacks share state through a [`RefCell`](std::cell::RefCell),
-    /// don't keep it borrowed across `reply`: the pty write callback's borrow
+    /// don't keep it borrowed across `reply`: the pty write effect's borrow
     /// would panic, and a panic in a callback aborts the process.
     pub fn reply(
         self,
@@ -1439,7 +1439,7 @@ pub enum UnknownSequence<'t> {
     /// ```
     ///
     /// For that sequence, `content` is `7400;status=busy` and `terminator`
-    /// is [`osc::Terminator::Bel`]. See [`Terminal::on_unknown_sequence`]
+    /// is [`osc::Terminator::Bel`]. See [`crate::effect::OnUnknownSequence`]
     /// for a complete example.
     #[non_exhaustive]
     Osc {
@@ -1553,7 +1553,7 @@ impl<'t> DesktopNotification<'t> {
 
 /// A request from the running program to resize the window.
 ///
-/// Passed to [`Terminal::on_resize_window`].
+/// Passed to [`crate::effect::OnResizeWindow`].
 ///
 /// New kinds may be added in later versions. Match with a wildcard arm and
 /// ignore any kind you don't handle.
@@ -1607,7 +1607,7 @@ impl ResizeWindow {
 }
 
 /// A shell integration event, passed to the
-/// [`Terminal::on_semantic_prompt`] callback.
+/// [`crate::effect::OnSemanticPrompt`] callback.
 ///
 /// [`kind`](Self::kind) says which step of the command this is. The other
 /// fields only carry information for the kinds listed on each field, and are
@@ -1615,7 +1615,7 @@ impl ResizeWindow {
 ///
 /// Strings are only valid during the callback. Copy them if you need them
 /// later. The lifetime `'t` enforces this: the event cannot escape the
-/// [`Terminal::on_semantic_prompt`] callback it was handed to.
+/// [`crate::effect::OnSemanticPrompt`] callback it was handed to.
 #[derive(Debug, Copy, Clone)]
 pub struct SemanticPrompt<'t> {
     ptr: *const ffi::TerminalSemanticPrompt,
@@ -1786,7 +1786,7 @@ pub enum PromptKind {
 /// callback. Text that the program didn't send is an empty string. All
 /// strings are only valid during the callback, so copy any you want to keep.
 /// The lifetime `'t` enforces this: the report cannot escape the
-/// [`Terminal::on_program_status`] callback it was handed to.
+/// [`crate::effect::OnProgramStatus`] callback it was handed to.
 #[derive(Debug, Copy, Clone)]
 pub struct ProgramStatus<'t> {
     ptr: *const ffi::TerminalProgramStatus,
@@ -1864,7 +1864,7 @@ impl<'t> ProgramStatus<'t> {
     /// `"cargo"`, `"terraform"`, or `"claude-code"`. Use it as a key for
     /// grouping, filtering, or choosing an icon. It is not a label. The label
     /// is [`title`](Self::title). Empty when the report didn't include one.
-    /// See [`Terminal::on_program_status`] for how an empty app is filled in
+    /// See [`crate::effect::OnProgramStatus`] for how an empty app is filled in
     /// from a parent record.
     #[must_use]
     pub fn app(self) -> &'t [u8] {
@@ -1985,7 +1985,7 @@ pub enum ProgressState {
 }
 
 /// Device attributes response data for all three DA levels.
-/// Filled by the [`Terminal::on_device_attributes`] callback in response
+/// Filled by the [`crate::effect::OnDeviceAttributes`] callback in response
 /// to CSI c, CSI > c, or CSI = c queries. The terminal uses whichever
 /// sub-struct matches the request type.
 #[derive(Debug, Clone, Copy)]
@@ -2279,7 +2279,7 @@ mod tests {
         assert_eq!(handler.callback_count, 1);
     }
 
-    /// What a clipboard read callback observed about its request.
+    /// What a clipboard read effect observed about its request.
     #[derive(Debug, Default, PartialEq, Eq)]
     struct SeenRead {
         location: Option<ClipboardLocation>,
@@ -2290,7 +2290,7 @@ mod tests {
         can_remember: bool,
     }
 
-    /// Feed `input` to a terminal whose clipboard read callback records the
+    /// Feed `input` to a terminal whose clipboard read effect records the
     /// request and hands it to `answer`, returning what was seen and what
     /// the terminal wrote back to the pty.
     ///
