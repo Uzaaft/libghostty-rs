@@ -3603,17 +3603,33 @@ mod miri_soundness {
     /// conversion inside `extern "C"`), while still delivering known tags.
     #[test]
     fn resize_window_skips_unknown_tags() {
-        let seen = std::cell::RefCell::new(Vec::new());
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<ResizeWindow>,
+        }
+        impl OnResizeWindow for Handler {
+            fn on_resize_window(&mut self, _terminal: &Terminal<'_>, request: ResizeWindow) {
+                self.seen.push(request);
+            }
+        }
+
         let mut terminal = Terminal::new(8, 2).unwrap();
         terminal
-            .on_resize_window(|_, request| seen.borrow_mut().push(request))
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_resize_window()
             .unwrap();
+
         // `GRID + 1`, then `GRID` as the positive control.
         terminal.vt_write(b"resize:unknown");
         terminal.vt_write(b"resize:grid");
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
+
         drop(terminal);
         assert_eq!(
-            seen.into_inner(),
+            seen,
             [ResizeWindow::Grid {
                 rows: NonZeroU16::new(30),
                 columns: NonZeroU16::new(100),
@@ -3629,12 +3645,17 @@ mod miri_soundness {
     /// terminator it doesn't know, while still delivering known ones.
     #[test]
     fn unknown_sequence_skips_unknown_tags_and_terminators() {
-        let seen = std::cell::RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_unknown_sequence(|_, sequence| {
-                // Copy the content out; it is only borrowed for the callback.
-                seen.borrow_mut().push(match sequence {
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<(Option<osc::Terminator>, Vec<u8>, bool)>,
+        }
+        impl OnUnknownSequence for Handler {
+            fn on_unknown_sequence<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                sequence: UnknownSequence<'t>,
+            ) {
+                self.seen.push(match sequence {
                     UnknownSequence::Apc { content, truncated } => {
                         (None, content.to_vec(), truncated)
                     }
@@ -3644,14 +3665,26 @@ mod miri_soundness {
                         terminator,
                     } => (Some(terminator), content.to_vec(), truncated),
                 });
-            })
+            }
+        }
+
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_unknown_sequence()
             .unwrap();
+
         // `OSC + 1` and an OSC ending in `BEL + 1`, then APC and OSC as the
         // positive controls.
         terminal.vt_write(b"unknown:future");
         terminal.vt_write(b"unknown:osc-badterm");
         terminal.vt_write(b"unknown:apc");
         terminal.vt_write(b"unknown:osc");
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
+
         drop(terminal);
         assert_eq!(
             seen.into_inner(),
