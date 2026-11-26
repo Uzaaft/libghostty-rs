@@ -132,8 +132,8 @@ rather than for that mode, so that other sources of holds can be added later.
 the terminal as it is right now, so a renderer that updates on every draw shows
 half-drawn frames. To avoid that:
 
-1. Install a [`Terminal::on_render_hold()`] callback on the terminal.
-2. When a hold begins, update the render state from inside the callback. At that
+1. Install an [`OnRenderHold`] efect handler on the terminal.
+2. When a hold begins, update the render state from inside the handler. At that
    moment the terminal holds exactly the frame the program wants left on screen.
    Nothing after the start of the hold has been processed yet, even if more
    bytes follow in the same [`Terminal::vt_write()`].
@@ -163,84 +163,90 @@ someone scrolls or starts a selection.
 
 > [!WARNING]
 > 
-> The [`Terminal::on_render_hold`] callback runs inside an `extern "C"`
+> The [`OnRenderHold`] effect handler runs inside an `extern "C"`
 > function, so a panic in it **aborts the process**.
 
-If the callback updates the render state, don't keep the render state
-borrowed (e.g. through a [`Snapshot`] or a [`RefMut`](std::cell::RefMut))
-across [`Terminal::vt_write`], [`Terminal::reset`] or [`Terminal::resize`],
-since any of them can invoke the callback. Use a non-panicking borrow such as
-[`RefCell::try_borrow_mut`](std::cell::RefCell::try_borrow_mut) inside the
-callback.
+If the handler updates the render state, don't keep the render state
+borrowed (e.g. through a [`Snapshot`]) across [`Terminal::vt_write`],
+[`Terminal::reset`] or [`Terminal::resize`], since any of them can invoke
+the callback. Cache information needed to draw the frame instead.
 
-```rust
+```rust,ignore
 use libghostty_vt::{
-  error::Error,
-  mode::Mode,
-  RenderState, Terminal,
+    error::Error,
+    effect,
+    mode::Mode,
+    RenderState, Terminal,
 };
 
-use std::{
-  cell::{Cell, RefCell},
-  time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 struct Renderer {
-    render_state: RefCell<RenderState<'static>>,
-    held: Cell<bool>,
-    hold_started: Cell<Instant>,
+    render_state: RenderState<'static>,
+    frame: Frame,
+    held: bool,
+    hold_started: Instant,
+}
+impl effect::OnRenderHold for Renderer {
+    fn on_render_hold(&mut self, terminal: &Terminal<'_>, held: bool) {
+        if held {
+            // Capture the frame the program wants left on screen. Don't
+            // panic if that fails, e.g. because the render state is
+            // borrowed elsewhere; keep drawing the previous frame instead.
+            let snapshot = self.render_state.update(terminal);
+            // Cache all the details required on this frame...
+            self.frame = calculate_frame(&snapshot);
+            self.hold_started = Instant::now();
+        }
+        self.held = held;
+    }
 }
 
-fn draw(r: &Renderer, terminal: &mut Terminal<'static, '_>) -> Result<(), Error> {
+fn draw(terminal: &mut Terminal<'static, '_>) -> Result<(), Error> {
+    let renderer = terminal.effect_handler_mut::<Renderer>()?;
+
     // Give up on a program that holds the screen for too long.
-    if r.held.get() && r.hold_started.get().elapsed() >= Duration::from_secs(1) {
+    if renderer.held && renderer.hold_started.elapsed() >= Duration::from_secs(1) {
         terminal.set_mode(Mode::SYNC_OUTPUT, false)?;
-        r.held.set(false);
+        renderer.held = false;
     }
 
     // During a hold, skip the update and draw the captured frame.
-    if !r.held.get() {
-        r.render_state.borrow_mut().update(terminal)?;
+    if !renderer.held {
+        let snapshot = renderer.render_state.update(terminal)?;
+        renderer.frame = calculate_frame(&snapshot);
     }
-    // draw_render_state(&r.render_state);
+    renderer.frame.draw();
     Ok(())
 }
 
 # fn main() -> Result<(), Box<dyn std::error::Error>> {
 let renderer = Renderer {
-    render_state: RefCell::new(RenderState::new()?),
-    held: Cell::new(false),
-    hold_started: Cell::new(Instant::now()),
+    render_state: RenderState::new()?,
+    held: false,
+    hold_started: Instant::now(),
 };
 
 let mut terminal = Terminal::new(80, 24)?;
-terminal.on_render_hold(|term, held| {
-    if held {
-        // Capture the frame the program wants left on screen. Don't
-        // panic if that fails, e.g. because the render state is
-        // borrowed elsewhere; keep drawing the previous frame instead.
-        let _ = renderer
-            .render_state
-            .try_borrow_mut()
-            .map(|mut state| state.update(term).map(|_| ()));
-        renderer.hold_started.set(Instant::now());
-    }
-    renderer.held.set(held);
-})?;
+terminal
+    .register_effects(renderer)?
+    .with_on_render_hold()?;
 
 terminal.vt_write(b"\x1b[?2026h");
-assert!(renderer.held.get());
-draw(&renderer, &mut terminal)?;
+let renderer = terminal.effect_handler::<Renderer>()?;
+assert!(renderer.held);
+draw(&mut terminal)?;
 
 terminal.vt_write(b"\x1b[?2026l");
-assert!(!renderer.held.get());
-draw(&renderer, &mut terminal)?;
+let renderer = terminal.effect_handler::<Renderer>()?;
+assert!(!renderer.held);
+draw(&mut terminal)?;
 # Ok(())
 # }
 ```
 
     
-Like every callback, this one runs on the thread that called
+Like every handler, this one runs on the thread that called
 [`Terminal::vt_write()`]. If another thread draws the render state, protect
 the update in the callback the same way you protect any other access to it.
 

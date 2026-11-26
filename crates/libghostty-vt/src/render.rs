@@ -780,10 +780,7 @@ impl<'alloc> RenderState<'alloc> {
     ///
     /// Returns `Err(Error::OutOfMemory)` if updating the state requires
     /// allocation and that allocation fails.
-    pub fn update<'cb>(
-        &mut self,
-        terminal: &Terminal<'alloc>,
-    ) -> Result<Snapshot<'alloc, '_>> {
+    pub fn update<'cb>(&mut self, terminal: &Terminal<'_>) -> Result<Snapshot<'alloc, '_>> {
         crate::sys::GATE.freeze();
 
         let result =
@@ -811,10 +808,7 @@ impl<'alloc> RenderState<'alloc> {
     ///
     /// This consumes terminal and screen dirty state in the same way as the
     /// internal render state update path.
-    pub fn begin_update<'cb>(
-        &mut self,
-        terminal: &Terminal<'alloc>,
-    ) -> Result<Update<'alloc, '_>> {
+    pub fn begin_update<'cb>(&mut self, terminal: &Terminal<'_>) -> Result<Update<'alloc, '_>> {
         crate::sys::GATE.freeze();
 
         let result = unsafe {

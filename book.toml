@@ -15,6 +15,7 @@ build.preludes = [
   "libghostty_vt::*",
   "libghostty_vt::alloc::Bytes",
   "libghostty_vt::color::*",
+  "libghostty_vt::effect::*",
   "libghostty_vt::fmt::Formatter",
   "libghostty_vt::grid_ref::*",
   "libghostty_vt::kitty::graphics::{Graphics,PlacementIterator,PlacementIteration,Image}",

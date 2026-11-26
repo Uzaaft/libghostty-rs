@@ -156,8 +156,8 @@ holds (just `text/plain` for an ordinary paste), a MIME reader callback that
 produces the data of any one of them, and where the paste came from. The
 terminal decides how its current modes apply.
 
-The bytes come out of the [`Terminal::on_pty_write`] callback, so you need
-one installed. See [Effects](effects.md).
+The bytes come out of the [`OnPtyWrite`] effect handler, so you need one installed.
+See [Effects](effects.md).
 
 ### What gets written
 
@@ -167,7 +167,7 @@ these are true:
 - Kitty clipboard protocol paste events (mode 5522, [`Mode::PASTE_EVENTS`])
   are on.
 - The person pasted from a clipboard ([`paste::Source::Clipboard`]).
-- You've installed a clipboard read callback.
+- You've installed a clipboard read effect handler.
 
 A paste event lists the clipboard's MIME types with a one-time password. No data
 is read for it. The program then reads what it wants through your clipboard read
