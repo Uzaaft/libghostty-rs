@@ -62,6 +62,7 @@ impl<'alloc> Terminal<'alloc> {
     ///
     #[doc = crate::guide_ref!("Effects guide", "effects")]
     pub fn register_effects<H: 'static>(&mut self, effs: H) -> Result<Effects<'_, 'alloc, H>> {
+        self.unregister_effects()?;
         let effs = self.effect_handler.insert(Box::new(effs));
 
         // SAFETY: Let's talk about how this is safe aliasing-wise.
@@ -116,8 +117,8 @@ pub struct Effects<'t, 'alloc, H> {
     _phan: PhantomData<H>,
 }
 
-macro_rules! effect {
-    {
+macro_rules! effects {
+    {$(
         $(#[$meta:meta])*
         $vis:vis trait $trait:ident {
             const OPTION = $opt:ident;
@@ -129,7 +130,14 @@ macro_rules! effect {
 
             fn $regfn:ident();
         }
-    } => {
+    )*} => {
+        impl Terminal<'_> {
+            fn unregister_effects(&mut self) -> ::core::result::Result<(), $crate::error::Error> {
+                $(self.set_ptr($crate::ffi::TerminalOption::$opt, ::core::ptr::null())?;)*
+                Ok(())
+            }
+        }
+    $(
         $(#[$meta])*
         ///
         #[doc = concat!("Register with [`Effects::", stringify!($regfn), "`].")]
@@ -192,10 +200,10 @@ macro_rules! effect {
                 ::core::result::Result::Ok(self)
             }
         }
-    }
+    )*}
 }
 
-effect! {
+effects! {
     /// Effect handler for when the terminal eneds to write data back to the
     /// pty (e.g. in response to a DECRQM query, device status report, or
     /// VT-driven mode 2048 enable).
@@ -209,8 +217,7 @@ effect! {
         }
         fn with_on_pty_write();
     }
-}
-effect! {
+
     /// Effect handler for when the given function when the terminal receives
     /// a BEL character (0x07).
     pub trait OnBell {
@@ -222,9 +229,7 @@ effect! {
         }
         fn with_on_bell();
     }
-}
 
-effect! {
     /// Effect handler for when the running program asks the terminal to
     /// stop updating the screen, and again when it lets the screen update again.
     /// We call the time in between a "render hold". See [Render holds] for what
@@ -263,9 +268,7 @@ effect! {
         }
         fn with_on_render_hold();
     }
-}
 
-effect! {
     /// Effect handler for when the terminal receives
     /// an ENQ character (0x05).
     ///
@@ -279,9 +282,7 @@ effect! {
         }
         fn with_on_enquiry();
     }
-}
 
-effect! {
     /// Effect handler for when the terminal receives an XTVERSION
     /// query (CSI > q), and respond with the resulting version string
     /// (e.g. "myterm 1.0").
@@ -296,9 +297,7 @@ effect! {
         }
         fn with_on_xtversion();
     }
-}
 
-effect! {
     /// Effect handler for when the terminal title changes
     /// via escape sequences (e.g. OSC 0 or OSC 2).
     ///
@@ -312,9 +311,7 @@ effect! {
         }
         fn with_on_title_changed();
     }
-}
 
-effect! {
     /// Effect handler for when the terminal pwd (current working
     /// directory) changes via escape sequences: OSC 7 (file:// URI),
     /// OSC 9 (ConEmu CurrentDir), or OSC 1337 CurrentDir (iTerm2).
@@ -336,9 +333,7 @@ effect! {
         }
         fn with_on_pwd_changed();
     }
-}
 
-effect! {
     /// Effect handler in response to XTWINOPS size queries (CSI
     /// 14/16/18/19 t) and when VT input enables in-band size reports (mode
     /// 2048). Return `Some` with the current terminal geometry, or return
@@ -362,9 +357,7 @@ effect! {
         }
         fn with_on_size();
     }
-}
 
-effect! {
     /// Effect handler for color scheme queries (CSI ? 996 n).
     ///
     /// Called when the terminal receives a color scheme device status report
@@ -385,9 +378,7 @@ effect! {
         }
         fn with_on_color_scheme();
     }
-}
 
-effect! {
     /// Effect handler for device attributes queries (DA1/DA2/DA3).
     ///
     /// Called when the terminal receives a device attributes query (CSI c,
@@ -444,9 +435,7 @@ effect! {
         }
         fn with_on_device_attributes();
     }
-}
 
-effect! {
     /// Effect handler for when the running program performs a clipboard write.
     ///
     /// OSC 52, iTerm2 OSC 1337 Copy, and Kitty clipboard (OSC 5522) writes
@@ -478,9 +467,7 @@ effect! {
         }
         fn with_on_clipboard_write();
     }
-}
 
-effect! {
     /// Effect handler for when the running program requests clipboard
     /// contents via OSC 52 with a "?" payload or a Kitty clipboard (OSC 5522)
     /// read. The read is synchronous and must be answered before the
@@ -518,9 +505,7 @@ effect! {
         }
         fn with_on_clipboard_read();
     }
-}
 
-effect! {
     /// Effect handler for when the running program requests a desktop
     /// notification via OSC 9 or OSC 777.
     pub trait OnDesktopNotification {
@@ -534,9 +519,7 @@ effect! {
         }
         fn with_on_desktop_notification();
     }
-}
 
-effect! {
     /// Effect handler for when the running program reports progress
     /// via OSC 9;4.
     pub trait OnProgressReport {
@@ -550,9 +533,7 @@ effect! {
         }
         fn with_on_progress_report();
     }
-}
 
-effect! {
     /// Effect handler for when the running program sends a program
     /// status report via OSC 7501.
     ///
@@ -730,9 +711,7 @@ effect! {
         }
         fn with_on_program_status();
     }
-}
 
-effect! {
     /// Effect handler for when the shell reports a step of a command.
     ///
     /// Each command goes through four steps, in this order: the prompt starts,
@@ -760,9 +739,7 @@ effect! {
         }
         fn with_on_semantic_prompt();
     }
-}
 
-effect! {
     /// Effect handler for when the running program performs a full
     /// reset (RIS, `ESC c`).
     ///
@@ -794,9 +771,7 @@ effect! {
         }
         fn with_on_reset();
     }
-}
 
-effect! {
     /// Effect handler for when the running program asks to resize the
     /// window, such as with CSI 8 ; rows ; columns t.
     ///
@@ -878,9 +853,7 @@ effect! {
         }
         fn with_on_resize_window();
     }
-}
 
-effect! {
     /// Effect handler for each complete sequence that libghostty-vt does not
     /// implement. Match on [`UnknownSequence`] first, because more kinds of
     /// sequences may be reported in later versions.
