@@ -129,8 +129,9 @@ selections. It handles click counts, dragging, and what each click count
 selects. You feed it events and it hands back snapshots.
 
 Create one [`Gesture`] per stream of pointer events with
-[`Gesture::new()`]. It isn't bound to a terminal, so the functions
-that need one take it as an argument. Then create a gesture event
+[`Gesture::new()`], passing its owning terminal. Operations still take a
+terminal argument, but reject a different terminal with `Error::InvalidValue`.
+Then create a gesture event
 for each event type you use with its corresponding `new` function,
 (e.g. [`PressEvent::new()`]). The type is fixed, but the
 object is reusable: change its options with the various setters
@@ -139,9 +140,9 @@ object is reusable: change its options with the various setters
 
 | Event type                                            | `apply` arguments | Optional                                |
 | ----------------------------------------------------- | ------------------ | --------------------------------------- |
-| [`PressEvent`]           | Ref                | The rest use their defaults.            |
-| [`DragEvent`]            | Ref, geometry      | Position, rectangle, word boundaries.   |
-| [`ReleaseEvent`]         | None               | Ref. Unset means it wasn't over a cell. |
+| [`PressEvent`]           | Point              | The rest use their defaults.            |
+| [`DragEvent`]            | Point, geometry    | Position, rectangle, word boundaries.   |
+| [`ReleaseEvent`]         | None               | Point. Unset means it wasn't over a cell. |
 | [`AutoscrollTickEvent`] | Viewport, geometry | Position, rectangle, word boundaries.   |
 | [`DeepPressEvent`]      | None               | Word boundaries.                        |
 
@@ -169,6 +170,7 @@ When a drag reaches the top or bottom of the surface, the gesture wants the
 viewport to scroll. Read [`Gesture::autoscroll()`] after each drag. While it's
 up or down, run a timer of your own that sends [`AutoscrollTickEvent`]
 events. Each tick scrolls the viewport one row and continues the drag.
+Applying a tick requires mutable access to the terminal.
 The interval is up to you, and about 15 milliseconds is a reasonable default.
 Scroll faster by ticking faster. If a tick returns [`Autoscroll::None`],
 the gesture has cancelled itself, so stop the timer.
@@ -179,7 +181,8 @@ Calls that use a gesture aren't safe to run concurrently, and they have to be
 serialized with changes to the terminal.
 
 [`Gesture::reset()`] cancels the current click sequence and
-releases the gesture's tracked state without freeing it.
+releases the gesture's tracked state without freeing it. It does not change
+the owning terminal; create another gesture to use another terminal.
 
 ## Copying it out {#guide-selection-copying}
 
