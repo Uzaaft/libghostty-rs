@@ -25,11 +25,10 @@
 #![doc = crate::guide_ref!("Scrollback", "scrollback")]
 #![doc = crate::guide_ref!("Custom Sequences", "custom-sequences")]
 
-use std::mem::MaybeUninit;
+use std::{any::Any, mem::MaybeUninit};
 
 use crate::{
     alloc::{Allocator, Object},
-    effect::VTable,
     error::{Error, Result, from_optional_result, from_optional_result_uninit, from_result},
     ffi::{self, TerminalData as Data, TerminalOption as Opt},
     key, mouse,
@@ -42,23 +41,12 @@ pub use ffi::TerminalScrollbar as Scrollbar;
 
 /// Opaque handle to a terminal instance.
 #[derive(Debug)]
-pub struct Terminal<'alloc: 'cb, 'cb> {
+pub struct Terminal<'alloc> {
     pub(crate) inner: Object<'alloc, ffi::TerminalImpl>,
-    // Own the allocation through a raw pointer so moving Terminal does not
-    // retag a Box and invalidate the userdata pointer retained by C. Drop
-    // reconstructs the Box only after freeing the native terminal.
-    pub(crate) vtable: *mut VTable<'alloc, 'cb>,
-    // Unique for the life of the process, unlike the handle's address, which
-    // the allocator may hand to a later terminal. Every handle carries the id
-    // of the terminal it refers to, including the borrowed views passed to
-    // callbacks (which copy it from the VTable), and distinct terminals never
-    // share one. The incremental snapshot decoder uses it to tell whether it
-    // still holds the terminal it decodes into, and Kitty placement rects use
-    // it to tell whether a placement belongs to the terminal they're given.
-    pub(crate) id: u64,
+    pub(crate) effect_handler: Option<Box<dyn Any>>,
 }
 
-impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
+impl<'alloc> Terminal<'alloc> {
     /// Create a new terminal instance.
     ///
     /// The terminal starts with various reasonable defaults e.g. around
@@ -95,16 +83,9 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
 
     pub(crate) unsafe fn from_raw(raw: ffi::Terminal) -> Result<Self> {
-        static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let inner = Object::new(raw)?;
-        let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
-            inner,
-            // The VTable keeps a copy of the id so the callback trampolines,
-            // which only get the raw handle and the VTable, can give the
-            // views they build the same id as this terminal.
-            vtable: Box::into_raw(Box::new(VTable::new(id))),
-            id,
+            inner: Object::new(raw)?,
+            effect_handler: None,
         })
     }
 
@@ -113,7 +94,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Feeds raw bytes through the terminal's VT stream parser, updating
     /// terminal state accordingly. By default, sequences that require output
     /// (queries, device status reports) are silently ignored.
-    /// Use [`Terminal::on_pty_write`] to install a callback that receives
+    /// Use [`crate::effect::OnPtyWrite`] to install a callback that receives
     /// response data.
     ///
     /// This never fails. Any erroneous input or errors in processing the input
@@ -273,7 +254,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// by the spec so that resize results are shown immediately), and sends an
     /// in-band size report if mode 2048 is enabled.
     ///
-    /// If synchronized output was enabled, the [render hold](Self::on_render_hold)
+    /// If synchronized output was enabled, the [render hold](crate::effect::OnRenderHold)
     /// callback is invoked to report that the hold ended.
     pub fn resize(
         &mut self,
@@ -300,10 +281,10 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// including modes, scrollback, scrolling region, and screen contents.
     /// The terminal dimensions are preserved.
     ///
-    /// If synchronized output was enabled, the [render hold](Self::on_render_hold)
+    /// If synchronized output was enabled, the [render hold](crate::effect::OnRenderHold)
     /// callback is invoked to report that the hold ended.
     ///
-    /// This doesn't call the [reset](Self::on_reset) callback.
+    /// This doesn't call the [reset](crate::effect::OnReset) callback.
     pub fn reset(&mut self) {
         unsafe { ffi::ghostty_terminal_reset(self.inner.as_raw()) }
     }
@@ -635,7 +616,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     }
 
     /// Set the most bytes of each unsupported sequence to keep and pass to the
-    /// [unknown sequence callback](Self::on_unknown_sequence). The same limit
+    /// [unknown sequence callback](crate::effect::OnUnknownSequence). The same limit
     /// applies to APC and OSC sequences.
     ///
     /// Zero, the default, turns unsupported sequence reporting off.
@@ -692,7 +673,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
     /// Data beyond the limit fails the whole transaction with EFBIG. The
     /// transaction is discarded, later write-related packets are ignored
     /// until a new write begins, and nothing reaches the
-    /// [clipboard write callback](Self::on_clipboard_write).
+    /// [clipboard write callback](crate::effect::OnClipboardWrite).
     ///
     /// Transactions are buffered in memory, so this limit bounds how much
     /// memory a single write can make the terminal allocate. Pass
@@ -769,7 +750,7 @@ impl<'alloc: 'cb, 'cb> Terminal<'alloc, 'cb> {
 }
 
 /// Methods related to history and scrollback.
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// The total number of rows in the active screen including scrollback.
     pub fn total_rows(&self) -> Result<usize> {
         self.get(Data::TOTAL_ROWS)
@@ -871,7 +852,7 @@ impl Terminal<'_, '_> {
 }
 
 /// Methods related to the cursor.
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// Get the cursor column position (0-indexed).
     pub fn cursor_x(&self) -> Result<u16> {
         self.get(Data::CURSOR_X)
@@ -922,13 +903,13 @@ impl Terminal<'_, '_> {
     }
 }
 
-impl Drop for Terminal<'_, '_> {
+impl Drop for Terminal<'_> {
     fn drop(&mut self) {
         unsafe { ffi::ghostty_terminal_free(self.inner.as_raw()) }
         // SAFETY: This terminal owns the allocation from Box::into_raw.
         // The native handle can no longer use its userdata. Borrowed callback
         // views are ManuallyDrop and never reach this destructor.
-        unsafe { drop(Box::from_raw(self.vtable)) }
+        // unsafe { drop(Box::from_raw(self.vtable)) }
     }
 }
 
@@ -1345,10 +1326,10 @@ pub struct ScreenMemoryUsage {
 mod tests {
     use super::*;
     use crate::RenderState;
+    use crate::effect::MockPty;
     use crate::grid_ref::TrackedGridRef;
     use crate::point::{self, Point};
     use crate::terminal::CursorStyle;
-    use std::cell::RefCell;
 
     #[test]
     fn scroll_viewport_delta_prompt() {
@@ -1401,16 +1382,16 @@ mod tests {
 
     /// Feed `input` to a terminal configured by `setup`, returning what it
     /// wrote back to the pty.
-    fn pty_output(setup: impl FnOnce(&mut Terminal<'_, '_>), input: &[u8]) -> Vec<u8> {
-        let output = RefCell::new(Vec::new());
+    fn pty_output(setup: impl FnOnce(&mut Terminal<'_>), input: &[u8]) -> Vec<u8> {
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         setup(&mut terminal);
         terminal.vt_write(input);
-        drop(terminal);
-        output.into_inner()
+        terminal.effect_handler::<MockPty>().unwrap().pty.clone()
     }
 
     /// A ground stop carries no string, so every string field is `None`.
@@ -1847,11 +1828,11 @@ mod tests {
         assert_eq!(terminal.mouse_shape().unwrap(), mouse::Shape::Text);
     }
 
-    fn tiny_terminal() -> Terminal<'static, 'static> {
+    fn tiny_terminal() -> Terminal<'static> {
         Terminal::new(8, 3).expect("terminal should initialize")
     }
 
-    fn codepoint_at_tracked_ref(terminal: &Terminal<'_, '_>, tracked: &TrackedGridRef) -> char {
+    fn codepoint_at_tracked_ref(terminal: &Terminal<'_>, tracked: &TrackedGridRef) -> char {
         let snapshot = tracked
             .snapshot(terminal)
             .expect("tracked snapshot should not fail")
@@ -1994,45 +1975,47 @@ mod tests {
     const DECRQCRA: &[u8] = b"\x1b[7;1;1;1;1;4*y";
 
     /// Write a DECRQCRA and return whatever the terminal replied.
-    fn request_checksum(terminal: &mut Terminal<'_, '_>, output: &RefCell<Vec<u8>>) -> Vec<u8> {
-        output.borrow_mut().clear();
+    fn request_checksum(terminal: &mut Terminal<'_>) -> Vec<u8> {
+        let handler = terminal.effect_handler_mut::<MockPty>().unwrap();
+        handler.pty.clear();
         terminal.vt_write(DECRQCRA);
-        output.borrow().clone()
+
+        let handler = terminal.effect_handler::<MockPty>().unwrap();
+        handler.pty.clone()
     }
 
     #[test]
     fn xt_checksum_report_requires_opt_in() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         terminal.vt_write(CHECKSUM_SCREEN);
 
         // Disabled by default.
-        assert_eq!(request_checksum(&mut terminal, &output), b"");
+        assert_eq!(request_checksum(&mut terminal), b"");
 
         terminal
             .set_xt_checksum_report_enabled(true)
             .expect("enabling checksum reports should succeed");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FEBA\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FEBA\x1b\\");
 
         terminal
             .set_xt_checksum_report_enabled(false)
             .expect("disabling checksum reports should succeed");
-        assert_eq!(request_checksum(&mut terminal, &output), b"");
+        assert_eq!(request_checksum(&mut terminal), b"");
     }
 
     #[test]
     fn xt_checksum_xtchecksum_ignored_while_disabled() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         terminal.vt_write(CHECKSUM_SCREEN);
 
         // XTCHECKSUM 1 (don't negate) while reporting is off is dropped, so
@@ -2041,26 +2024,21 @@ mod tests {
         terminal
             .set_xt_checksum_report_enabled(true)
             .expect("enabling checksum reports should succeed");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FEBA\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FEBA\x1b\\");
 
         // Once enabled, the same XTCHECKSUM takes effect: 0x146 unnegated.
         terminal.vt_write(b"\x1b[1#y");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~0146\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~0146\x1b\\");
     }
 
     #[test]
     fn xt_checksum_extension_changes_calculation() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         terminal.vt_write(CHECKSUM_SCREEN);
         terminal
             .set_xt_checksum_report_enabled(true)
@@ -2070,20 +2048,14 @@ mod tests {
         terminal
             .set_xt_checksum_extension(XtChecksumExtension::NO_ATTRIBUTES)
             .expect("valid extension should be accepted");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FF3A\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FF3A\x1b\\");
 
         // Keeping blanks adds the space: 0x146 + 0x20 = 0x166, negated to
         // 0xFE9A.
         terminal
             .set_xt_checksum_extension(XtChecksumExtension::NO_OMIT_BLANKS)
             .expect("valid extension should be accepted");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FE9A\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FE9A\x1b\\");
 
         // The extension also applies after a full reset (RIS), which clears
         // the screen, so rewrite it.
@@ -2092,36 +2064,28 @@ mod tests {
             .expect("valid extension should be accepted");
         terminal.vt_write(b"\x1bc");
         terminal.vt_write(CHECKSUM_SCREEN);
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~0146\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~0146\x1b\\");
 
         // The empty set restores the DEC calculation.
         terminal
             .set_xt_checksum_extension(XtChecksumExtension::empty())
             .expect("empty extension should be accepted");
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FEBA\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FEBA\x1b\\");
 
         // Bits above 31 are rejected and leave the calculation unchanged.
         let result = terminal.set_xt_checksum_extension(XtChecksumExtension::from_bits_retain(32));
         assert!(matches!(result, Err(Error::InvalidValue)));
-        assert_eq!(
-            request_checksum(&mut terminal, &output),
-            b"\x1bP7!~FEBA\x1b\\"
-        );
+        assert_eq!(request_checksum(&mut terminal), b"\x1bP7!~FEBA\x1b\\");
     }
 
     #[test]
     fn xt_checksum_extension_unwritten_and_full_codepoints() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
+            .register_effects(MockPty::default())
+            .expect("effects should be registered")
+            .with_on_pty_write()
+            .expect("pty_write should be registered");
         terminal
             .set_xt_checksum_report_enabled(true)
             .expect("enabling checksum reports should succeed");
@@ -2131,10 +2095,12 @@ mod tests {
         // Row 1: column 1 is never written, column 2 is a bold `X`. Bold is
         // left on so we'd notice it leaking into the unwritten cell.
         terminal.vt_write("\x1b[2;1H\u{1D400}\x1b[1;2H\x1b[1mX".as_bytes());
-        let request = |terminal: &mut Terminal<'_, '_>, req: &[u8]| {
-            output.borrow_mut().clear();
+        let request = |terminal: &mut Terminal<'_>, req: &[u8]| {
+            let handler = terminal.effect_handler_mut::<MockPty>().unwrap();
+            handler.pty.clear();
             terminal.vt_write(req);
-            output.borrow().clone()
+            let handler = terminal.effect_handler::<MockPty>().unwrap();
+            handler.pty.clone()
         };
 
         // Row 1, columns 1 through 2. Bold `X` is 0x58 + 0x80 = 0xD8.
@@ -2368,76 +2334,5 @@ mod miri_soundness {
             // SAFETY: Registration provided this callback and its userdata.
             unsafe { write.unwrap()(terminal, userdata, data, len) };
         }
-    }
-
-    #[test]
-    fn moved_terminal_callbacks_and_destruction() {
-        use std::cell::Cell;
-        struct CountDrop<'a>(&'a Cell<usize>);
-        impl Drop for CountDrop<'_> {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-        fn dispatch<'alloc: 'cb, 'cb>(
-            mut terminal: Terminal<'alloc, 'cb>,
-        ) -> Terminal<'alloc, 'cb> {
-            terminal.vt_write(b"reply");
-            terminal
-        }
-
-        let drops = Cell::new(0);
-        let calls = Cell::new(0);
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        let first = CountDrop(&drops);
-        let observed = &calls;
-        terminal
-            .on_pty_write(move |_, bytes| {
-                let _guard = &first;
-                assert_eq!(bytes, b"reply");
-                observed.set(observed.get() + 1);
-            })
-            .unwrap();
-        let mut terminal = dispatch(terminal);
-        assert_eq!(calls.get(), 1);
-        assert_eq!(drops.get(), 0);
-
-        let second = CountDrop(&drops);
-        terminal
-            .on_pty_write(move |_, bytes| {
-                let _guard = &second;
-                assert_eq!(bytes, b"reply");
-                observed.set(observed.get() + 10);
-            })
-            .unwrap();
-        assert_eq!(drops.get(), 1);
-        drop(dispatch(terminal));
-        assert_eq!(calls.get(), 11);
-        assert_eq!(drops.get(), 2);
-        drop(Terminal::new(8, 2).unwrap());
-    }
-
-    #[test]
-    fn moved_terminal_nested_clipboard_reply() {
-        let order = std::cell::RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_pty_write(|_, bytes| {
-                assert_eq!(bytes, b"reply");
-                order.borrow_mut().push(2);
-            })
-            .unwrap();
-        terminal
-            .on_clipboard_read(|_, request| {
-                order.borrow_mut().push(1);
-                request.reply(Ok(&[])).finish();
-                order.borrow_mut().push(3);
-            })
-            .unwrap();
-        fn dispatch(mut terminal: Terminal<'_, '_>) {
-            terminal.vt_write(b"clipboard");
-        }
-        dispatch(terminal);
-        assert_eq!(*order.borrow(), [1, 2, 3]);
     }
 }

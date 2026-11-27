@@ -1,5 +1,6 @@
 use libghostty_vt::{
     alloc::{Allocator, Bytes},
+    effect,
     error::Error,
     kitty::graphics::Graphics,
     render::{ImageIterator, ImageProtocol, RenderState, Snapshot},
@@ -91,7 +92,7 @@ fn print_image(graphics: &Graphics<'_>, image_id: u32) {
 ///
 /// A real app waits for the delay that tick_animations() returns. To keep
 /// this example quick, a pretend clock jumps ahead by that delay instead.
-fn run_animation(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
+fn run_animation(terminal: &mut Terminal<'_>) -> Result<(), Error> {
     // These commands set up the animation:
     //
     //   a=T  Send a red 1x1 RGBA image with ID 2 and display it.
@@ -148,7 +149,7 @@ fn run_animation(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
 fn draw_images<'alloc>(
     snapshot: &Snapshot<'alloc, '_>,
     images: &mut ImageIterator<'alloc>,
-    terminal: &Terminal<'alloc, '_>,
+    terminal: &Terminal<'alloc>,
 ) -> Result<usize, Error> {
     // Fill the iterator from the last update.
     let mut image_it = images.update(snapshot)?;
@@ -220,7 +221,7 @@ fn draw_images<'alloc>(
 /// so it keeps the list it has. Before the third frame, new output
 /// scrolls the screen by two rows, which moves both images, so the third
 /// frame reads the list again.
-fn run_frames(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
+fn run_frames(terminal: &mut Terminal<'_>) -> Result<(), Error> {
     // Create the render state and the image iterator once, and reuse them.
     let mut state = RenderState::new()?;
     let mut images = ImageIterator::new()?;
@@ -274,9 +275,14 @@ fn main() -> Result<(), Error> {
     // Install write_pty to see the protocol response.
     // The Kitty graphics protocol sends an APC response back to the pty
     // when an image is loaded (unless suppressed with q=2).
-    terminal.on_pty_write(|_term, data| {
-        println!("  response ({} bytes): {}", data.len(), data.escape_ascii());
-    })?;
+    struct Handler;
+
+    impl effect::OnPtyWrite for Handler {
+        fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+            println!("  response ({} bytes): {}", data.len(), data.escape_ascii());
+        }
+    }
+    terminal.register_effects(Handler)?.with_on_pty_write()?;
 
     // Move the cursor to row 10 so the images have room to scroll up.
     terminal.vt_write(b"\x1b[10;1H");

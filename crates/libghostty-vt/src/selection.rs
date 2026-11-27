@@ -58,7 +58,7 @@ impl<'t> Selection<'t> {
     /// of a rectangular/block selection.
     #[must_use]
     pub fn new(
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
         start: GridRef<'t>,
         end: GridRef<'t>,
         rectangle: bool,
@@ -222,7 +222,7 @@ impl<'t> Selection<'t> {
 }
 
 /// Methods related to [selections](crate::selection).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// Get the active screen's current selection.
     ///
     /// On success, returns an untracked snapshot of the terminal-owned selection.
@@ -366,7 +366,7 @@ impl Terminal<'_, '_> {
     /// // select the nearest word between the original click and current drag point
     /// // in both directions, then combine the outer word bounds.
     /// fn ref_at<'t>(
-    ///     terminal: &'t Terminal<'_, '_>,
+    ///     terminal: &'t Terminal<'_>,
     ///     x: u16,
     ///     y: u32
     /// ) -> Result<GridRef<'t>, Error> {
@@ -410,7 +410,7 @@ pub struct SelectLine<'t> {
 impl<'t> SelectLine<'t> {
     /// Create a new set of options for [deriving a line selection](Terminal::select_line),
     /// from the given grid reference.
-    pub fn new(terminal: &'t Terminal<'_, '_>, grid_ref: GridRef<'t>) -> Self {
+    pub fn new(terminal: &'t Terminal<'_>, grid_ref: GridRef<'t>) -> Self {
         Self {
             terminal: terminal.inner.as_raw(),
             inner: ffi::TerminalSelectLineOptions {
@@ -472,7 +472,7 @@ pub struct SelectWord<'t> {
     _phan: PhantomData<&'t ffi::Terminal>,
 }
 impl<'t> SelectWord<'t> {
-    fn new(terminal: &'t Terminal<'_, '_>, grid_ref: GridRef<'t>) -> Self {
+    fn new(terminal: &'t Terminal<'_>, grid_ref: GridRef<'t>) -> Self {
         Self {
             terminal: terminal.inner.as_raw(),
             inner: ffi::TerminalSelectWordOptions {
@@ -524,7 +524,7 @@ pub struct SelectWordBetween<'t> {
     _phan: PhantomData<&'t ffi::Terminal>,
 }
 impl<'t> SelectWordBetween<'t> {
-    fn new(terminal: &'t Terminal<'_, '_>, start: GridRef<'t>, end: GridRef<'t>) -> Self {
+    fn new(terminal: &'t Terminal<'_>, start: GridRef<'t>, end: GridRef<'t>) -> Self {
         Self {
             terminal: terminal.inner.as_raw(),
             inner: ffi::TerminalSelectWordBetweenOptions {

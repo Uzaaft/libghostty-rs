@@ -4,10 +4,7 @@
 //! a terminal.
 
 use libghostty_vt::{effect, error::Error, paste, Terminal};
-use std::{
-    cell::RefCell,
-    io::{self, Write},
-};
+use std::io::{self, Write};
 
 // ANCHOR: terminal-paste
 /// What the clipboard holds. A real embedder would keep a handle to the
@@ -41,7 +38,7 @@ impl Clipboard {
 // Paste whatever the clipboard holds. The terminal applies its own
 // state: bracketed paste framing (mode 2004) or a Kitty paste event
 // (mode 5522) instead of the text.
-fn paste_clipboard(terminal: &mut Terminal<'_, '_>, text: &'static str) {
+fn paste_clipboard(terminal: &mut Terminal<'_>, text: &'static str) {
     let clipboard = Clipboard { text };
 
     let options = paste::Options::new()
@@ -110,17 +107,16 @@ fn encode_example() {
 }
 // ANCHOR_END: paste-encode
 
-fn main() -> Result<(), Error> {
-    // The base64 password of the last paste event, captured from the OK
-    // packet so the example can play the program's side of the protocol.
-    let event_pw = RefCell::new(Vec::new());
-    let mut terminal = Terminal::new(80, 24)?;
+struct Handler {
+    event_pw: Vec<u8>,
+}
 
-    // Pasted bytes and paste events go to on_pty_write. Serving clipboard
-    // reads is what lets the terminal send paste events at all: without
-    // this callback the program could never read the clipboard, so pastes
-    // stay text even when mode 5522 is enabled.
-    terminal.on_pty_write(|_, data| {
+// Pasted bytes and paste events go to on_pty_write. Serving clipboard
+// reads is what lets the terminal send paste events at all: without
+// this callback the program could never read the clipboard, so pastes
+// stay text even when mode 5522 is enabled.
+impl effect::OnPtyWrite for Handler {
+    fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
         // Everything the terminal writes to the running program: the pasted
         // text, or the paste event packets when mode 5522 is enabled.
         println!("  -> pty ({} bytes): {}", data.len(), data.escape_ascii());
@@ -129,14 +125,20 @@ fn main() -> Result<(), Error> {
         let prefix = b"\x1b]5522;type=read:status=OK:pw=";
 
         if let Some(pw) = data.strip_prefix(prefix) {
-            event_pw.replace(pw.iter().copied().take_while(|&v| v != b'\x1b').collect());
+            self.event_pw = pw.iter().copied().take_while(|&v| v != b'\x1b').collect();
         }
-    })?;
+    }
+}
 
-    // Serves clipboard reads. After a paste event the program's read arrives
-    // with `granted` set, because it carries the event's one-time password,
-    // so the embedder skips its permission prompt.
-    terminal.on_clipboard_read(|_, read| {
+// Serves clipboard reads. After a paste event the program's read arrives
+// with `granted` set, because it carries the event's one-time password,
+// so the embedder skips its permission prompt.
+impl effect::OnClipboardRead for Handler {
+    fn on_clipboard_read<'t>(
+        &mut self,
+        _terminal: &'t Terminal<'_>,
+        read: effect::ClipboardRead<'t>,
+    ) {
         print!(
             r#"  clipboard read: name="{}" "#,
             read.name().escape_ascii(),
@@ -153,7 +155,18 @@ fn main() -> Result<(), Error> {
             b"hello from the clipboard",
         )]))
         .finish();
-    })?;
+    }
+}
+
+fn main() -> Result<(), Error> {
+    // The base64 password of the last paste event, captured from the OK
+    // packet so the example can play the program's side of the protocol.
+    let mut terminal = Terminal::new(80, 24)?;
+
+    terminal
+        .register_effects(Handler { event_pw: vec![] })?
+        .with_on_pty_write()?
+        .with_on_clipboard_read()?;
 
     println!("Plain paste:");
     paste_clipboard(&mut terminal, "hello world");
@@ -176,13 +189,14 @@ fn main() -> Result<(), Error> {
     // Play the program's side: read the clipboard with the password from
     // the event. The read arrives granted and the data is served through
     // write_pty as base64 without any permission prompt.
-    if !event_pw.borrow().is_empty() {
+    let handler = terminal.effect_handler::<Handler>()?;
+    if !handler.event_pw.is_empty() {
         println!("Program reads with the event password:");
         let mut read_seq = Vec::new();
         write!(
             &mut read_seq,
             "\x1b]5522;type=read:pw={}:name=UGFzdGUgZXZlbnQ=;dGV4dC9wbGFpbg==\x1b\\",
-            event_pw.borrow().escape_ascii()
+            handler.event_pw.escape_ascii()
         )
         .unwrap();
         terminal.vt_write(&read_seq);

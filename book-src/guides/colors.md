@@ -162,9 +162,9 @@ luminance and contrast values.
 Programs want to know if your terminal is light or dark, so they can pick colors
 that fit. There are two ways they find out.
 
-A program can ask with `CSI ? 996 n`. Register a callback with
-[`Terminal::on_color_scheme()`] and fill in the current scheme, or
-return `false` to ignore the query. See [Effects](effects.md).
+A program can ask with `CSI ? 996 n`. Register an [`OnColorScheme`] effect handler
+with [`Effects::with_on_color_scheme()`] and return the current scheme, or
+return `None` to ignore the query. See [Effects](effects.md).
 
 Or a program can set mode 2031 and expect you to tell it when the scheme changes.
 For this one, encode the report yourself with [`report::ColorScheme::encode()`]

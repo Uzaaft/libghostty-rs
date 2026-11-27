@@ -5,7 +5,7 @@
 
 use libghostty_vt::{Error, Terminal, search::Search};
 
-fn fixture(terminal: &mut Terminal<'_, '_>) -> Search<'static> {
+fn fixture(terminal: &mut Terminal<'_>) -> Search<'static> {
     terminal.vt_write(b"fixture");
     let mut search = Search::new(terminal).unwrap();
     search.set_needle(terminal, b"fixture").unwrap();
@@ -14,7 +14,7 @@ fn fixture(terminal: &mut Terminal<'_, '_>) -> Search<'static> {
     search
 }
 
-fn rejects_wrong_terminal(search: &mut Search<'_>, terminal: &mut Terminal<'_, '_>) {
+fn rejects_wrong_terminal(search: &mut Search<'_>, terminal: &mut Terminal<'_>) {
     assert!(matches!(search.feed(terminal), Err(Error::InvalidValue)));
     assert!(matches!(search.run(terminal), Err(Error::InvalidValue)));
     assert!(matches!(

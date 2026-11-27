@@ -4,14 +4,11 @@
 // These call into libghostty, which Miri cannot execute.
 #![cfg(not(miri))]
 
-use std::{
-    cell::RefCell,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use libghostty_vt::{
     Error, Terminal,
-    effect::{ClipboardMime, ClipboardReadError},
+    effect::{self, ClipboardMime, ClipboardReadError},
     paste::Options,
     sys,
 };
@@ -45,22 +42,41 @@ impl sys::SecureRandomSource for Counting {
 /// Paste into a terminal whose program asked for Kitty paste events, which
 /// need entropy for their one-time password. Returns the result and output.
 fn paste_event() -> (Result<bool, Error>, Vec<u8>) {
-    let output = RefCell::new(Vec::new());
+    struct Handler {
+        output: Vec<u8>,
+    }
+    impl effect::OnPtyWrite for Handler {
+        fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+            self.output.extend_from_slice(data);
+        }
+    }
+    // Without a clipboard-read handler the paste never reaches the
+    // paste-event path, so the entropy source would not be called.
+    impl effect::OnClipboardRead for Handler {
+        fn on_clipboard_read<'t>(
+            &mut self,
+            _terminal: &'t Terminal<'_>,
+            read: effect::ClipboardRead<'t>,
+        ) -> effect::ClipboardReadReply<'t> {
+            read.reply(Err(ClipboardReadError::Denied))
+        }
+    }
+
     let mut terminal = Terminal::new(80, 24).unwrap();
     terminal
-        .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+        .register_effects(Handler { output: vec![] })
         .unwrap()
-        // Without a clipboard-read handler the paste never reaches the
-        // paste-event path, so the entropy source would not be called.
-        .on_clipboard_read(|_term, request| {
-            request.reply(Err(ClipboardReadError::Denied)).finish();
-        })
+        .with_on_pty_write()
+        .unwrap()
+        .with_on_clipboard_read()
         .unwrap();
     terminal.vt_write(b"\x1b[?5522h");
     let mimes = [ClipboardMime::new(b"text/plain")];
     let result = terminal.paste(Options::new(), &mimes, |_mime, _out| Ok(()));
+    let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+    let output = std::mem::take(&mut handler.output);
     drop(terminal);
-    (result, output.into_inner())
+    (result, output)
 }
 
 #[test]

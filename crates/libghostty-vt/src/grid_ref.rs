@@ -39,7 +39,7 @@ use crate::{
 };
 
 /// Methods related to [grid references](crate::grid_ref).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// Resolve a point in the terminal grid to a grid reference.
     ///
     /// Resolves the given point (which can be in active, viewport, screen,
@@ -308,7 +308,7 @@ impl TrackedGridRef {
     ///
     /// If the tracked reference no longer has a meaningful value, this returns
     /// `Ok(None)`. This includes references whose owning terminal has been dropped.
-    pub fn snapshot<'t>(&self, terminal: &'t Terminal<'_, '_>) -> Result<Option<GridRef<'t>>> {
+    pub fn snapshot<'t>(&self, terminal: &'t Terminal<'_>) -> Result<Option<GridRef<'t>>> {
         // The C ghostty_tracked_grid_ref_snapshot does not take a terminal, so
         // we validate the pairing here to keep the returned GridRef's lifetime
         // soundly tied to a terminal that actually owns the underlying pin.
@@ -374,7 +374,7 @@ impl TrackedGridRef {
     /// at the time this function is called. If the terminal has switched between
     /// primary and alternate screens, this may move the tracked reference from
     /// one screen/page-list to the other.
-    pub fn set(&mut self, terminal: &mut Terminal<'_, '_>, point: Point) -> Result<&mut Self> {
+    pub fn set(&mut self, terminal: &mut Terminal<'_>, point: Point) -> Result<&mut Self> {
         crate::sys::GATE.freeze();
 
         // The C layer validates the terminal/tracked-ref pairing and returns

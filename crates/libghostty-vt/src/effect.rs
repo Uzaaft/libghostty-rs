@@ -11,10 +11,24 @@
 //! result back, you can skip this module.
 //!
 //! # Example
+//!
 //! ```rust
-//! # use libghostty_vt::Terminal;
-//! # let mut terminal = Terminal::new(80, 24).unwrap();
-//! terminal.on_bell(|_term| println!("Bell rang!"));
+//! use libghostty_vt::{effect, Terminal};
+//! # use libghostty_vt::error::Error;
+//!
+//! struct Handler;
+//! impl effect::OnBell for Handler {
+//!     fn on_bell(&mut self, _terminal: &Terminal<'_>) {
+//!         println!("Bell rang!")
+//!     }
+//! }
+//!
+//! # fn main() -> Result<(), Error> {
+//! # let mut terminal = Terminal::new(80, 24)?;
+//! terminal
+//!     .register_effects(Handler)?
+//!     .with_on_bell()?;
+//! # Ok(()) }
 //! ```
 //!
 //! See the [Effects] guide for how to register them, the rules for callbacks,
@@ -24,238 +38,207 @@
 use std::{marker::PhantomData, num::NonZeroU16};
 
 use crate::{
+    Terminal,
     error::{Error, Result},
     ffi, osc,
     report::{ColorScheme, SizeReportSize},
 };
 
-#[allow(unused, reason = "only referenced in docs")]
-use crate::{Terminal, mode::Mode};
+impl<'alloc> Terminal<'alloc> {
+    /// Register [effect handlers](crate::effect) for the terminal.
+    ///
+    /// The handler type `H` is a user-defined type that can implement one or more
+    /// traits associated with effects, such as [`OnBell`].
+    ///
+    /// When registering, you need to call the method on this type that corresponds
+    /// to the trait, such as [`Effects::with_on_bell`] for [`OnBell`], otherwise
+    /// the effect handler would not be registered with libghostty. In advanced
+    /// use cases this may be used to conditionally register effect handlers.
+    ///
+    /// The effect handler can be retrieved later through
+    /// [`Terminal::effect_handler`] or [`Terminal::effect_handler_mut`].
+    ///
+    /// See the [Effects guide].
+    ///
+    #[doc = crate::guide_ref!("Effects guide", "effects")]
+    pub fn register_effects<H: 'static>(&mut self, effs: H) -> Result<Effects<'_, 'alloc, H>> {
+        self.unregister_effects()?;
+        let effs = self.effect_handler.insert(Box::new(effs));
 
-/// You might be wondering just what the heck this is.
+        // SAFETY: Let's talk about how this is safe aliasing-wise.
+        // The only situations where a mutable reference is created are either
+        // in the effect callback trampolines (which are triggered by mutable
+        // terminal methods like `vt_write`) or `effect_handler_mut`. Both
+        // cases already require exclusive access over the terminal and by
+        // extension the effect handler. I therefore consider this safe.
+        let effs = (&raw const **effs).cast::<std::ffi::c_void>();
+
+        self.set_ptr(ffi::TerminalOption::USERDATA, effs)?;
+        Ok(Effects {
+            terminal: self,
+            _phan: PhantomData,
+        })
+    }
+
+    /// Borrow the current effect handler immutably.
+    ///
+    /// # Error
+    ///
+    /// Returns [`Error::InvalidValue`] if an effect handler hasn't been
+    /// installed or the current handler is not of type `H`.
+    pub fn effect_handler<H: 'static>(&self) -> Result<&H> {
+        self.effect_handler
+            .as_ref()
+            .and_then(|h| h.downcast_ref::<H>())
+            .ok_or(Error::InvalidValue)
+    }
+
+    /// Borrow the current effect handler mutably.
+    ///
+    /// # Error
+    ///
+    /// Returns [`Error::InvalidValue`] if an effect handler hasn't been
+    /// installed or the current handler is not of type `H`.
+    pub fn effect_handler_mut<H: 'static>(&mut self) -> Result<&mut H> {
+        self.effect_handler
+            .as_mut()
+            .and_then(|h| h.downcast_mut::<H>())
+            .ok_or(Error::InvalidValue)
+    }
+}
+
+/// Builder for adding [effect handlers](crate::effect) to a terminal.
 ///
-/// Truth to be told, you don't need to understand how it works
-/// in order to use it. It does a bunch of voodoo behind the scenes
-/// that make sure all the invariants of the C API are upheld, while
-/// providing a convenient API for Rust users.
-///
-/// Each handler is defined in this following format:
-/// ```ignore
-/// pub fn on_foobar(
-///     &mut self,
-///     // The corresponding GhosttyTerminalOption
-///     tag = FOOBAR,
-///
-///     // The name of the original function type in C,
-///     // along with the extra C parameters and the expected C return type
-///     from = TerminalFoobarFn(foo: *const u8, bar: usize) -> bool,
-///
-///     // The name of mapped Rust function type,
-///     // along with the Rust parameters and return type.
-///     //
-///     // `<'t>` is used to tie the return value to the lifetime of the
-///     // terminal. The name is arbitrary - any lifetime marker will do.
-///     to = <'t>FoobarFn(&'t [u8]) -> bool,
-/// ) |term, func| {
-///     // `term` is the terminal and `func` is the Rust callback.
-///     // Both names are arbitrary.
-///
-///     // Convert the raw parameters into Rust types.
-///     // This is just to illustrate how.
-///     let slice = unsafe { std::slice::from_raw_parts(foo, bar) };
-///
-///     // Call into user logic and return.
-///     func(&terminal, slice)
-/// }
-/// ```
-macro_rules! handlers {
-    {
-        $(
-            $(#[$fmeta:meta])*
-            $vis:vis fn $name:ident(
+/// Returned by [`Terminal::register_effects`].
+#[doc = crate::guide_ref!("Effects guide", "effect")]
+#[derive(Debug)]
+pub struct Effects<'t, 'alloc, H> {
+    terminal: &'t mut Terminal<'alloc>,
+    _phan: PhantomData<H>,
+}
+
+macro_rules! effects {
+    {$(
+        $(#[$meta:meta])*
+        $vis:vis trait $trait:ident {
+            const OPTION = $opt:ident;
+            type Raw = $rawfn:ident($($rawarg:ident: $rawty: ty),*) $(-> $rawret:ty)? ;
+
+            fn $fn:ident$(<$lf:lifetime>)?(
+                $($arg:ident: $ty:ty),*
+            ) $(-> $ret:ty)? |$handler:ident, $term:ident| $block:block
+
+            fn $regfn:ident();
+        }
+    )*} => {
+        impl Terminal<'_> {
+            fn unregister_effects(&mut self) -> ::core::result::Result<(), $crate::error::Error> {
+                $(self.set_ptr($crate::ffi::TerminalOption::$opt, ::core::ptr::null())?;)*
+                Ok(())
+            }
+        }
+    $(
+        $(#[$meta])*
+        ///
+        #[doc = concat!("Register with [`Effects::", stringify!($regfn), "`].")]
+        ///
+        /// See the [Effects guide] for more details.
+        #[doc = $crate::guide_ref!("Effects guide", "effects")]
+        $vis trait $trait: 'static {
+            #[doc = concat!("Handler function for the [`", stringify!($trait), "`] effect.")]
+            fn $fn$(<$lf>)?(
                 &mut self,
-                tag = $tag:ident,
-                from = $rawfnty:ident( $($rfname:ident: $rfty:ty),*$(,)? ) $(-> $rawrty:ty)?,
-                $(#[$tmeta:meta])*
-                to = $(<$lf:lifetime>)? $fnty:ident( $($fty:ty),*$(,)? ) $(-> $rty:ty)?,
-            ) |$t:ident, $func:ident| $block:block
-        )*
-    } => {
-        /// Methods for registering [effect handlers](crate::effect).
-        impl<'alloc, 'cb> $crate::terminal::Terminal<'alloc, 'cb> {$(
-            $(#[$fmeta])*
-            ///
-            /// See [Effects](crate::effect) for more details.
-            $vis fn $name(&mut self, f: impl $fnty<'alloc, 'cb>) -> $crate::error::Result<&mut Self> {
-                unsafe extern "C" fn callback(
-                    t: $crate::ffi::Terminal,
-                    ud: *mut std::ffi::c_void,
-                    $($rfname: $rfty),*
-                ) $(-> $rawrty)? {
-                    // SAFETY: USERDATA is the owning raw VTable pointer
-                    // returned by Box::into_raw, unchanged by Terminal moves,
-                    // before the callback is registered. ghostty invokes
-                    // callbacks synchronously from vt_write, vt_write_until,
-                    // reset, resize and paste (which writes to the pty). All
-                    // five take `&mut self`, so the VTable outlives this call
-                    // and nothing outside the callbacks touches it meanwhile.
-                    // Callbacks only get a `&Terminal`, so they can't reach
-                    // any of those entry points.
-                    //
-                    // Dispatch nests in one place: `ClipboardRead::reply`
-                    // writes the answer to the pty right away, so the pty
-                    // write callback runs inside the clipboard read callback.
-                    // That is still sound, since neither trampoline keeps a
-                    // reference into the VTable across the user's closure:
-                    // `vtable` is only used to pick out the closure, which
-                    // lives in its own box, and different callbacks use
-                    // different boxes.
-                    let vtable = unsafe { &mut *ud.cast::<VTable<'_, '_>>() };
+                terminal: &$($lf)? Terminal<'_>,
+                $($arg: $ty),*
+            ) $(-> $ret)?;
+        }
 
-                    let obj = $crate::alloc::Object::new(t).expect("received null terminal ptr in callback - this is a bug!");
+        impl<H: $trait> Effects<'_, '_, H> {
+            #[doc = concat!("Register the [`", stringify!($trait), "`] effect handler.")]
+            ///
+            /// This function **must** be called to register the effect handler.
+            /// Just implementing the correct trait does not automatically
+            /// register it. This also means that registration is optional if
+            /// that is required.
+            pub fn $regfn(self) -> Result<Self> {
+                unsafe extern "C" fn trampoline<H: $trait + 'static>(
+                    terminal: $crate::ffi::Terminal,
+                    userdata: *mut ::core::ffi::c_void,
+                    $($rawarg: $rawty),*
+                ) $(-> $rawret)? {
+                    // SAFETY: The C terminal state calls callbacks synchronously
+                    // and different callbacks cannot access the userdata simultaneously.
+                    // We can thus assume we have exclusive access over the userdata.
+                    // Similarly, `effect_handler_mut` cannot be called when
+                    // the terminal is being mutated and effect callbacks are
+                    // called.
+                    let $handler = unsafe { &mut *userdata.cast::<H>() };
+
+                    let obj = $crate::alloc::Object::new(terminal)
+                        .expect("received null terminal ptr in callback - this is a bug!");
+
                     // Build a temporary borrowed Terminal view for the callback
                     // without taking ownership of the underlying ghostty terminal.
-                    //
-                    // The view must carry the real terminal's id, not a
-                    // placeholder: checks such as `PlacementIteration::rect`
-                    // compare ids to tell terminals apart, and a shared
-                    // placeholder would make views of different terminals
-                    // look like the same one.
-                    let term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_, '_> {
+                    let term = ::core::mem::ManuallyDrop::new($crate::terminal::Terminal::<'_> {
                         inner: obj,
-                        vtable: ud.cast(),
-                        id: vtable.id,
+                        effect_handler: None,
                     });
-                    let $t: &$crate::terminal::Terminal = &term;
-                    let $func = vtable.$name.as_deref_mut()
-                        .expect("no handler set but callback is still called - this is a bug!");
+
+                    let $term = &term;
                     $block
                 }
 
-                // SAFETY: Registration has exclusive access to the terminal;
-                // no callback is active and the VTable allocation is live.
-                unsafe { (*self.vtable).$name = Some(::std::boxed::Box::new(f)); }
+                let func: $crate::ffi::$rawfn = Some(trampoline::<H> as _);
 
-                // USERDATA is a raw pointer option: pass the heap allocation
-                // itself, not the address of the Box smart pointer field stored
-                // inline in Terminal.
-                //
-                // Reuse the owning pointer, not a pointer derived from a
-                // temporary mutable reference into the VTable.
-                let userdata = self.vtable.cast::<::std::ffi::c_void>().cast_const();
-                self.set_ptr($crate::ffi::TerminalOption::USERDATA, userdata)?;
-
-                // The callback must be coerced into a function *pointer*
-                // and not a function *item* (which is a ZST whose address is meaningless).
-                // :)
-                // Type-check against the generated C callback alias so ABI changes
-                // cannot silently pass through the type-erased option setter.
-                let _: $crate::ffi::$rawfnty = Some(callback);
-
-                let callback_ptr: unsafe extern "C" fn(
-                    $crate::ffi::Terminal,
-                    *mut ::std::ffi::c_void,
-                    $($rfty),*
-                ) $(-> $rawrty)? = callback;
-
-                $crate::sys::GATE.freeze();
-
-                let result = unsafe {
-                    $crate::ffi::ghostty_terminal_set(
-                        self.inner.as_raw(),
-                        $crate::ffi::TerminalOption::$tag,
-                        callback_ptr as *const ::std::ffi::c_void
-                    )
-                };
-                $crate::error::from_result(result)?;
-                Ok(self)
-            }
-        )*}
-        $(
-            #[doc = concat!(
-                "[Effect] callback type for [`Terminal::",
-                stringify!($name),
-                "`](Terminal::",
-                stringify!($name),
-                ").\n"
-            )]
-            #[doc = $crate::guide_ref!("Effect", "effects")]
-            $(#[$tmeta])*
-            pub trait $fnty<'alloc, 'cb>:
-                $(for<$lf>)? FnMut(
-                    &$($lf)? $crate::terminal::Terminal<'alloc, 'cb>,
-                    $($fty),*
-                ) $(-> $rty)? + 'cb {}
-
-            impl<'alloc, 'cb, F> $fnty<'alloc, 'cb> for F
-            where
-                F: $(for<$lf>)? FnMut(
-                    &$($lf)? $crate::terminal::Terminal<'alloc, 'cb>,
-                    $($fty),*
-                ) $(-> $rty)? + 'cb
-            {}
-        )*
-
-        pub(crate) struct VTable<'alloc, 'cb> {
-            // The `Terminal::id` of the terminal owning this VTable, for the
-            // callback views. See the trampoline above.
-            id: u64,
-            $($name: Option<::std::boxed::Box<dyn $fnty<'alloc, 'cb>>>),*
-        }
-
-        impl ::core::fmt::Debug for VTable<'_, '_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-                f.write_str("VTable {..}")
+                self.terminal.set_ptr(
+                    $crate::ffi::TerminalOption::$opt,
+                    match func {
+                        Some(f) => f as *const ::core::ffi::c_void,
+                        None => ::core::ptr::null(),
+                    }
+                )?;
+                ::core::result::Result::Ok(self)
             }
         }
-
-        impl VTable<'_, '_> {
-            pub(crate) fn new(id: u64) -> Self {
-                Self {
-                    id,
-                    $($name: None),*
-                }
-            }
-        }
-    };
+    )*}
 }
 
-handlers! {
-    /// Call the given function when the terminal needs to write data back
-    /// to the pty (e.g. in response to a DECRQM query, device status report,
-    /// or VT-driven mode 2048 enable).
-    pub fn on_pty_write(
-        &mut self,
-        tag = WRITE_PTY,
-        from = TerminalWritePtyFn(ptr: *const u8, len: usize),
-        to = <'t>PtyWriteFn(&'t [u8]),
-    ) |term, func| {
-        // SAFETY: We trust libghostty to return valid memory given we
-        // uphold all lifetime invariants (e.g. no `vt_write` calls
-        // during this callback, which is guaranteed via the mutable reference).
-        let data = unsafe { std::slice::from_raw_parts(ptr, len) };
-        func(term, data);
+effects! {
+    /// Effect handler for when the terminal eneds to write data back to the
+    /// pty (e.g. in response to a DECRQM query, device status report, or
+    /// VT-driven mode 2048 enable).
+    pub trait OnPtyWrite {
+        const OPTION = WRITE_PTY;
+        type Raw = TerminalWritePtyFn(data: *const u8, len: usize);
+
+        fn on_pty_write<'t>(data: &'t [u8]) |h, term| {
+            let data = unsafe { std::slice::from_raw_parts(data, len) };
+            h.on_pty_write(term, data);
+        }
+        fn with_on_pty_write();
     }
 
-    /// Call the given function when the terminal receives
+    /// Effect handler for when the given function when the terminal receives
     /// a BEL character (0x07).
-    pub fn on_bell(
-        &mut self,
-        tag = BELL,
-        from = TerminalBellFn(),
-        to = BellFn(),
-    ) |term, func| {
-        func(term);
+    pub trait OnBell {
+        const OPTION = BELL;
+        type Raw = TerminalBellFn();
+
+        fn on_bell() |h, term| {
+            h.on_bell(term);
+        }
+        fn with_on_bell();
     }
 
-    /// Call the given function when the running program asks the terminal to
+    /// Effect handler for when the running program asks the terminal to
     /// stop updating the screen, and again when it lets the screen update again.
     /// We call the time in between a "render hold". See [Render holds] for what
     /// to do about one.
     ///
     #[doc = crate::guide_ref!("Render holds", "rendering", "holds")]
     ///
-    /// `held` is true when the program sets mode 2026 ([`Mode::SYNC_OUTPUT`]),
+    /// `held` is true when the program sets mode 2026
+    /// ([`Mode::SYNC_OUTPUT`](crate::mode::Mode::SYNC_OUTPUT)),
     /// which is the only way to start a hold today.
     ///
     /// `held` is false when the hold ends, which happens when:
@@ -276,56 +259,60 @@ handlers! {
     /// panic-safe. Any panic will terminate the entire process.
     ///
     #[doc = crate::guide_ref!("Safety", "rendering", "holds-safety")]
-    pub fn on_render_hold(
-        &mut self,
-        tag = RENDER_HOLD,
-        from = TerminalRenderHoldFn(held: bool),
-        to = RenderHoldFn(bool),
-    ) |term, func| {
-        func(term, held);
+    pub trait OnRenderHold {
+        const OPTION = RENDER_HOLD;
+        type Raw = TerminalRenderHoldFn(held: bool);
+
+        fn on_render_hold(held: bool) |h, term| {
+            h.on_render_hold(term, held);
+        }
+        fn with_on_render_hold();
     }
 
-    /// Call the given function when the terminal receives
+    /// Effect handler for when the terminal receives
     /// an ENQ character (0x05).
     ///
     /// Return `None` to report nothing.
-    pub fn on_enquiry(
-        &mut self,
-        tag = ENQUIRY,
-        from = TerminalEnquiryFn() -> ffi::String,
-        to = <'t>EnquiryFn() -> Option<&'t str>,
-    ) |term, func| {
-        func(term).unwrap_or("").as_bytes().into()
+    pub trait OnEnquiry {
+        const OPTION = ENQUIRY;
+        type Raw = TerminalEnquiryFn() -> ffi::String;
+
+        fn on_enquiry<'t>() -> Option<&'t [u8]> |h, term| {
+            h.on_enquiry(term).unwrap_or(b"").into()
+        }
+        fn with_on_enquiry();
     }
 
-    /// Call the given function when the terminal receives an XTVERSION
+    /// Effect handler for when the terminal receives an XTVERSION
     /// query (CSI > q), and respond with the resulting version string
     /// (e.g. "myterm 1.0").
     ///
     /// Return `None` to report the default "libghostty" version.
-    pub fn on_xtversion(
-        &mut self,
-        tag = XTVERSION,
-        from = TerminalXtversionFn() -> ffi::String,
-        to = <'t>XtversionFn() -> Option<&'t str>,
-    ) |term, func| {
-        func(term).unwrap_or("").as_bytes().into()
+    pub trait OnXtversion {
+        const OPTION = XTVERSION;
+        type Raw = TerminalXtversionFn() -> ffi::String;
+
+        fn on_xtversion<'t>() -> Option<&'t [u8]> |h, term| {
+            h.on_xtversion(term).unwrap_or(b"").into()
+        }
+        fn with_on_xtversion();
     }
 
-    /// Call the given function when the terminal title changes
+    /// Effect handler for when the terminal title changes
     /// via escape sequences (e.g. OSC 0 or OSC 2).
     ///
     /// Use [`Terminal::title()`] inside the callback to read the new value.
-    pub fn on_title_changed(
-        &mut self,
-        tag = TITLE_CHANGED,
-        from = TerminalTitleChangedFn(),
-        to = TitleChangedFn(),
-    ) |term, func| {
-        func(term);
+    pub trait OnTitleChanged {
+        const OPTION = TITLE_CHANGED;
+        type Raw = TerminalTitleChangedFn();
+
+        fn on_title_changed() |h, term| {
+            h.on_title_changed(term);
+        }
+        fn with_on_title_changed();
     }
 
-    /// Call the given function when the terminal pwd (current working
+    /// Effect handler for when the terminal pwd (current working
     /// directory) changes via escape sequences: OSC 7 (file:// URI),
     /// OSC 9 (ConEmu CurrentDir), or OSC 1337 CurrentDir (iTerm2).
     /// Use [`Terminal::pwd()`] inside the callback to read the new value.
@@ -337,17 +324,17 @@ handlers! {
     ///
     /// The callback also fires when the shell clears the pwd (e.g. an empty
     /// OSC 7). In that case [`Terminal::pwd()`] returns a zero-length slice.
-    pub fn on_pwd_changed(
-        &mut self,
-        tag = PWD_CHANGED,
-        from = TerminalPwdChangedFn(),
-        to = PwdChangedFn(),
-    ) |term, func| {
-        func(term);
+    pub trait OnPwdChanged {
+        const OPTION = PWD_CHANGED;
+        type Raw = TerminalPwdChangedFn();
+
+        fn on_pwd_changed() |h, term| {
+            h.on_pwd_changed(term);
+        }
+        fn with_on_pwd_changed();
     }
 
-
-    /// Call this given function in response to XTWINOPS size queries (CSI
+    /// Effect handler in response to XTWINOPS size queries (CSI
     /// 14/16/18/19 t) and when VT input enables in-band size reports (mode
     /// 2048). Return `Some` with the current terminal geometry, or return
     /// `None` to suppress the report.
@@ -355,45 +342,44 @@ handlers! {
     /// [`SizeReportSize`] is frozen. If a later version of libghostty-vt needs
     /// more fields, it adds a new callback, and keeps calling this callback
     /// forever. A callback keeps working with every later version of the library.
-    pub fn on_size(
-        &mut self,
-        tag = SIZE,
-        from = TerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool,
-        to = SizeFn() -> Option<SizeReportSize>,
-    ) |term, func| {
-        if let Some(size) = func(term) {
-            // SAFETY: Out pointer is assumed to be valid.
-            unsafe { *out = size };
-            true
-        } else {
-            false
+    pub trait OnSize {
+        const OPTION = SIZE;
+        type Raw = TerminalSizeFn(out: *mut ffi::SizeReportSize) -> bool;
+
+        fn on_size() -> Option<SizeReportSize> |h, term| {
+            if let Some(size) = h.on_size(term) {
+                // SAFETY: Out pointer is assumed to be valid.
+                unsafe { *out = size };
+                true
+            } else {
+                false
+            }
         }
+        fn with_on_size();
     }
 
-
-
-    /// Call this given function for color scheme queries (CSI ? 996 n).
+    /// Effect handler for color scheme queries (CSI ? 996 n).
     ///
     /// Called when the terminal receives a color scheme device status report
     /// query. Return `Some` with the current color scheme, or return false to
     /// silently ignore the query.
-    pub fn on_color_scheme(
-        &mut self,
-        tag = COLOR_SCHEME,
-        from = TerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool,
-        to = ColorSchemeFn() -> Option<ColorScheme>,
-    ) |term, func| {
-        if let Some(size) = func(term) {
-            // SAFETY: Out pointer is assumed to be valid.
-            unsafe { *out = size.into() };
-            true
-        } else {
-            false
+    pub trait OnColorScheme {
+        const OPTION = COLOR_SCHEME;
+        type Raw = TerminalColorSchemeFn(out: *mut ffi::ColorScheme::Type) -> bool;
+
+        fn on_color_scheme() -> Option<ColorScheme> |h, term| {
+            if let Some(size) = h.on_color_scheme(term) {
+                // SAFETY: Out pointer is assumed to be valid.
+                unsafe { *out = size.into() };
+                true
+            } else {
+                false
+            }
         }
+        fn with_on_color_scheme();
     }
 
-
-    /// Call this given function for device attributes queries (DA1/DA2/DA3).
+    /// Effect handler for device attributes queries (DA1/DA2/DA3).
     ///
     /// Called when the terminal receives a device attributes query (CSI c,
     /// CSI > c, or CSI = c). Return `Some` with the response data, or return
@@ -411,45 +397,46 @@ handlers! {
     /// # use libghostty_vt::{error::Error, Terminal};
     /// use libghostty_vt::effect::*;
     ///
-    /// # fn main() -> Result<(), Error> {
-    /// # let mut terminal = Terminal::new(80, 24)?;
-    /// terminal.on_device_attributes(|_term| {
-    ///     const FEATURES: [DeviceAttributeFeature; 2] = [
-    ///         DeviceAttributeFeature::ANSI_COLOR,
-    ///         DeviceAttributeFeature::CLIPBOARD,
-    ///     ];
-    ///     Some(DeviceAttributes {
-    ///         primary: PrimaryDeviceAttributes::new(ConformanceLevel::VT220, &FEATURES),
-    ///         secondary: SecondaryDeviceAttributes {
-    ///             device_type: DeviceType::VT220,
-    ///             firmware_version: 0,
-    ///             rom_cartridge: 0,
-    ///         },
-    ///         tertiary: TertiaryDeviceAttributes::default(),
-    ///     })
-    /// })?;
-    /// # Ok(()) }
+    /// struct Handler;
+    /// impl OnDeviceAttributes for Handler {
+    ///     fn on_device_attributes(&mut self, _terminal: &Terminal<'_>) -> Option<DeviceAttributes> {
+    ///         const FEATURES: [DeviceAttributeFeature; 2] = [
+    ///             DeviceAttributeFeature::ANSI_COLOR,
+    ///             DeviceAttributeFeature::CLIPBOARD,
+    ///         ];
+    ///         Some(DeviceAttributes {
+    ///             primary: PrimaryDeviceAttributes::new(ConformanceLevel::VT220, &FEATURES),
+    ///             secondary: SecondaryDeviceAttributes {
+    ///                 device_type: DeviceType::VT220,
+    ///                 firmware_version: 0,
+    ///                 rom_cartridge: 0,
+    ///             },
+    ///             tertiary: TertiaryDeviceAttributes::default(),
+    ///         })
+    ///     }
+    /// }
     /// ```
     ///
     /// [`DeviceAttributes`] is frozen. If a later version of libghostty-vt needs
     /// more fields, it adds a new callback, and keeps calling this callback
     /// forever. A callback keeps working with every later version of the library.
-    pub fn on_device_attributes(
-        &mut self,
-        tag = DEVICE_ATTRIBUTES,
-        from = TerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool,
-        to = DeviceAttributesFn() -> Option<DeviceAttributes>,
-    ) |term, func| {
-        if let Some(size) = func(term) {
-            // SAFETY: Out pointer is assumed to be valid.
-            unsafe { *out = size.into() };
-            true
-        } else {
-            false
+    pub trait OnDeviceAttributes {
+        const OPTION = DEVICE_ATTRIBUTES;
+        type Raw = TerminalDeviceAttributesFn(out: *mut ffi::DeviceAttributes) -> bool;
+
+        fn on_device_attributes() -> Option<DeviceAttributes> |h, term| {
+            if let Some(size) = h.on_device_attributes(term) {
+                // SAFETY: Out pointer is assumed to be valid.
+                unsafe { *out = size.into() };
+                true
+            } else {
+                false
+            }
         }
+        fn with_on_device_attributes();
     }
 
-    /// Call the given function when the running program performs a clipboard write.
+    /// Effect handler for when the running program performs a clipboard write.
     ///
     /// OSC 52, iTerm2 OSC 1337 Copy, and Kitty clipboard (OSC 5522) writes
     /// are normalized to an atomic set of decoded MIME representations.
@@ -468,21 +455,27 @@ handlers! {
     /// program will be "granted" and you can skip permission requests.
     ///
     /// Clipboard read requests (OSC 52 `"?"` and OSC 5522 reads) are delivered to
-    /// [`Terminal::on_clipboard_read`] instead.
-    pub fn on_clipboard_write(
-        &mut self,
-        tag = CLIPBOARD_WRITE,
-        from = TerminalClipboardWriteFn(
-            write: *const ffi::ClipboardWrite
-        ),
-        to = <'t>ClipboardWriteFn(ClipboardWrite<'t>),
-    ) |term, func| {
-        // SAFETY: The request is only borrowed for the callback duration,
-        // which `ClipboardWrite`'s lifetime enforces.
-        func(term, unsafe { ClipboardWrite::from_raw(write) });
+    /// [`crate::effect::OnClipboardRead`] instead.
+    pub trait OnClipboardWrite {
+        const OPTION = CLIPBOARD_WRITE;
+        type Raw = TerminalClipboardWriteFn(write: *const ffi::ClipboardWrite);
+
+        fn on_clipboard_write<'t>(write: ClipboardWrite<'t>) -> ClipboardWriteReply<'t> |h, term| {
+            // SAFETY: The request is only borrowed for the callback duration,
+            // which `ClipboardWrite`'s lifetime enforces.
+            let reply = h.on_clipboard_write(term, unsafe { ClipboardWrite::from_raw(write) });
+
+            // SAFETY: The request lives for the callback duration.
+            if let Some(callback) = unsafe { (*reply.write.ptr).reply } {
+                // SAFETY: The reply only needs to outlive this synchronous call.
+                unsafe { callback(reply.write.ptr, &raw const reply.raw) };
+            }
+
+        }
+        fn with_on_clipboard_write();
     }
 
-    /// Call the given function when the running program requests clipboard
+    /// Effect handler for when the running program requests clipboard
     /// contents via OSC 52 with a "?" payload or a Kitty clipboard (OSC 5522)
     /// read. The read is synchronous and must be answered before the
     /// callback returns.
@@ -508,44 +501,54 @@ handlers! {
     /// [`Terminal::paste`] sends the program an event instead of the text,
     /// and the program's follow-up read arrives here with granted set since
     /// the user already pasted. See [`Terminal::paste`].
-    pub fn on_clipboard_read(
-        &mut self,
-        tag = CLIPBOARD_READ,
-        from = TerminalClipboardReadFn(read: *const ffi::ClipboardRead),
-        to = <'t>ClipboardReadFn(ClipboardRead<'t>),
-    ) |term, func| {
-        // SAFETY: The request is only borrowed for the callback duration,
-        // which `ClipboardRead`'s lifetime enforces.
-        func(term, unsafe { ClipboardRead::from_raw(read) });
+    pub trait OnClipboardRead {
+        const OPTION = CLIPBOARD_READ;
+        type Raw = TerminalClipboardReadFn(read: *const ffi::ClipboardRead);
+
+        fn on_clipboard_read<'t>(read: ClipboardRead<'t>) -> ClipboardReadReply<'t> |h, term| {
+            // SAFETY: The request is only borrowed for the callback duration,
+            // which `ClipboardRead`'s lifetime enforces.
+            let reply = h.on_clipboard_read(term, unsafe { ClipboardRead::from_raw(read) });
+
+            // SAFETY: The request lives for the callback duration.
+            if let Some(callback) = unsafe { (*reply.read.ptr).reply } {
+                // SAFETY: The reply and the buffers it points to only need to
+                // outlive this synchronous call.
+                unsafe { callback(reply.read.ptr, &raw const reply.reply) };
+            }
+        }
+        fn with_on_clipboard_read();
     }
 
-    /// Call the given function when the running program requests a desktop
+    /// Effect handler for when the running program requests a desktop
     /// notification via OSC 9 or OSC 777.
-    pub fn on_desktop_notification(
-        &mut self,
-        tag = DESKTOP_NOTIFICATION,
-        from = TerminalDesktopNotificationFn(
+    pub trait OnDesktopNotification {
+        const OPTION = DESKTOP_NOTIFICATION;
+        type Raw = TerminalDesktopNotificationFn(
             notif: *const ffi::TerminalDesktopNotification
-        ),
-        to = <'t>DesktopNotificationFn(DesktopNotification<'t>),
-    ) |term, func| {
-        func(term, unsafe { DesktopNotification::from_raw(notif) });
+        );
+
+        fn on_desktop_notification<'t>(notif: DesktopNotification<'t>) |h, term| {
+            h.on_desktop_notification(term, unsafe { DesktopNotification::from_raw(notif) });
+        }
+        fn with_on_desktop_notification();
     }
 
-    /// Call the given function when the running program reports progress
+    /// Effect handler for when the running program reports progress
     /// via OSC 9;4.
-    pub fn on_progress_report(
-        &mut self,
-        tag = PROGRESS_REPORT,
-        from = TerminalProgressReportFn(
+    pub trait OnProgressReport {
+        const OPTION = PROGRESS_REPORT;
+        type Raw = TerminalProgressReportFn(
             progress: *const ffi::TerminalProgressReport
-        ),
-        to = <'t>ProgressReportFn(ProgressReport<'t>),
-    ) |term, func| {
-        func(term, unsafe { ProgressReport::from_raw(progress) });
+        );
+
+        fn on_progress_report<'t>(progress: ProgressReport<'t>) |h, term| {
+            h.on_progress_report(term, unsafe { ProgressReport::from_raw(progress) });
+        }
+        fn with_on_progress_report();
     }
 
-    /// Call the given function when the running program sends a program
+    /// Effect handler for when the running program sends a program
     /// status report via OSC 7501.
     ///
     /// The terminal doesn't store reports, so your application keeps them.
@@ -564,11 +567,10 @@ handlers! {
     ///   one. If the root record has app `"deploy"` and the record
     ///   `"us-east"` has none, show `"us-east"` with app `"deploy"` too.
     /// - When a new shell prompt starts ([`SemanticPromptKind::PromptStart`]
-    ///   from the [`Terminal::on_semantic_prompt`] callback) or the program
+    ///   from the [`crate::effect::OnSemanticPrompt`] callback) or the program
     ///   running in the terminal exits, remove `working` and
     ///   `blocked` records. You may remove `idle` records too. Keep `done`
     ///   and `error` records until the user has seen them, for example until
-
     ///   they next focus the terminal.
     /// - Keep at most 256 records, and allow at least 64. When a new record
     ///   would go over your limit, remove the one that was updated longest
@@ -576,7 +578,7 @@ handlers! {
     ///
     /// A full reset (RIS, `ESC c`) removes every record. When that happens,
     /// the terminal calls this with a [`ProgramStatusState::Clear`] report
-    /// and an empty id, and then calls the [`Terminal::on_reset`] callback.
+    /// and an empty id, and then calls the [`crate::effect::OnReset`] callback.
     /// This only happens when `ESC c` is processed by [`Terminal::vt_write`]
     /// or [`Terminal::vt_write_until`]. [`Terminal::reset`] doesn't
     /// call this, so clear your records yourself after calling it.
@@ -596,32 +598,37 @@ handlers! {
     /// ```rust
     /// use std::cell::RefCell;
     /// use std::collections::HashMap;
-    /// use libghostty_vt::{Terminal, effect::ProgramStatusState};
+    /// use libghostty_vt::{Terminal, effect};
     ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// // One record per id. This one keeps only the state and message.
-    /// let records = RefCell::new(HashMap::<Vec<u8>, (ProgramStatusState, Vec<u8>)>::new());
-    /// # let pty = RefCell::new(Vec::new());
+    /// #[derive(Default)]
+    /// struct Handler {
+    ///     /// One record per id. This one keeps only the state and message.
+    ///     records: HashMap<Vec<u8>, (effect::ProgramStatusState, Vec<u8>)>,
+    /// #   pty: Vec<u8>,
+    /// }
     ///
-    /// let mut terminal = Terminal::new(80, 24)?;
-    /// // Set a pty write callback too, so programs that check for support
-    /// // get a reply.
-    /// terminal
-    ///     .on_pty_write(|_term, bytes| {
+    /// impl effect::OnPtyWrite for Handler {
+    ///     fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
     ///         // Write `bytes` back to the pty.
-    /// #       pty.borrow_mut().extend_from_slice(bytes);
-    ///     })?
-    ///     .on_program_status(|_term, report| {
+    /// #       self.pty.extend_from_slice(data);
+    ///     }
+    /// }
+    ///
+    /// impl effect::OnProgramStatus for Handler {
+    ///     fn on_program_status<'t>(
+    ///         &mut self,
+    ///         _terminal: &'t Terminal<'_>,
+    ///         report: effect::ProgramStatus,
+    ///     ) {
     ///         // A panic in the callback aborts the process, so ignore a
     ///         // state these bindings don't know instead of unwrapping.
     ///         let Ok(state) = report.state() else { return };
-    ///         let mut records = records.borrow_mut();
     ///
-    ///         if state == ProgramStatusState::Clear {
+    ///         if state == effect::ProgramStatusState::Clear {
     ///             // Remove this record and every record beneath it. An empty
     ///             // id removes every record.
     ///             let id = report.id();
-    ///             records.retain(|key, _| {
+    ///             self.records.retain(|key, _| {
     ///                 let beneath = key
     ///                     .strip_prefix(id)
     ///                     .is_some_and(|rest| rest.is_empty() || rest.starts_with(b"/"));
@@ -632,47 +639,68 @@ handlers! {
     ///
     ///         // Replace the whole record. The strings are only valid during
     ///         // this call, so copy them.
-    ///         records.insert(report.id().to_vec(), (state, report.message().to_vec()));
-    ///     })?;
-    /// # let ids = || {
-    /// #     let mut ids: Vec<_> = records.borrow().keys().cloned().collect();
+    ///         self.records.insert(
+    ///             report.id().to_vec(),
+    ///             (state, report.message().to_vec())
+    ///         );
+    ///     }
+    /// }
+    ///
+    /// # fn ids(terminal: &Terminal<'_>) -> Vec<Vec<u8>> {
+    /// #     let handler = terminal.effect_handler::<Handler>().unwrap();
+    /// #     let mut ids: Vec<_> = handler.records.keys().cloned().collect();
     /// #     ids.sort();
     /// #     ids
     /// # };
+    ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let mut terminal = Terminal::new(80, 24)?;
+    ///
+    /// terminal
+    ///     .register_effects(Handler::default())?
+    ///     // Set a pty write effect too, so programs that check for support
+    ///     // get a reply.
+    ///     .with_on_pty_write()?
+    ///     .with_on_program_status()?;
+    ///
     ///
     /// // A root record and a few beneath it. "QnVpbGRpbmc=" is "Building".
     /// terminal.vt_write(b"\x1b]7501;state=working:app=cargo:msg=QnVpbGRpbmc=\x1b\\");
     /// terminal.vt_write(b"\x1b]7501;state=working:id=build\x1b\\");
     /// terminal.vt_write(b"\x1b]7501;state=blocked:kind=question:id=build/test\x1b\\");
     /// terminal.vt_write(b"\x1b]7501;state=done:id=buildx\x1b\\");
-    /// # assert_eq!(ids(), [&b""[..], b"build", b"build/test", b"buildx"]);
+    /// # assert_eq!(ids(&terminal), [&b""[..], b"build", b"build/test", b"buildx"]);
+    /// # let handler = terminal.effect_handler::<Handler>().unwrap();
     /// # assert_eq!(
-    /// #     records.borrow()[&b""[..]],
-    /// #     (ProgramStatusState::Working, b"Building".to_vec()),
+    /// #     handler.records[&b""[..]],
+    /// #     (effect::ProgramStatusState::Working, b"Building".to_vec()),
     /// # );
     ///
     /// // A report replaces its record completely, so the message is gone.
     /// terminal.vt_write(b"\x1b]7501;state=done\x1b\\");
-    /// # assert_eq!(records.borrow()[&b""[..]], (ProgramStatusState::Done, Vec::new()));
+    /// # let handler = terminal.effect_handler::<Handler>().unwrap();
+    /// # assert_eq!(handler.records[&b""[..]], (effect::ProgramStatusState::Done, Vec::new()));
     ///
     /// // Clearing "build" also removes "build/test", but not "buildx".
     /// terminal.vt_write(b"\x1b]7501;state=clear:id=build\x1b\\");
-    /// # assert_eq!(ids(), [&b""[..], b"buildx"]);
+    /// # assert_eq!(ids(&terminal), [&b""[..], b"buildx"]);
     ///
     /// // A program checking for support gets a reply through the pty.
     /// terminal.vt_write(b"\x1b]7501;?\x1b\\");
-    /// # assert!(pty.borrow().starts_with(b"\x1b]7501;?:states="));
+    /// # let handler = terminal.effect_handler::<Handler>().unwrap();
+    /// # assert!(handler.pty.starts_with(b"\x1b]7501;?:states="));
     ///
     /// // A full reset removes every record.
     /// terminal.vt_write(b"\x1bc");
-    /// # assert!(records.borrow().is_empty());
+    /// # let handler = terminal.effect_handler::<Handler>().unwrap();
+    /// # assert!(handler.records.is_empty());
     /// # Ok(())
     /// # }
     /// ```
     ///
     /// Programs may ask whether the terminal supports the protocol by
     /// sending `OSC 7501 ; ?`. While this callback is set, the terminal
-    /// answers through [`Terminal::on_pty_write`] with `?` followed by the
+    /// answers through [`crate::effect::OnPtyWrite`] with `?` followed by the
     /// states and kinds it accepts:
     ///
     /// ```text
@@ -684,20 +712,21 @@ handlers! {
     /// that asks sees the protocol as unsupported. Asking is optional, so
     /// programs may send reports anyway. Those are dropped. Set a pty write
     /// callback too, or programs never see the reply.
-    pub fn on_program_status(
-        &mut self,
-        tag = PROGRAM_STATUS,
-        from = TerminalProgramStatusFn(
+    pub trait OnProgramStatus {
+        const OPTION = PROGRAM_STATUS;
+        type Raw = TerminalProgramStatusFn(
             report: *const ffi::TerminalProgramStatus
-        ),
-        to = <'t>ProgramStatusFn(ProgramStatus<'t>),
-    ) |term, func| {
-        // SAFETY: The report and its strings are only valid during the
-        // callback, which `ProgramStatus`'s lifetime enforces.
-        func(term, unsafe { ProgramStatus::from_raw(report) });
+        );
+
+        fn on_program_status<'t>(report: ProgramStatus<'t>) |h, term| {
+            // SAFETY: The report and its strings are only valid during the
+            // callback, which `ProgramStatus`'s lifetime enforces.
+            h.on_program_status(term, unsafe { ProgramStatus::from_raw(report) });
+        }
+        fn with_on_program_status();
     }
 
-    /// Call the given function when the shell reports a step of a command.
+    /// Effect handler for when the shell reports a step of a command.
     ///
     /// Each command goes through four steps, in this order: the prompt starts,
     /// input starts, output starts, and the command ends. Then the next
@@ -711,20 +740,21 @@ handlers! {
     ///
     /// The terminal has already updated its screen when this is called.
     /// A sequence the terminal rejects as malformed is never reported.
-    pub fn on_semantic_prompt(
-        &mut self,
-        tag = SEMANTIC_PROMPT,
-        from = TerminalSemanticPromptFn(
+    pub trait OnSemanticPrompt {
+        const OPTION = SEMANTIC_PROMPT;
+        type Raw = TerminalSemanticPromptFn(
             event: *const ffi::TerminalSemanticPrompt
-        ),
-        to = <'t>SemanticPromptFn(SemanticPrompt<'t>),
-    ) |term, func| {
-        // SAFETY: The event and its strings are only valid during the
-        // callback, which `SemanticPrompt`'s lifetime enforces.
-        func(term, unsafe { SemanticPrompt::from_raw(event) });
+        );
+
+        fn on_semantic_prompt<'t>(event: SemanticPrompt<'t>) |h, term| {
+            // SAFETY: The event and its strings are only valid during the
+            // callback, which `SemanticPrompt`'s lifetime enforces.
+            h.on_semantic_prompt(term, unsafe { SemanticPrompt::from_raw(event) });
+        }
+        fn with_on_semantic_prompt();
     }
 
-    /// Call the given function when the running program performs a full
+    /// Effect handler for when the running program performs a full
     /// reset (RIS, `ESC c`).
     ///
     /// A full reset clears the screen and scrollback, returns modes to their
@@ -733,11 +763,11 @@ handlers! {
     /// running in the terminal, such as the current command.
     ///
     /// The terminal has already reset itself when this is called. The
-    /// [`Terminal::on_title_changed`] and [`Terminal::on_pwd_changed`]
+    /// [`crate::effect::OnTitleChanged`] and [`crate::effect::OnPwdChanged`]
     /// callbacks are not called for the cleared title and working directory,
     /// so update anything you show for them here. A full reset also removes
     /// any progress report and program status records. If you set
-    /// [`Terminal::on_progress_report`] or [`Terminal::on_program_status`],
+    /// [`crate::effect::OnProgressReport`] or [`crate::effect::OnProgramStatus`],
     /// those callbacks are called before this one.
     ///
     /// A soft reset (DECSTR, `CSI ! p`) keeps the screen, title and working
@@ -746,16 +776,17 @@ handlers! {
     /// [`Terminal::reset`] doesn't call this either: only a reset the
     /// running program sends through [`Terminal::vt_write`] or
     /// [`Terminal::vt_write_until`] does.
-    pub fn on_reset(
-        &mut self,
-        tag = RESET,
-        from = TerminalResetFn(),
-        to = ResetFn(),
-    ) |term, func| {
-        func(term);
+    pub trait OnReset {
+        const OPTION = RESET;
+        type Raw = TerminalResetFn();
+
+        fn on_reset() |h, term| {
+            h.on_reset(term);
+        }
+        fn with_on_reset();
     }
 
-    /// Call the given function when the running program asks to resize the
+    /// Effect handler for when the running program asks to resize the
     /// window, such as with CSI 8 ; rows ; columns t.
     ///
     /// More kinds of requests may be reported in later versions; see
@@ -769,26 +800,45 @@ handlers! {
     /// Without this callback, resize requests are ignored.
     ///
     /// ```rust
-    /// use std::{cell::Cell, num::NonZeroU16};
-    /// use libghostty_vt::{Terminal, effect::ResizeWindow};
+    /// use std::num::NonZeroU16;
+    /// use libghostty_vt::{Terminal, effect};
+    ///
+    /// #[derive(Default)]
+    /// struct Handler {
+    ///     requested: Option<(Option<NonZeroU16>, Option<NonZeroU16>)>,
+    /// }
+    ///
+    /// impl effect::OnResizeWindow for Handler {
+    ///     fn on_resize_window(
+    ///         &mut self,
+    ///         _terminal: &Terminal<'_>,
+    ///         request: effect::ResizeWindow
+    ///     ) {
+    ///         match request {
+    ///             effect::ResizeWindow::Grid { rows, columns } => {
+    ///                 self.requested = Some((rows, columns))
+    ///             },
+    ///             // Ignore kinds of requests you don't handle.
+    ///             _ => {}
+    ///         }
+    ///     }
+    /// }
     ///
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let requested = Cell::new(None);
-    ///
     /// let mut terminal = Terminal::new(80, 24)?;
-    /// terminal.on_resize_window(|_term, request| match request {
-    ///     ResizeWindow::Grid { rows, columns } => requested.set(Some((rows, columns))),
-    ///     // Ignore kinds of requests you don't handle.
-    ///     _ => {}
-    /// })?;
     ///
+    /// terminal
+    ///     .register_effects(Handler::default())?
+    ///     .with_on_resize_window()?;
     /// terminal.vt_write(b"\x1b[8;30;100t");
-    /// # assert_eq!(requested.get(), Some((NonZeroU16::new(30), NonZeroU16::new(100))));
+    /// # let effects = terminal.effect_handler::<Handler>()?;
+    /// # assert_eq!(effects.requested, Some((NonZeroU16::new(30), NonZeroU16::new(100))));
     ///
     /// // The terminal itself keeps its size. Apply the request yourself
     /// // (`None` means keep the current size of that dimension).
     /// # assert_eq!((terminal.cols()?, terminal.rows()?), (80, 24));
-    /// if let Some((rows, columns)) = requested.take() {
+    /// let effects = terminal.effect_handler::<Handler>()?;
+    /// if let Some((rows, columns)) = effects.requested {
     ///     let rows = rows.map_or(terminal.rows()?, NonZeroU16::get);
     ///     let cols = columns.map_or(terminal.cols()?, NonZeroU16::get);
     ///     terminal.resize(cols, rows, 8, 16)?;
@@ -797,27 +847,28 @@ handlers! {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn on_resize_window(
-        &mut self,
-        tag = RESIZE_WINDOW,
-        from = TerminalResizeWindowFn(request: *const ffi::TerminalResizeWindow),
-        to = ResizeWindowFn(ResizeWindow),
-    ) |term, func| {
-        // SAFETY: We trust libghostty to give us a valid, non-NULL request
-        // that lives for the callback duration, with the tag and its
-        // matching payload written. For a payload-less kind the union may be
-        // left unwritten, which is why `from_raw` checks the tag before
-        // reading anything else, instead of us copying the struct out.
-        let request = unsafe { ResizeWindow::from_raw(request) };
-        // Upstream asks callbacks to ignore tags they don't handle. A tag
-        // these bindings don't know has no Rust value, so the closure isn't
-        // called for it.
-        if let Some(request) = request {
-            func(term, request);
+    pub trait OnResizeWindow {
+        const OPTION = RESIZE_WINDOW;
+        type Raw = TerminalResizeWindowFn(request: *const ffi::TerminalResizeWindow);
+
+        fn on_resize_window(request: ResizeWindow) |h, term| {
+            // SAFETY: We trust libghostty to give us a valid, non-NULL request
+            // that lives for the callback duration, with the tag and its
+            // matching payload written. For a payload-less kind the union may be
+            // left unwritten, which is why `from_raw` checks the tag before
+            // reading anything else, instead of us copying the struct out.
+            let request = unsafe { ResizeWindow::from_raw(request) };
+            // Upstream asks callbacks to ignore tags they don't handle. A tag
+            // these bindings don't know has no Rust value, so the closure isn't
+            // called for it.
+            if let Some(request) = request {
+                h.on_resize_window(term, request);
+            }
         }
+        fn with_on_resize_window();
     }
 
-    /// Called once for each complete sequence that libghostty-vt does not
+    /// Effect handler for each complete sequence that libghostty-vt does not
     /// implement. Match on [`UnknownSequence`] first, because more kinds of
     /// sequences may be reported in later versions.
     ///
@@ -829,23 +880,24 @@ handlers! {
     ///   malformed.
     /// - Supported protocols that you turned off.
     ///
-    /// The callback runs during [`Self::vt_write`]. It may write a reply to
+    /// The callback runs during [`Terminal::vt_write`]. It may write a reply to
     /// the pty, and that reply stays in order with the terminal's own
-    /// replies. It must not call [`Self::vt_write`] on the same terminal.
+    /// replies. It must not call [`Terminal::vt_write`] on the same terminal.
     ///
-    /// Nothing is reported until [`Self::set_unknown_max_bytes`] is also set
+    /// Nothing is reported until [`Terminal::set_unknown_max_bytes`] is also set
     /// to a nonzero value. Installing the callback by itself keeps no sequence
     /// data and allocates no sequence-capture buffers.
-    pub fn on_unknown_sequence(
-        &mut self,
-        tag = UNKNOWN_SEQUENCE,
-        from = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence),
-        to = <'t>UnknownSequenceFn(UnknownSequence<'t>),
-    ) |term, func| {
-        // SAFETY: Sequence data only lasts as long as the callback.
-        if let Some(sequence) = unsafe { UnknownSequence::from_raw(sequence) } {
-            func(term, sequence);
+    pub trait OnUnknownSequence {
+        const OPTION = UNKNOWN_SEQUENCE;
+        type Raw = TerminalUnknownSequenceFn(sequence: *const ffi::TerminalUnknownSequence);
+
+        fn on_unknown_sequence<'t>(sequence: UnknownSequence<'t>) |h, term| {
+            // SAFETY: Sequence data only lasts as long as the callback.
+            if let Some(sequence) = unsafe { UnknownSequence::from_raw(sequence) } {
+                h.on_unknown_sequence(term, sequence);
+            }
         }
+        fn with_on_unknown_sequence();
     }
 }
 
@@ -1004,15 +1056,6 @@ impl ClipboardWriteReply<'_> {
     pub fn with_remember(mut self, v: bool) -> Self {
         self.raw.remember = v;
         self
-    }
-
-    /// Finish the reply.
-    pub fn finish(self) {
-        // SAFETY: The request lives for the callback duration.
-        if let Some(callback) = unsafe { (*self.write.ptr).reply } {
-            // SAFETY: The reply only needs to outlive this synchronous call.
-            unsafe { callback(self.write.ptr, &raw const self.raw) };
-        }
     }
 }
 
@@ -1174,7 +1217,7 @@ impl<'t> ClipboardRead<'t> {
     /// permission prompt and serve the read.
     ///
     /// Always false when [`mimes`](Self::mimes) is empty: such a request is
-    /// served without a prompt (see [`Terminal::on_clipboard_read`]), so the
+    /// served without a prompt (see [`crate::effect::OnClipboardRead`]), so the
     /// terminal never consults grants for it and a one-time password is
     /// preserved for the follow-up data read.
     #[must_use]
@@ -1204,9 +1247,9 @@ impl<'t> ClipboardRead<'t> {
     /// `text/plain`.
     ///
     /// The answer is written to the pty before this returns, so the
-    /// [pty write callback](Terminal::on_pty_write) runs inside this call. If
+    /// [pty write effect](crate::effect::OnPtyWrite) runs inside this call. If
     /// both callbacks share state through a [`RefCell`](std::cell::RefCell),
-    /// don't keep it borrowed across `reply`: the pty write callback's borrow
+    /// don't keep it borrowed across `reply`: the pty write effect's borrow
     /// would panic, and a panic in a callback aborts the process.
     pub fn reply(
         self,
@@ -1259,14 +1302,7 @@ impl ClipboardReadReply<'_> {
         self
     }
     /// Finish the reply.
-    pub fn finish(self) {
-        // SAFETY: The request lives for the callback duration.
-        if let Some(callback) = unsafe { (*self.read.ptr).reply } {
-            // SAFETY: The reply and the buffers it points to only need to
-            // outlive this synchronous call.
-            unsafe { callback(self.read.ptr, &raw const self.reply) };
-        }
-    }
+    pub fn finish(self) {}
 }
 
 /// One MIME representation in a [`ClipboardRead::reply`].
@@ -1379,7 +1415,7 @@ pub enum UnknownSequence<'t> {
     /// ```
     ///
     /// For that sequence, `content` is `7400;status=busy` and `terminator`
-    /// is [`osc::Terminator::Bel`]. See [`Terminal::on_unknown_sequence`]
+    /// is [`osc::Terminator::Bel`]. See [`crate::effect::OnUnknownSequence`]
     /// for a complete example.
     #[non_exhaustive]
     Osc {
@@ -1493,7 +1529,7 @@ impl<'t> DesktopNotification<'t> {
 
 /// A request from the running program to resize the window.
 ///
-/// Passed to [`Terminal::on_resize_window`].
+/// Passed to [`crate::effect::OnResizeWindow`].
 ///
 /// New kinds may be added in later versions. Match with a wildcard arm and
 /// ignore any kind you don't handle.
@@ -1547,7 +1583,7 @@ impl ResizeWindow {
 }
 
 /// A shell integration event, passed to the
-/// [`Terminal::on_semantic_prompt`] callback.
+/// [`crate::effect::OnSemanticPrompt`] callback.
 ///
 /// [`kind`](Self::kind) says which step of the command this is. The other
 /// fields only carry information for the kinds listed on each field, and are
@@ -1555,7 +1591,7 @@ impl ResizeWindow {
 ///
 /// Strings are only valid during the callback. Copy them if you need them
 /// later. The lifetime `'t` enforces this: the event cannot escape the
-/// [`Terminal::on_semantic_prompt`] callback it was handed to.
+/// [`crate::effect::OnSemanticPrompt`] callback it was handed to.
 #[derive(Debug, Copy, Clone)]
 pub struct SemanticPrompt<'t> {
     ptr: *const ffi::TerminalSemanticPrompt,
@@ -1726,7 +1762,7 @@ pub enum PromptKind {
 /// callback. Text that the program didn't send is an empty string. All
 /// strings are only valid during the callback, so copy any you want to keep.
 /// The lifetime `'t` enforces this: the report cannot escape the
-/// [`Terminal::on_program_status`] callback it was handed to.
+/// [`crate::effect::OnProgramStatus`] callback it was handed to.
 #[derive(Debug, Copy, Clone)]
 pub struct ProgramStatus<'t> {
     ptr: *const ffi::TerminalProgramStatus,
@@ -1804,7 +1840,7 @@ impl<'t> ProgramStatus<'t> {
     /// `"cargo"`, `"terraform"`, or `"claude-code"`. Use it as a key for
     /// grouping, filtering, or choosing an icon. It is not a label. The label
     /// is [`title`](Self::title). Empty when the report didn't include one.
-    /// See [`Terminal::on_program_status`] for how an empty app is filled in
+    /// See [`crate::effect::OnProgramStatus`] for how an empty app is filled in
     /// from a parent record.
     #[must_use]
     pub fn app(self) -> &'t [u8] {
@@ -1925,7 +1961,7 @@ pub enum ProgressState {
 }
 
 /// Device attributes response data for all three DA levels.
-/// Filled by the [`Terminal::on_device_attributes`] callback in response
+/// Filled by the [`crate::effect::OnDeviceAttributes`] callback in response
 /// to CSI c, CSI > c, or CSI = c queries. The terminal uses whichever
 /// sub-struct matches the request type.
 #[derive(Debug, Clone, Copy)]
@@ -2110,35 +2146,56 @@ impl From<TertiaryDeviceAttributes> for ffi::DeviceAttributesTertiary {
     }
 }
 
+/// Mocking a PTY by just collecting all the bytes sent to the PTY.
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct MockPty {
+    pub pty: Vec<u8>,
+}
+
+#[cfg(test)]
+impl crate::effect::OnPtyWrite for MockPty {
+    fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+        self.pty.extend_from_slice(data);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RenderState, terminal::Boundary};
-    use std::{
-        cell::{Cell, RefCell},
-        mem::ManuallyDrop,
-    };
+    use crate::{mode::Mode, terminal::Boundary};
+    use std::mem::ManuallyDrop;
+
+    struct CountingHandler {
+        callback_count: usize,
+    }
+
+    impl OnDeviceAttributes for CountingHandler {
+        fn on_device_attributes(&mut self, _terminal: &Terminal<'_>) -> Option<DeviceAttributes> {
+            self.callback_count += 1;
+            Some(DeviceAttributes {
+                primary: PrimaryDeviceAttributes::new(
+                    ConformanceLevel::VT220,
+                    &[DeviceAttributeFeature::ANSI_COLOR],
+                ),
+                secondary: SecondaryDeviceAttributes {
+                    device_type: DeviceType::VT220,
+                    firmware_version: 1,
+                    rom_cartridge: 0,
+                },
+                tertiary: TertiaryDeviceAttributes { unit_id: 0 },
+            })
+        }
+    }
 
     #[inline(never)]
-    fn build_terminal(callback_count: &RefCell<usize>) -> Terminal<'static, '_> {
+    fn build_terminal() -> Terminal<'static> {
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
-            .on_device_attributes(move |_term| {
-                *callback_count.borrow_mut() += 1;
-                Some(DeviceAttributes {
-                    primary: PrimaryDeviceAttributes::new(
-                        ConformanceLevel::VT220,
-                        &[DeviceAttributeFeature::ANSI_COLOR],
-                    ),
-                    secondary: SecondaryDeviceAttributes {
-                        device_type: DeviceType::VT220,
-                        firmware_version: 1,
-                        rom_cartridge: 0,
-                    },
-                    tertiary: TertiaryDeviceAttributes { unit_id: 0 },
-                })
-            })
+            .register_effects(CountingHandler { callback_count: 0 })
+            .expect("callback should register")
+            .with_on_device_attributes()
             .expect("callback should register");
 
         terminal
@@ -2185,20 +2242,20 @@ mod tests {
     }
 
     /// Explicitly relocate the Terminal into distinct storage, then verify the
-    /// callback still fires through the stable `VTable` userdata pointer.
+    /// callback still fires through the stable effect handler pointer.
     #[test]
     fn callbacks_survive_explicit_relocation() {
-        let callback_count = RefCell::new(0usize);
-        let terminal = build_terminal(&callback_count);
+        let terminal = build_terminal();
         let (mut terminal, addr_before, addr_after) = relocate_into_new_box(terminal);
         assert_ne!(addr_before, addr_after);
 
         // Primary DA request (CSI c) should invoke on_device_attributes.
         terminal.vt_write(b"\x1b[c");
-        assert_eq!(*callback_count.borrow(), 1);
+        let handler = terminal.effect_handler::<CountingHandler>().unwrap();
+        assert_eq!(handler.callback_count, 1);
     }
 
-    /// What a clipboard read callback observed about its request.
+    /// What a clipboard read effect observed about its request.
     #[derive(Debug, Default, PartialEq, Eq)]
     struct SeenRead {
         location: Option<ClipboardLocation>,
@@ -2209,25 +2266,36 @@ mod tests {
         can_remember: bool,
     }
 
-    /// Feed `input` to a terminal whose clipboard read callback records the
+    /// Feed `input` to a terminal whose clipboard read effect records the
     /// request and hands it to `answer`, returning what was seen and what
     /// the terminal wrote back to the pty.
     ///
     /// Assertions happen outside the callback: a panic inside it would
     /// abort the whole test binary instead of failing the test.
-    fn clipboard_read(
-        input: &[u8],
-        answer: impl Fn(ClipboardRead<'_>),
-    ) -> (Vec<SeenRead>, Vec<u8>) {
-        let seen = RefCell::new(Vec::new());
-        let output = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
-        terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .expect("callback should register");
-        terminal
-            .on_clipboard_read(|_term, request| {
-                seen.borrow_mut().push(SeenRead {
+    fn clipboard_read<F>(input: &[u8], answer: F) -> (Vec<SeenRead>, Vec<u8>)
+    where
+        F: for<'t> Fn(ClipboardRead<'t>) -> ClipboardReadReply<'t> + 'static,
+    {
+        struct Handler<F: 'static> {
+            answer: F,
+            seen: Vec<SeenRead>,
+            output: Vec<u8>,
+        }
+        impl<F> OnPtyWrite for Handler<F> {
+            fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+                self.output.extend_from_slice(data);
+            }
+        }
+        impl<F> OnClipboardRead for Handler<F>
+        where
+            F: for<'t> Fn(ClipboardRead<'t>) -> ClipboardReadReply<'t>,
+        {
+            fn on_clipboard_read<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                request: ClipboardRead<'t>,
+            ) -> ClipboardReadReply<'t> {
+                self.seen.push(SeenRead {
                     location: Some(request.location()),
                     mimes: request.mimes().map(<[u8]>::to_vec).collect(),
                     list: request.list(),
@@ -2235,20 +2303,34 @@ mod tests {
                     granted: request.granted(),
                     can_remember: request.can_remember(),
                 });
-                answer(request);
+                (self.answer)(request)
+            }
+        }
+
+        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
+        terminal
+            .register_effects(Handler {
+                answer,
+                seen: vec![],
+                output: vec![],
             })
+            .expect("callback should register")
+            .with_on_pty_write()
+            .expect("callback should register")
+            .with_on_clipboard_read()
             .expect("callback should register");
         terminal.vt_write(input);
-        drop(terminal);
-        (seen.into_inner(), output.into_inner())
+
+        let handler = terminal.effect_handler_mut::<Handler<F>>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
+        let output = std::mem::take(&mut handler.output);
+        (seen, output)
     }
 
     #[test]
     fn osc52_clipboard_read() {
         let (seen, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request
-                .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
-                .finish();
+            request.reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
         });
         assert_eq!(
             seen,
@@ -2260,12 +2342,10 @@ mod tests {
         );
         assert_eq!(output, b"\x1b]52;c;aGVsbG8=\x1b\\");
 
-        // Errors and missing replies both answer with an empty clipboard.
+        // Errors answer with an empty clipboard.
         let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request.reply(Err(ClipboardReadError::Denied)).finish();
+            request.reply(Err(ClipboardReadError::Denied))
         });
-        assert_eq!(output, b"\x1b]52;c;\x1b\\");
-        let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |_request| {});
         assert_eq!(output, b"\x1b]52;c;\x1b\\");
     }
 
@@ -2289,7 +2369,6 @@ mod tests {
                         // so this must reach the program unchanged.
                         ClipboardMime::new(b"\xFF"),
                     ])
-                    .finish();
             },
         );
         assert_eq!(
@@ -2314,17 +2393,12 @@ mod tests {
             .as_bytes()
         );
 
-        // Errors map to protocol statuses, and a missing reply is EPERM.
+        // Errors map to protocol statuses.
         let (_, output) = clipboard_read(
             b"\x1b]5522;type=read:id=r2;dGV4dC9wbGFpbg==\x1b\\",
-            |request| request.reply(Err(ClipboardReadError::Busy)).finish(),
+            |request| request.reply(Err(ClipboardReadError::Busy)),
         );
         assert_eq!(output, b"\x1b]5522;type=read:status=EBUSY:id=r2\x1b\\");
-        let (_, output) = clipboard_read(
-            b"\x1b]5522;type=read:id=r3;dGV4dC9wbGFpbg==\x1b\\",
-            |_request| {},
-        );
-        assert_eq!(output, b"\x1b]5522;type=read:status=EPERM:id=r3\x1b\\");
     }
 
     #[test]
@@ -2337,7 +2411,6 @@ mod tests {
             request
                 .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hi")]))
                 .with_remember(true)
-                .finish();
         });
         let grants: Vec<_> = seen.iter().map(|s| (s.can_remember, s.granted)).collect();
         assert_eq!(grants, [(true, false), (true, true)]);
@@ -2357,7 +2430,6 @@ mod tests {
                         ClipboardReplyContent::new(b"text/plain", b""),
                     ]))
                     .with_available_mimes(&[ClipboardMime::new(b"")])
-                    .finish();
             },
         );
         assert_eq!(
@@ -2371,9 +2443,7 @@ mod tests {
 
         // OSC 52 has no text representation to use, so the clipboard is empty.
         let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request
-                .reply(Ok(&[ClipboardReplyContent::new(b"", b"")]))
-                .finish();
+            request.reply(Ok(&[ClipboardReplyContent::new(b"", b"")]))
         });
         assert_eq!(output, b"\x1b]52;c;\x1b\\");
     }
@@ -2388,7 +2458,7 @@ mod tests {
         ] {
             let (_, output) = clipboard_read(
                 b"\x1b]5522;type=read:id=x;dGV4dC9wbGFpbg==\x1b\\",
-                |request| request.reply(Err(error)).finish(),
+                move |request| request.reply(Err(error)),
             );
             let expected = format!("\x1b]5522;type=read:status={status}:id=x\x1b\\");
             assert_eq!(output, expected.as_bytes(), "{error:?}");
@@ -2397,11 +2467,9 @@ mod tests {
 
     #[test]
     fn clipboard_read_primary_location() {
-        let reply = |request: ClipboardRead<'_>| {
-            request
-                .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
-                .finish();
-        };
+        fn reply<'t>(request: ClipboardRead<'t>) -> ClipboardReadReply<'t> {
+            request.reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
+        }
 
         let (seen, output) = clipboard_read(b"\x1b]52;p;?\x1b\\", reply);
         assert_eq!(seen[0].location, Some(ClipboardLocation::Primary));
@@ -2428,21 +2496,35 @@ mod tests {
     // ASCII never reaches it.
     #[test]
     fn clipboard_write_decodes_base64() {
-        let written = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 3).unwrap();
-        terminal
-            .on_clipboard_write(|_, request| {
+        struct Handler {
+            written: Vec<Vec<u8>>,
+        }
+
+        impl OnClipboardWrite for Handler {
+            fn on_clipboard_write<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                write: ClipboardWrite<'t>,
+            ) -> ClipboardWriteReply<'t> {
                 // Record rather than assert here: a panic in a callback
                 // aborts the whole test binary.
-                for content in request.contents() {
-                    written.borrow_mut().push(content.data.to_vec());
+                for content in write.contents() {
+                    self.written.push(content.data.to_vec());
                 }
-                request.reply(Ok(())).finish();
-            })
+                write.reply(Ok(()))
+            }
+        }
+
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .register_effects(Handler { written: vec![] })
+            .unwrap()
+            .with_on_clipboard_write()
             .unwrap();
 
         terminal.vt_write(b"\x1b]52;c;//4=\x1b\\");
-        assert_eq!(*written.borrow(), [vec![0xff, 0xfe]]);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.written, [vec![0xff, 0xfe]]);
     }
 
     #[test]
@@ -2458,7 +2540,7 @@ mod tests {
         let input = [remember, list, remember].concat();
         let (seen, output) = clipboard_read(input.as_bytes(), |request| {
             // Empty slices hand C dangling non-null pointers with length 0.
-            request.reply(Ok(&[])).with_remember(true).finish();
+            request.reply(Ok(&[])).with_remember(true)
         });
         let observed: Vec<_> = seen
             .iter()
@@ -2497,24 +2579,44 @@ mod tests {
             "\x1b]5522;type=wdata\x1b\\",
         );
         let run = |limit| {
-            let written = RefCell::new(Vec::new());
-            let output = RefCell::new(Vec::new());
+            #[derive(Default)]
+            struct Handler {
+                written: Vec<Vec<u8>>,
+                output: Vec<u8>,
+            }
+            impl OnPtyWrite for Handler {
+                fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+                    self.output.extend_from_slice(data);
+                }
+            }
+            impl OnClipboardWrite for Handler {
+                fn on_clipboard_write<'t>(
+                    &mut self,
+                    _terminal: &'t Terminal<'_>,
+                    write: ClipboardWrite<'t>,
+                ) -> ClipboardWriteReply<'t> {
+                    self.written
+                        .extend(write.contents().map(|c| c.data.to_vec()));
+                    write.reply(Ok(()))
+                }
+            }
+
             let mut terminal = Terminal::new(8, 2).expect("terminal should initialize");
             terminal
-                .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+                .register_effects(Handler::default())
                 .unwrap()
-                .on_clipboard_write(|_term, request| {
-                    written
-                        .borrow_mut()
-                        .extend(request.contents().map(|c| c.data.to_vec()));
-                    request.reply(Ok(())).finish();
-                })
+                .with_on_pty_write()
                 .unwrap()
-                .set_clipboard_write_max_bytes(Some(limit))
+                .with_on_clipboard_write()
                 .unwrap();
+            terminal.set_clipboard_write_max_bytes(Some(limit)).unwrap();
             terminal.vt_write(write.as_bytes());
+
+            let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+            let output = std::mem::take(&mut handler.output);
+            let written = std::mem::take(&mut handler.written);
             drop(terminal);
-            (output.into_inner(), written.into_inner())
+            (output, written)
         };
 
         // Exceeding the limit fails the transaction and never reaches the callback.
@@ -2531,23 +2633,36 @@ mod tests {
     fn render_hold_reports_start_and_end_in_pairs() {
         // Mirrors upstream's "set render_hold callback" test in
         // src/terminal/c/terminal.zig.
-        let events = RefCell::new(Vec::new());
-        let take = || std::mem::take(&mut *events.borrow_mut());
+
+        #[derive(Default)]
+        struct Handler {
+            events: Vec<bool>,
+        }
+        impl OnRenderHold for Handler {
+            fn on_render_hold(&mut self, _terminal: &Terminal<'_>, held: bool) {
+                self.events.push(held);
+            }
+        }
+
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
         terminal
-            .on_render_hold(|_term, held| events.borrow_mut().push(held))
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_render_hold()
             .expect("callback should register");
 
         // A set during a hold and a reset without a hold are ignored.
         terminal.vt_write(b"\x1b[?2026h\x1b[?2026hA\x1b[?2026l\x1b[?2026l");
-        assert_eq!(take(), [true, false]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), [true, false]);
 
         // Neither a reset nor a resize reports anything without a hold.
         terminal.reset();
         terminal
             .resize(100, 30, 8, 16)
             .expect("resize should succeed");
-        assert_eq!(take(), []);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), []);
 
         // Reset and resize end an active hold, and so does a resize that
         // keeps the dimensions: upstream turns synchronized output off
@@ -2563,7 +2678,11 @@ mod tests {
         terminal
             .resize(80, 24, 8, 16)
             .expect("resize should succeed");
-        assert_eq!(take(), [true, false, true, false, true, false]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(
+            std::mem::take(&mut handler.events),
+            [true, false, true, false, true, false]
+        );
         assert!(!terminal.mode(Mode::SYNC_OUTPUT).unwrap());
 
         // A resize that fails leaves the mode, and so the hold, in place.
@@ -2571,7 +2690,8 @@ mod tests {
         assert!(terminal.resize(0, 24, 8, 16).is_err());
         assert!(terminal.mode(Mode::SYNC_OUTPUT).unwrap());
         terminal.vt_write(b"\x1b[?2026l");
-        assert_eq!(take(), [true, false]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), [true, false]);
 
         // Changing the mode ourselves, e.g. when a hold times out, is never
         // reported in either direction. The hold is simply over, so the
@@ -2586,95 +2706,31 @@ mod tests {
             .expect("mode should be settable")
             .set_mode(Mode::SYNC_OUTPUT, false)
             .expect("mode should be settable");
-        assert_eq!(take(), [true]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), [true]);
         // ...and the program can start a new hold afterwards.
         terminal.vt_write(b"\x1b[?2026h");
-        assert_eq!(take(), [true]);
-    }
-
-    /// Read the text of the first row of a render state snapshot.
-    fn first_row_text(snapshot: &crate::render::Snapshot<'_, '_>) -> Result<String> {
-        let mut rows = crate::render::RowIterator::new()?;
-        let mut cells = crate::render::CellIterator::new()?;
-        let mut row_iter = rows.update(snapshot)?;
-        let Some(row) = row_iter.next() else {
-            return Ok(String::new());
-        };
-        let mut cell_iter = cells.update(row)?;
-        let mut text = String::new();
-        while let Some(cell) = cell_iter.next() {
-            text.extend(cell.graphemes()?);
-        }
-        Ok(text)
-    }
-
-    #[test]
-    fn render_hold_captures_frame_before_hold() {
-        // A renderer that refreshes its render state whenever a hold starts
-        // or ends, recording the first row it captured each time. Failures
-        // are recorded as `None` instead of panicking, since a panic here
-        // would abort the whole test binary.
-        let render_state =
-            RefCell::new(RenderState::new().expect("render state should initialize"));
-        let frames = RefCell::new(Vec::new());
-        let take = || std::mem::take(&mut *frames.borrow_mut());
-        let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
-        terminal
-            .on_render_hold(|term, held| {
-                let text = render_state.try_borrow_mut().ok().and_then(|mut state| {
-                    let snapshot = state.update(term).ok()?;
-                    first_row_text(&snapshot).ok()
-                });
-                frames.borrow_mut().push((held, text));
-            })
-            .expect("callback should register");
-
-        // The hold starts before `B` is processed, even though it's in the
-        // same write, so the captured frame only has `A`.
-        terminal.vt_write(b"A\x1b[?2026hB");
-        assert_eq!(take(), [(true, Some("A".to_owned()))]);
-        // The terminal itself has moved on, though.
-        {
-            let mut state = render_state.borrow_mut();
-            let snapshot = state.update(&terminal).expect("render state should update");
-            assert_eq!(first_row_text(&snapshot).unwrap(), "AB");
-        }
-        terminal.vt_write(b"\x1b[?2026l");
-        assert_eq!(take(), [(false, Some("AB".to_owned()))]);
-
-        // Updating the render state also works when the hold ends from
-        // `resize` and `reset`, which invoke the callback while the outer
-        // call holds `&mut Terminal`.
-        terminal.vt_write(b"\x1b[?2026hC");
-        terminal
-            .resize(100, 30, 8, 16)
-            .expect("resize should succeed");
-        assert_eq!(
-            take(),
-            [
-                (true, Some("AB".to_owned())),
-                (false, Some("ABC".to_owned()))
-            ]
-        );
-        terminal.vt_write(b"\x1b[?2026hD");
-        terminal.reset();
-        assert_eq!(
-            take(),
-            [(true, Some("ABC".to_owned())), (false, Some(String::new()))]
-        );
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(std::mem::take(&mut handler.events), [true]);
     }
 
     #[test]
     fn unknown_sequences_are_reported() {
         use osc::Terminator::{Bel, St};
 
-        let seen = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_unknown_sequence(|_term, sequence| {
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<(Vec<u8>, bool, Option<osc::Terminator>)>,
+        }
+        impl OnUnknownSequence for Handler {
+            fn on_unknown_sequence<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                sequence: UnknownSequence<'t>,
+            ) {
                 // Record rather than assert: a panic in a callback aborts the
                 // whole test binary.
-                seen.borrow_mut().push(match sequence {
+                self.seen.push(match sequence {
                     UnknownSequence::Apc {
                         content, truncated, ..
                     } => (content.to_vec(), truncated, None),
@@ -2685,7 +2741,14 @@ mod tests {
                         ..
                     } => (content.to_vec(), truncated, Some(terminator)),
                 });
-            })
+            }
+        }
+
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_unknown_sequence()
             .unwrap();
         // Registration alone leaves reporting disabled.
         terminal.vt_write(b"\x1b_unknown\x1b\\");
@@ -2699,9 +2762,12 @@ mod tests {
         // callback for them: OSC 7501 is program status, OSC 2 the title.
         terminal.vt_write(b"\x1b]7501;state=working\x1b\\");
         terminal.vt_write(b"\x1b]2;title\x07");
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
         drop(terminal);
         assert_eq!(
-            seen.into_inner(),
+            seen,
             [
                 (b"unkn".to_vec(), true, None),
                 (b"7400".to_vec(), true, Some(Bel)),
@@ -2715,82 +2781,110 @@ mod tests {
     /// correct value inside the `on_title_changed` callback.
     #[test]
     fn title_changed_callback_returns_correct_title() {
-        // The callback bound on `on_title_changed` is `'cb`, not `'static`,
-        // so the closure can borrow stack locals directly – no Rc needed.
-        let captured_title: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-        let callback_count: Cell<usize> = Cell::new(0);
+        #[derive(Default)]
+        struct Handler {
+            captured_title: Vec<u8>,
+            callback_count: usize,
+        }
+        impl OnTitleChanged for Handler {
+            fn on_title_changed(&mut self, terminal: &Terminal<'_>) {
+                self.callback_count += 1;
+                let title = terminal
+                    .title()
+                    .expect("title() should succeed inside callback");
+                self.captured_title = title.to_owned();
+            }
+        }
 
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
-            .on_title_changed(|term| {
-                callback_count.set(callback_count.get() + 1);
-                let title = term
-                    .title()
-                    .expect("title() should succeed inside callback");
-                *captured_title.borrow_mut() = title.to_owned();
-            })
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_title_changed()
             .expect("callback should register");
 
         // OSC 2 (set title) should invoke on_title_changed.
         terminal.vt_write(b"\x1b]2;Hello Effects\x1b\\");
-        assert_eq!(callback_count.get(), 1);
-        assert_eq!(*captured_title.borrow(), b"Hello Effects");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 1);
+        assert_eq!(handler.captured_title, b"Hello Effects");
 
         // A second title change should fire the callback again.
         terminal.vt_write(b"\x1b]2;Second Title\x1b\\");
-        assert_eq!(callback_count.get(), 2);
-        assert_eq!(*captured_title.borrow(), b"Second Title");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
+        assert_eq!(handler.captured_title, b"Second Title");
     }
 
     /// Send an OSC 7 current-directory sequence, then verify `term.pwd()`
     /// returns the correct value inside the `on_pwd_changed` callback.
     #[test]
     fn pwd_changed_callback_returns_correct_pwd() {
-        let captured_pwd: RefCell<Vec<u8>> = RefCell::new(Vec::new());
-        let callback_count: Cell<usize> = Cell::new(0);
+        #[derive(Default)]
+        struct Handler {
+            captured_pwd: Vec<u8>,
+            callback_count: usize,
+        }
+        impl OnPwdChanged for Handler {
+            fn on_pwd_changed(&mut self, terminal: &Terminal<'_>) {
+                self.callback_count += 1;
+                let pwd = terminal
+                    .pwd()
+                    .expect("pwd() should succeed inside callback");
+                self.captured_pwd = pwd.to_owned();
+            }
+        }
 
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
-            .on_pwd_changed(|term| {
-                callback_count.set(callback_count.get() + 1);
-                let pwd = term.pwd().expect("pwd() should succeed inside callback");
-                *captured_pwd.borrow_mut() = pwd.to_owned();
-            })
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_pwd_changed()
             .expect("callback should register");
 
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/project\x1b\\");
-        assert_eq!(callback_count.get(), 1);
-        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/project");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 1);
+        assert_eq!(handler.captured_pwd, b"file://localhost/tmp/project");
 
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/other\x1b\\");
-        assert_eq!(callback_count.get(), 2);
-        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/other");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
+        assert_eq!(handler.captured_pwd, b"file://localhost/tmp/other");
 
         // libghostty stores the pwd bytes as-is, so non-UTF-8 input must come
         // back verbatim instead of being rejected.
         terminal.vt_write(b"\x1b]7;file://localhost/tmp/\xff\x1b\\");
-        assert_eq!(callback_count.get(), 3);
-        assert_eq!(*captured_pwd.borrow(), b"file://localhost/tmp/\xff");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 3);
+        assert_eq!(handler.captured_pwd, b"file://localhost/tmp/\xff");
     }
 
     /// Only a full reset sent by the program (RIS) fires `on_reset`, and the
     /// terminal has already reset itself by then.
     #[test]
     fn reset_callback_fires_only_on_ris() {
-        let callback_count: Cell<usize> = Cell::new(0);
-        let title_in_callback: RefCell<Option<Vec<u8>>> = RefCell::new(None);
-
+        #[derive(Default)]
+        struct Handler {
+            callback_count: usize,
+            title_in_callback: Option<Vec<u8>>,
+        }
+        impl OnReset for Handler {
+            fn on_reset(&mut self, terminal: &Terminal<'_>) {
+                self.callback_count += 1;
+                // Record rather than assert here: a panic in a callback
+                // aborts the whole test binary.
+                self.title_in_callback = terminal.title().ok().map(<[u8]>::to_owned);
+            }
+        }
         let mut terminal = Terminal::new(80, 24).expect("terminal should initialize");
 
         terminal
-            .on_reset(|term| {
-                callback_count.set(callback_count.get() + 1);
-                // Record rather than assert here: a panic in a callback
-                // aborts the whole test binary.
-                *title_in_callback.borrow_mut() = term.title().ok().map(<[u8]>::to_owned);
-            })
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_reset()
             .expect("callback should register");
 
         // Set a title first so we can tell whether RIS already cleared it
@@ -2803,42 +2897,62 @@ mod tests {
         // sibling's option instead.
         terminal.vt_write(b"\x1b]9;4;1;50\x1b\\");
         terminal.vt_write(b"\x1b]7501;state=working:id=build\x1b\\");
-        assert_eq!(callback_count.get(), 0);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 0);
         terminal.vt_write(b"\x1bc");
-        assert_eq!(callback_count.get(), 1);
-        assert_eq!(*title_in_callback.borrow(), Some(Vec::new()));
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 1);
+        assert_eq!(handler.title_in_callback, Some(Vec::new()));
 
         // `vt_write_until` feeds the same stream, so it fires too.
         terminal.vt_write(b"\x1b");
         terminal.vt_write_until(b"c", Boundary::GROUND).unwrap();
-        assert_eq!(callback_count.get(), 2);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
 
         // A soft reset (DECSTR) doesn't count as a full reset.
         terminal.vt_write(b"\x1b[!p");
-        assert_eq!(callback_count.get(), 2);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
 
         // Upstream's `ghostty_terminal_reset` resets the terminal directly
         // and only the stream handling `ESC c` calls the callback.
         terminal.reset();
-        assert_eq!(callback_count.get(), 2);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.callback_count, 2);
     }
 
     /// OSC 9 and OSC 777 carry the program's raw bytes, which libghostty
     /// passes on unvalidated. They used to be exposed as `&str`.
     #[test]
     fn desktop_notifications_are_not_assumed_to_be_utf8() {
-        let seen = RefCell::new(Vec::new());
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<(Vec<u8>, Vec<u8>)>,
+        }
+        impl OnDesktopNotification for Handler {
+            fn on_desktop_notification<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                notif: DesktopNotification<'t>,
+            ) {
+                self.seen
+                    .push((notif.title().to_vec(), notif.body().to_vec()));
+            }
+        }
+
         let mut terminal = Terminal::new(8, 3).unwrap();
         terminal
-            .on_desktop_notification(|_, notification| {
-                seen.borrow_mut()
-                    .push((notification.title().to_vec(), notification.body().to_vec()));
-            })
-            .unwrap();
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_desktop_notification()
+            .expect("callback should register");
         terminal.vt_write(b"\x1b]9;\xff\xfe\x07");
         terminal.vt_write(b"\x1b]777;notify;\xc3\x28;ok\x07");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+
         assert_eq!(
-            *seen.borrow(),
+            handler.seen,
             [
                 (b"".to_vec(), b"\xff\xfe".to_vec()),
                 (b"\xc3\x28".to_vec(), b"ok".to_vec()),
@@ -2884,14 +2998,23 @@ mod tests {
     /// Assertions happen outside the callback: a panic inside it would
     /// abort the whole test binary instead of failing the test.
     fn program_status(input: &[u8]) -> (Vec<SeenStatus>, Vec<u8>) {
-        let seen = RefCell::new(Vec::new());
-        let output = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 3).unwrap();
-        terminal
-            .on_pty_write(|_, bytes| output.borrow_mut().extend_from_slice(bytes))
-            .unwrap()
-            .on_program_status(|_, report| {
-                seen.borrow_mut().push(SeenStatus {
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<SeenStatus>,
+            output: Vec<u8>,
+        }
+        impl OnPtyWrite for Handler {
+            fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+                self.output.extend_from_slice(data);
+            }
+        }
+        impl OnProgramStatus for Handler {
+            fn on_program_status<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                report: ProgramStatus<'t>,
+            ) {
+                self.seen.push(SeenStatus {
                     state: report.state().ok(),
                     kind: report.kind().ok(),
                     progress: report.progress(),
@@ -2900,11 +3023,25 @@ mod tests {
                     title: report.title().to_vec(),
                     message: report.message().to_vec(),
                 });
-            })
-            .unwrap();
+            }
+        }
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .register_effects(Handler::default())
+            .expect("callback should register")
+            .with_on_pty_write()
+            .expect("callback should register")
+            .with_on_program_status()
+            .expect("callback should register");
+
         terminal.vt_write(input);
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
+        let output = std::mem::take(&mut handler.output);
+
         drop(terminal);
-        (seen.into_inner(), output.into_inner())
+        (seen, output)
     }
 
     #[test]
@@ -3015,28 +3152,46 @@ mod tests {
 
     #[test]
     fn program_status_is_not_cleared_by_reset() {
+        type Seen = (Option<ProgramStatusState>, Vec<u8>);
+        struct Handler {
+            seen: Vec<Seen>,
+        }
+        impl OnProgramStatus for Handler {
+            fn on_program_status<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                report: ProgramStatus<'t>,
+            ) {
+                self.seen.push((report.state().ok(), report.id().to_vec()));
+            }
+        }
+
         // Upstream's `ghostty_terminal_reset` only resets the terminal; the
         // clear report comes from the stream handling `ESC c`.
-        let seen = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(8, 3).unwrap();
         terminal
-            .on_program_status(|_, report| {
-                seen.borrow_mut()
-                    .push((report.state().ok(), report.id().to_vec()));
-            })
+            .register_effects(Handler { seen: vec![] })
+            .unwrap()
+            .with_on_program_status()
             .unwrap();
 
         terminal.vt_write(b"\x1b]7501;state=error:id=x\x07");
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
         assert_eq!(
-            seen.take(),
+            std::mem::take(&mut handler.seen),
             [(Some(ProgramStatusState::Error), b"x".to_vec())]
         );
 
         terminal.reset();
-        assert!(seen.borrow().is_empty());
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.seen, [] as [Seen; 0]);
 
         terminal.vt_write(b"\x1bc");
-        assert_eq!(seen.take(), [(Some(ProgramStatusState::Clear), Vec::new())]);
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        assert_eq!(
+            std::mem::take(&mut handler.seen),
+            [(Some(ProgramStatusState::Clear), Vec::new())]
+        );
     }
 
     #[test]
@@ -3052,14 +3207,17 @@ mod tests {
 
         // Without the callback the query goes unanswered, so the program
         // sees the protocol as unsupported.
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(8, 3).unwrap();
         terminal
-            .on_pty_write(|_, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .register_effects(MockPty::default())
+            .unwrap()
+            .with_on_pty_write()
             .unwrap();
         terminal.vt_write(b"\x1b]7501;?\x1b\\");
+        let handler = terminal.effect_handler_mut::<MockPty>().unwrap();
+        let output = std::mem::take(&mut handler.pty);
         drop(terminal);
-        assert_eq!(output.into_inner(), [] as [u8; 0]);
+        assert_eq!(output, [] as [u8; 0]);
     }
 
     /// What a semantic prompt callback observed about one event, copied out
@@ -3098,22 +3256,36 @@ mod tests {
     /// Assertions happen outside the callback: a panic inside it would
     /// abort the whole test binary instead of failing the test.
     fn semantic_prompt(input: &[u8]) -> Vec<SeenPrompt> {
-        let seen = RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 3).unwrap();
-        terminal
-            .on_semantic_prompt(|_, event| {
-                seen.borrow_mut().push(SeenPrompt {
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<SeenPrompt>,
+        }
+        impl OnSemanticPrompt for Handler {
+            fn on_semantic_prompt<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                event: SemanticPrompt<'t>,
+            ) {
+                self.seen.push(SeenPrompt {
                     kind: event.kind().ok(),
                     prompt_kind: event.prompt_kind().ok(),
                     exit_code: event.exit_code(),
                     command: event.command().to_vec(),
                     error: event.error().to_vec(),
                 });
-            })
+            }
+        }
+
+        let mut terminal = Terminal::new(8, 3).unwrap();
+        terminal
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_semantic_prompt()
             .unwrap();
         terminal.vt_write(input);
-        drop(terminal);
-        seen.into_inner()
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        std::mem::take(&mut handler.seen)
     }
 
     #[test]
@@ -3208,15 +3380,28 @@ mod tests {
     /// Assertions happen outside the callback: a panic inside it would
     /// abort the whole test binary instead of failing the test.
     fn resize_window(input: &[u8]) -> (Vec<ResizeWindow>, (u16, u16)) {
-        let seen = RefCell::new(Vec::new());
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<ResizeWindow>,
+        }
+        impl OnResizeWindow for Handler {
+            fn on_resize_window(&mut self, _terminal: &Terminal<'_>, request: ResizeWindow) {
+                self.seen.push(request);
+            }
+        }
+
         let mut terminal = Terminal::new(80, 24).unwrap();
         terminal
-            .on_resize_window(|_, request| seen.borrow_mut().push(request))
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_resize_window()
             .unwrap();
         terminal.vt_write(input);
         let size = (terminal.cols().unwrap(), terminal.rows().unwrap());
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
         drop(terminal);
-        (seen.into_inner(), size)
+        (seen, size)
     }
 
     #[test]
@@ -3373,17 +3558,33 @@ mod miri_soundness {
     /// conversion inside `extern "C"`), while still delivering known tags.
     #[test]
     fn resize_window_skips_unknown_tags() {
-        let seen = std::cell::RefCell::new(Vec::new());
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<ResizeWindow>,
+        }
+        impl OnResizeWindow for Handler {
+            fn on_resize_window(&mut self, _terminal: &Terminal<'_>, request: ResizeWindow) {
+                self.seen.push(request);
+            }
+        }
+
         let mut terminal = Terminal::new(8, 2).unwrap();
         terminal
-            .on_resize_window(|_, request| seen.borrow_mut().push(request))
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_resize_window()
             .unwrap();
+
         // `GRID + 1`, then `GRID` as the positive control.
         terminal.vt_write(b"resize:unknown");
         terminal.vt_write(b"resize:grid");
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
+
         drop(terminal);
         assert_eq!(
-            seen.into_inner(),
+            seen,
             [ResizeWindow::Grid {
                 rows: NonZeroU16::new(30),
                 columns: NonZeroU16::new(100),
@@ -3399,12 +3600,17 @@ mod miri_soundness {
     /// terminator it doesn't know, while still delivering known ones.
     #[test]
     fn unknown_sequence_skips_unknown_tags_and_terminators() {
-        let seen = std::cell::RefCell::new(Vec::new());
-        let mut terminal = Terminal::new(8, 2).unwrap();
-        terminal
-            .on_unknown_sequence(|_, sequence| {
-                // Copy the content out; it is only borrowed for the callback.
-                seen.borrow_mut().push(match sequence {
+        #[derive(Default)]
+        struct Handler {
+            seen: Vec<(Option<osc::Terminator>, Vec<u8>, bool)>,
+        }
+        impl OnUnknownSequence for Handler {
+            fn on_unknown_sequence<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                sequence: UnknownSequence<'t>,
+            ) {
+                self.seen.push(match sequence {
                     UnknownSequence::Apc { content, truncated } => {
                         (None, content.to_vec(), truncated)
                     }
@@ -3414,17 +3620,29 @@ mod miri_soundness {
                         terminator,
                     } => (Some(terminator), content.to_vec(), truncated),
                 });
-            })
+            }
+        }
+
+        let mut terminal = Terminal::new(8, 2).unwrap();
+        terminal
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_unknown_sequence()
             .unwrap();
+
         // `OSC + 1` and an OSC ending in `BEL + 1`, then APC and OSC as the
         // positive controls.
         terminal.vt_write(b"unknown:future");
         terminal.vt_write(b"unknown:osc-badterm");
         terminal.vt_write(b"unknown:apc");
         terminal.vt_write(b"unknown:osc");
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        let seen = std::mem::take(&mut handler.seen);
+
         drop(terminal);
         assert_eq!(
-            seen.into_inner(),
+            seen,
             [
                 (None, b"payload".to_vec(), true),
                 (Some(osc::Terminator::Bel), b"payload".to_vec(), false),

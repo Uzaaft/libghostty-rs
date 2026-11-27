@@ -11,10 +11,10 @@
 //!
 //! - If Kitty clipboard protocol paste events ([`Mode::PASTE_EVENTS`], mode 5522)
 //!   are enabled, the paste was user-initiated ([`Source::Clipboard`]),
-//!   and a [clipboard read callback](Terminal::on_clipboard_read) is
+//!   and a [clipboard read effect](crate::effect::OnClipboardRead) is
 //!   installed, the terminal sends the program a paste event listing the
 //!   clipboard's MIME types with a one-time password instead of the data. The
-//!   program then reads what it wants through the clipboard read callback,
+//!   program then reads what it wants through the clipboard read effect,
 //!   which arrives with [`granted`](crate::effect::ClipboardRead::granted)
 //!   set so no permission prompt is needed. No data is read for the event.
 //! - Otherwise the first text representation is written: unsafe control bytes
@@ -25,7 +25,7 @@
 //! The data is pulled through the reader only when a representation is
 //! actually pasted (so a clipboard holding a large image next to some text
 //! costs nothing), and the encoded bytes stream to the
-//! [pty write callback](Terminal::on_pty_write) in chunks as they are
+//! [pty write effect](crate::effect::OnPtyWrite) in chunks as they are
 //! produced, never in one piece. The callback may be invoked several times for
 //! a single paste; the pieces must be written to the pty in order.
 //!
@@ -40,31 +40,40 @@
 //! and a refused or failed paste writes nothing at all.
 //!
 //! ```rust
-//! use libghostty_vt::{Error, Terminal, paste::Options, effect::ClipboardMime};
+//! use libghostty_vt::{
+//!     Error, Terminal,
+//!     effect,
+//!     paste::Options,
+//! };
 //! use std::io::Write;
 //!
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! struct Handler;
+//! impl effect::OnPtyWrite for Handler {
+//!     fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+//!         // Write the bytes to the pty.
+//! #       let _ = data;
+//!     }
+//! }
+//!
+//! # fn main() -> Result<(), Error> {
 //! let mut terminal = Terminal::new(80, 24)?;
-//! terminal.on_pty_write(|_term, bytes| {
-//!     // Write the bytes to the pty.
-//! #   let _ = bytes;
-//! })?;
+//! terminal
+//!     .register_effects(Handler)?
+//!     .with_on_pty_write()?;
 //!
 //! let clipboard = "echo hello\n";
-//! let mimes = [ClipboardMime::new(b"text/plain")];
+//! let mimes = [effect::ClipboardMime::new(b"text/plain")];
 //! let read = |_mime: &[u8], out: &mut dyn Write| out.write_all(clipboard.as_bytes());
 //!
 //! match terminal.paste(Options::new(), &mimes, read) {
+//!     Ok(_) => {}
 //!     // Ask the user whether the paste should go ahead, then retry.
 //!     Err(Error::Rejected) => {
 //!         terminal.paste(Options::new().with_allow_unsafe(true), &mimes, read)?;
 //!     }
-//!     result => {
-//!         result?;
-//!     }
+//!     Err(e) => return Err(e),
 //! }
-//! # Ok(())
-//! # }
+//! # Ok(()) }
 //! ```
 //!
 //! # Building blocks
@@ -186,11 +195,11 @@ pub enum Source {
     /// The user pasted from a clipboard: keybind, menu, middle click.
     #[default]
     Clipboard = ffi::PasteSource::CLIPBOARD,
+
     /// Text inserted some other way: IME commit, drag and drop, scripted
     /// input. Always written as text, never as a paste event, matching kitty.
     /// This is not a way to opt out of paste events; an embedder that doesn't
-    /// want them doesn't install a
-    /// [clipboard read callback](Terminal::on_clipboard_read).
+    /// want them doesn't install a [clipboard read effect](crate::effect::OnClipboardRead).
     Text = ffi::PasteSource::TEXT,
 }
 
@@ -250,15 +259,15 @@ impl Default for Options {
 }
 
 /// Methods related to [pasting](crate::paste).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// Paste into the terminal according to its current state: a Kitty
     /// clipboard protocol paste event if [`Mode::PASTE_EVENTS`] is enabled and
-    /// a [clipboard read callback](Self::on_clipboard_read) is installed,
+    /// a [clipboard read effect](crate::effect::OnClipboardRead) is installed,
     /// otherwise the text framed per [`Mode::BRACKETED_PASTE`]. See the
     /// [module documentation](crate::paste) for the full behavior. Output
-    /// streams through the [pty write callback](Self::on_pty_write) in chunks.
-    /// The viewport is not scrolled; that is up to the embedder, as for key
-    /// input.
+    /// streams through the [pty write effect](crate::effect::OnPtyWrite) in
+    /// chunks. The viewport is not scrolled; that is up to the embedder, as
+    /// for key input.
     ///
     /// `mimes` lists the MIME types of the representations available, in
     /// preferred order. A text paste reads and writes the first entry with a
@@ -292,7 +301,7 @@ impl Terminal<'_, '_> {
     ///
     /// - [`Error::Rejected`](crate::Error::Rejected) if the text could inject commands and
     ///   [`Options::with_allow_unsafe`] is not set.
-    /// - [`Error::InvalidValue`](crate::Error::InvalidValue) if no pty write callback is installed.
+    /// - [`Error::InvalidValue`](crate::Error::InvalidValue) if no pty write effect is installed.
     /// - [`Error::IoError`](crate::Error::IoError) if the reader failed, or if there is no secure
     ///   entropy source to mint a paste event password (see
     ///   [crate::sys::SECURE_RANDOM_SOURCE]).
@@ -395,38 +404,23 @@ impl Write for PasteWriter {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
-    use crate::{Error, effect::ClipboardReadError, mode::Mode};
-    use std::cell::{Cell, RefCell};
+    use crate::{
+        Error,
+        effect::{self, ClipboardReadError},
+        mode::Mode,
+    };
 
     const TEXT: [ClipboardMime<'static>; 1] = [ClipboardMime::new(b"text/plain")];
 
-    /// What a paste wrote to the pty and which MIME types it read.
-    ///
-    /// The reader only records: a panic inside it would abort the whole test
-    /// binary instead of failing the test.
-    fn paste(
-        terminal: &mut Terminal<'_, '_>,
-        output: &RefCell<Vec<u8>>,
-        options: Options,
-        mimes: &[ClipboardMime<'_>],
-        data: &[u8],
-    ) -> (Result<bool>, Vec<Vec<u8>>) {
-        output.borrow_mut().clear();
-        let mut reads = Vec::new();
-        let result = terminal.paste(options, mimes, |mime, out| {
-            reads.push(mime.to_owned());
-            out.write_all(data)
-        });
-        (result, reads)
-    }
-
     #[test]
     fn text_paste_follows_bracketed_paste_mode() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).unwrap();
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .register_effects(effect::MockPty::default())
+            .unwrap()
+            .with_on_pty_write()
             .unwrap();
+
         let mimes = [
             ClipboardMime::new(b"image/png"),
             ClipboardMime::new(b"text/plain"),
@@ -434,10 +428,17 @@ mod tests {
 
         // Unbracketed: unsafe control bytes become spaces. Only the text
         // representation is read.
-        let (result, reads) = paste(&mut terminal, &output, Options::new(), &mimes, b"a\0b");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let mut reads = Vec::new();
+        let result = terminal.paste(Options::new(), &mimes, |mime, out| {
+            reads.push(mime.to_owned());
+            out.write_all(b"a\0b")
+        });
         assert!(result.unwrap());
         assert_eq!(reads, [b"text/plain"]);
-        assert_eq!(*output.borrow(), b"a b");
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, b"a b");
 
         // With several text representations, only the first one is read.
         let mimes = [
@@ -445,10 +446,17 @@ mod tests {
             ClipboardMime::new(b"UTF8_STRING"),
             ClipboardMime::new(b"text/plain"),
         ];
-        let (result, reads) = paste(&mut terminal, &output, Options::new(), &mimes, b"hi");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let mut reads = Vec::new();
+        let result = terminal.paste(Options::new(), &mimes, |mime, out| {
+            reads.push(mime.to_owned());
+            out.write_all(b"hi")
+        });
         assert!(result.unwrap());
         assert_eq!(reads, [b"UTF8_STRING"]);
-        assert_eq!(*output.borrow(), b"hi");
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, b"hi");
 
         // The reader gets the very string it was given, not a copy.
         let mime = b"text/plain".to_vec();
@@ -462,41 +470,62 @@ mod tests {
         assert!(same);
 
         // A newline could inject a command, so it needs confirmation.
-        let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"a\nb");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let result = terminal.paste(Options::new(), &TEXT, |_, out| out.write_all(b"a\nb"));
         assert!(matches!(result, Err(Error::Rejected)));
-        assert!(output.borrow().is_empty());
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, [] as [u8; 0]);
+
         let options = Options::new().with_allow_unsafe(true);
-        let (result, _) = paste(&mut terminal, &output, options, &TEXT, b"a\nb");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let result = terminal.paste(options, &TEXT, |_, out| out.write_all(b"a\nb"));
         assert!(result.unwrap());
-        assert_eq!(*output.borrow(), b"a\rb");
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, b"a\rb");
 
         // So could a lone carriage return, since it is what Enter sends. It
         // is passed through as is.
         assert!(!is_safe("a\rb"));
-        let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"a\rb");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let result = terminal.paste(Options::new(), &TEXT, |_, out| out.write_all(b"a\rb"));
         assert!(matches!(result, Err(Error::Rejected)));
-        assert!(output.borrow().is_empty());
-        let (result, _) = paste(&mut terminal, &output, options, &TEXT, b"a\rb");
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, [] as [u8; 0]);
+
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let result = terminal.paste(options, &TEXT, |_, out| out.write_all(b"a\rb"));
         assert!(result.unwrap());
-        assert_eq!(*output.borrow(), b"a\rb");
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, b"a\rb");
 
         // Bracketed: line terminators are safe, but the end sequence is not.
         terminal.set_mode(Mode::BRACKETED_PASTE, true).unwrap();
-        let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"a\nb");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let result = terminal.paste(options, &TEXT, |_, out| out.write_all(b"a\nb"));
         assert!(result.unwrap());
-        assert_eq!(*output.borrow(), b"\x1b[200~a\nb\x1b[201~");
-        let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"a\rb");
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, b"\x1b[200~a\nb\x1b[201~");
+
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let result = terminal.paste(options, &TEXT, |_, out| out.write_all(b"a\rb"));
         assert!(result.unwrap());
-        assert_eq!(*output.borrow(), b"\x1b[200~a\rb\x1b[201~");
-        let (result, _) = paste(
-            &mut terminal,
-            &output,
-            Options::new(),
-            &TEXT,
-            b"a\x1b[201~b",
-        );
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, b"\x1b[200~a\rb\x1b[201~");
+
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let result = terminal.paste(Options::new(), &TEXT, |_, out| {
+            out.write_all(b"a\x1b[201~b")
+        });
         assert!(matches!(result, Err(Error::Rejected)));
-        assert!(output.borrow().is_empty());
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, [] as [u8; 0]);
 
         // Upstream scans raw bytes and never checks UTF-8: invalid UTF-8 on
         // its own is safe, and the terminator is still caught amid it.
@@ -506,38 +535,61 @@ mod tests {
 
     #[test]
     fn nothing_to_paste_and_failures_write_nothing() {
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new(80, 24).unwrap();
 
-        // Without a pty write callback there is nowhere to paste to.
-        let (result, reads) = paste(&mut terminal, &output, Options::new(), &TEXT, b"hi");
+        // Without a pty write effect there is nowhere to paste to.
+        let mut reads = Vec::new();
+        let result = terminal.paste(Options::new(), &TEXT, |mime, out| {
+            reads.push(mime.to_owned());
+            out.write_all(b"hi")
+        });
         assert!(matches!(result, Err(Error::InvalidValue)));
         assert_eq!(reads, [] as [Vec<u8>; 0]);
 
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .register_effects(effect::MockPty::default())
+            .unwrap()
+            .with_on_pty_write()
             .unwrap();
 
         // No MIME types, or only non-text ones, is nothing to paste.
-        let (result, reads) = paste(&mut terminal, &output, Options::new(), &[], b"");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let mut reads = Vec::new();
+        let result = terminal.paste(Options::new(), &[], |mime, out| {
+            reads.push(mime.to_owned());
+            out.write_all(b"")
+        });
         assert!(!result.unwrap());
         assert_eq!(reads, [] as [Vec<u8>; 0]);
+
         let png = [ClipboardMime::new(b"image/png")];
-        let (result, reads) = paste(&mut terminal, &output, Options::new(), &png, b"png");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let mut reads = Vec::new();
+        let result = terminal.paste(Options::new(), &png, |mime, out| {
+            reads.push(mime.to_owned());
+            out.write_all(b"png")
+        });
         assert!(!result.unwrap());
         assert_eq!(reads, [] as [Vec<u8>; 0]);
+
         // An empty text representation is nothing to paste either.
-        let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"");
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
+        let result = terminal.paste(Options::new(), &TEXT, |_, out| out.write_all(b""));
         assert!(!result.unwrap());
 
         // A failing reader fails the paste.
-        output.borrow_mut().clear();
+        let handler = terminal.effect_handler_mut::<effect::MockPty>().unwrap();
+        handler.pty.clear();
         let result = terminal.paste(Options::new(), &TEXT, |_mime, out| {
             out.write_all(b"partial")?;
             Err(std::io::Error::other("clipboard went away"))
         });
         assert!(matches!(result, Err(Error::IoError)));
-        assert!(output.borrow().is_empty());
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, [] as [u8; 0]);
     }
 
     /// A reader that ignores a refused write must not paste the rest.
@@ -545,25 +597,27 @@ mod tests {
     fn refused_writes_fail_the_paste_even_if_ignored() {
         let capped = crate::alloc::testing::Capped::new(1024 * 1024);
         let alloc = capped.allocator();
-        let output = RefCell::new(Vec::new());
         let mut terminal = Terminal::new_in(&alloc, 80, 24).unwrap();
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .register_effects(effect::MockPty::default())
+            .unwrap()
+            .with_on_pty_write()
             .unwrap();
 
-        let after_refused = Cell::new(false);
+        let mut after_refused = false;
         let result = terminal.paste(Options::new(), &TEXT, |_mime, out| {
             out.write_all(b"before ")?;
             // Too big for the allocator, so the writer refuses it. A reader
             // that drops that error and carries on...
             let _ = out.write_all(&vec![b'x'; 4 * 1024 * 1024]);
             // ...can't write anything else either.
-            after_refused.set(out.write_all(b"after").is_err());
+            after_refused = out.write_all(b"after").is_err();
             Ok(())
         });
-        assert!(after_refused.get());
+        assert!(after_refused);
         assert!(matches!(result, Err(Error::OutOfMemory)));
-        assert!(output.borrow().is_empty());
+        let handler = terminal.effect_handler::<effect::MockPty>().unwrap();
+        assert_eq!(handler.pty, [] as [u8; 0]);
     }
 
     /// Extract the one-time password from a paste event.
@@ -575,42 +629,71 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines, reason = "it's just a test")]
     fn kitty_paste_events_replace_user_pastes() {
-        let output = RefCell::new(Vec::new());
-        let granted = RefCell::new(Vec::new());
-        let reads = Cell::new(0);
+        #[derive(Default)]
+        struct Handler {
+            output: Vec<u8>,
+            granted: Vec<bool>,
+        }
+        impl effect::OnPtyWrite for Handler {
+            fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+                self.output.extend_from_slice(data);
+            }
+        }
+        impl effect::OnClipboardRead for Handler {
+            fn on_clipboard_read<'t>(
+                &mut self,
+                _terminal: &'t Terminal<'_>,
+                request: effect::ClipboardRead<'t>,
+            ) -> effect::ClipboardReadReply<'t> {
+                self.granted.push(request.granted());
+                request.reply(Err(ClipboardReadError::Denied))
+            }
+        }
+
         let mut terminal = Terminal::new(80, 24).unwrap();
         terminal
-            .on_pty_write(|_term, bytes| output.borrow_mut().extend_from_slice(bytes))
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_pty_write()
             .unwrap();
 
         // The program enabling mode 5522 alone doesn't produce events.
         terminal.vt_write(b"\x1b[?5522h");
         assert!(terminal.mode(Mode::PASTE_EVENTS).unwrap());
-        let (result, _) = paste(&mut terminal, &output, Options::new(), &TEXT, b"hi");
+
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        handler.output.clear();
+        let result = terminal.paste(Options::new(), &TEXT, |_, out| out.write_all(b"hi"));
+
         assert!(result.unwrap());
-        assert_eq!(*output.borrow(), b"hi");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.output, b"hi");
 
         // Once clipboard reads are handled, a user paste becomes an event
         // listing every MIME type, and nothing is read.
         terminal
-            .on_clipboard_read(|_term, request| {
-                granted.borrow_mut().push(request.granted());
-                request.reply(Err(ClipboardReadError::Denied)).finish();
-            })
+            .register_effects(Handler::default())
+            .unwrap()
+            .with_on_pty_write()
+            .unwrap()
+            .with_on_clipboard_read()
             .unwrap();
+
         let mimes = [
             ClipboardMime::new(b"text/plain"),
             ClipboardMime::new(b"image/png"),
         ];
-        output.borrow_mut().clear();
+        let mut reads = 0usize;
         let result = terminal.paste(Options::new(), &mimes, |_mime, _out| {
-            reads.set(reads.get() + 1);
+            reads += 1;
             Ok(())
         });
         assert!(result.unwrap());
-        assert_eq!(reads.get(), 0);
-        let event = output.borrow().clone();
+        assert_eq!(reads, 0);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        let event = handler.output.clone();
         let pw = event_password(&event);
         assert_eq!(
             event,
@@ -640,34 +723,53 @@ mod tests {
         terminal.vt_write(read(":name=YXBw", "b3RoZXI=").as_bytes());
         terminal.vt_write(read(":name=YXBw", &pw).as_bytes());
         terminal.vt_write(read(":name=YXBw", &pw).as_bytes());
-        assert_eq!(*granted.borrow(), [false, false, true, false]);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.granted, [false, false, true, false]);
 
         // An event never puts the text on the input stream, so text that
         // would be unsafe unbracketed is not rejected, and is not even read.
-        let (result, reads) = paste(&mut terminal, &output, Options::new(), &TEXT, b"a\n");
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        handler.output.clear();
+        let mut reads = Vec::new();
+        let result = terminal.paste(Options::new(), &TEXT, |mime, out| {
+            reads.push(mime.to_owned());
+            out.write_all(b"a\n")
+        });
+
         assert!(result.unwrap());
         assert_eq!(reads, [] as [Vec<u8>; 0]);
+        let handler = terminal.effect_handler::<Handler>().unwrap();
         assert!(
-            output
-                .borrow()
+            handler
+                .output
                 .starts_with(b"\x1b]5522;type=read:status=OK:pw=")
         );
 
         // Other locations are reported as the primary selection.
         let options = Options::new().with_location(ClipboardLocation::Selection);
-        let (result, _) = paste(&mut terminal, &output, options, &TEXT, b"hi");
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        handler.output.clear();
+        let result = terminal.paste(options, &TEXT, |_, out| out.write_all(b"hi"));
         assert!(result.unwrap());
+        let handler = terminal.effect_handler::<Handler>().unwrap();
         assert!(
-            output
-                .borrow()
+            handler
+                .output
                 .starts_with(b"\x1b]5522;type=read:status=OK:loc=primary:")
         );
 
         // Programmatic insertion always pastes the text.
         let options = Options::new().with_source(Source::Text);
-        let (result, reads) = paste(&mut terminal, &output, options, &TEXT, b"hi");
+        let handler = terminal.effect_handler_mut::<Handler>().unwrap();
+        handler.output.clear();
+        let mut reads = Vec::new();
+        let result = terminal.paste(options, &TEXT, |mime, out| {
+            reads.push(mime.to_owned());
+            out.write_all(b"hi")
+        });
         assert!(result.unwrap());
         assert_eq!(reads, [b"text/plain"]);
-        assert_eq!(*output.borrow(), b"hi");
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.output, b"hi");
     }
 }

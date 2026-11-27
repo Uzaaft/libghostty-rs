@@ -1,8 +1,8 @@
 # Custom Sequences {#guide-custom-sequences}
 
-libghostty-vt gives you two ways to get at escape sequences yourself: a callback
-for the sequences we don't implement, and a write function that stops at the
-start or end of a control string.
+libghostty-vt gives you two ways to get at escape sequences yourself: an effect
+handler for the sequences we don't implement, and a write function that stops at
+the start or end of a control string.
 
 Programs sometimes send sequences we don't implement, such as a newer protocol
 or one specific to your application. The terminal discards these by default. And
@@ -18,18 +18,18 @@ You can ask the terminal to hand these sequences to you, so your application can
 implement the protocol itself. Two options work together, and you have to set
 both:
 
-- [`Terminal::on_unknown_sequence()`] installs the callback.
+- [`Effects::with_on_unknown_sequence()`] installs the effect handler.
 - [`Terminal::set_unknown_max_bytes()`] sets how many bytes of each sequence
   to keep. It defaults to zero, which turns the feature off.
 
-The callback receives a [`effect::UnknownSequence`]. Its tag says which kind
+The handler receives a [`effect::UnknownSequence`]. Its tag says which kind
 of sequence arrived. APC and OSC sequences are reported today, and more kinds
 may be added later, so ignore any tag you don't handle.
 
 For OSC, the content is everything between `ESC ]` and the terminator, including
 the number that identifies the sequence. As an example, suppose your application
 invents its own OSC 7400 so that programs can report their status. If a program
-writes `ESC ] 7400;status=busy BEL`, the callback receives the content
+writes `ESC ] 7400;status=busy BEL`, the effect handler receives the content
 `7400;status=busy` and the terminator [`osc::Terminator::Bel`]. Match on the
 number followed by `;`, so that `7400;` doesn't also match an unrelated `74000;`
 sequence.
@@ -39,34 +39,48 @@ implement, such as OSC 2 for the window title, is never reported, even when its
 contents are malformed. We also don't report sequences cut short before their
 terminator, or supported protocols that you turned off.
 
-The callback runs while the terminal is processing input, so it can answer a
+The handler runs while the terminal is processing input, so it can answer a
 query by writing straight to the pty. The reply stays in order with the
 terminal's own replies. Use the terminator from the request in your reply, since
 that's what the program expects.
-The rules from [The rules for callbacks](effects.md#guide-effects-rules)
+The rules from [The rules for handlers](effects.md#guide-effects-rules)
 all apply here.
 
 ```rust,ignore
+use libghostty_vt::effect;
+
+struct Handler;
+impl effect::OnUnknownSequence for Handler {
+    fn on_unknown_sequence<'t>(
+        &mut self,
+        _terminal: &'t Terminal<'_>,
+        seq: effect::UnknownSequence<'t>,
+    ) {
+        let UnknownSequence::Osc { content, truncated, .. } = seq else {
+          return;
+        };
+
+        // This protocol needs the whole sequence, so skip cut-off ones.
+        if truncated {
+          return;
+        }
+
+        // Only handle OSC 7400. Everything else is ignored.
+        if let Some(status) = content.strip_prefix(b"7400;") {
+          // The content is only valid during this call. Copy it if you need it
+          // later. my_app.handle_status is your own function.
+          my_app.handle_status(status);
+        }
+    }
+}
+
+
 terminal
-  // Keep up to 4 KiB of each unknown sequence and report them.
-  .set_unknown_max_bytes(4096)?
-  .on_unknown_sequence(|_term, seq| {
-    let UnknownSequence::Osc { content, truncated, .. } = seq else {
-      return;
-    };
-
-    // This protocol needs the whole sequence, so skip cut-off ones.
-    if truncated {
-      return;
-    }
-
-    // Only handle OSC 7400. Everything else is ignored.
-    if let Some(status) = content.strip_prefix(b"7400;") {
-      // The content is only valid during this call. Copy it if you need it
-      // later. my_app_handle_status is your own function.
-      my_app.handle_status(status);
-    }
-  })?;
+    .register_effects(Handler)?
+    .with_on_unknown_sequence()?;
+    
+// Keep up to 4 KiB of each unknown sequence and report them.
+terminal.set_unknown_max_bytes(4096)?;
 ```
 
 Pick a limit that fits the largest sequence you expect. A longer sequence is
@@ -76,7 +90,7 @@ the terminal already owns, so limits up to 2048 add no allocations for OSC.
 Larger limits allocate memory for each unknown OSC sequence, and unknown APC
 sequences are always kept in allocated memory.
 
-This callback handles both kinds and prints what it gets:
+This handler handles both kinds and prints what it gets:
 
 ```rust,ignore
 {{#include ../../example/rust-vt-effects/src/main.rs:effects-unknown-sequence}}

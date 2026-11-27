@@ -10,7 +10,7 @@ use libghostty_vt::{
 #[rustfmt::skip]
 // ANCHOR: colors-set-defaults
 /// Set up a dark color theme with custom palette entries.
-fn set_color_theme(terminal: &mut Terminal<'_, '_>) -> Result<(), Error> {
+fn set_color_theme(terminal: &mut Terminal<'_>) -> Result<(), Error> {
     // Set default foreground (light gray) and background (dark)
     terminal
         .set_default_fg_color(Some(Rgb { r: 0xDD, g: 0xDD, b: 0xDD }))?
@@ -48,7 +48,7 @@ fn print_color(name: &str, effective: Option<Rgb>, default: Option<Rgb>) {
     }
 }
 
-fn print_all_colors(terminal: &Terminal<'_, '_>, label: &str) -> Result<(), Error> {
+fn print_all_colors(terminal: &Terminal<'_>, label: &str) -> Result<(), Error> {
     println!("{label}:");
     print_color(
         "foreground",

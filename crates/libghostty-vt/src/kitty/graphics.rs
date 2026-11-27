@@ -31,12 +31,9 @@ use crate::{
 #[derive(Debug)]
 pub struct Graphics<'t> {
     inner: Ref<'t, ffi::KittyGraphicsImpl>,
-    /// The `Terminal::id` of the terminal this storage belongs to.
-    ///
-    /// The lifetime only says that some terminal is borrowed, not which one,
-    /// so [`PlacementIteration::rect`] compares this with the terminal it's
-    /// given to make sure they're the same one.
-    terminal: u64,
+    // Used for getting e.g. image rects. The terminal is semantically
+    // borrowed here and must not mutate, so this is fine to have.
+    terminal: ffi::Terminal,
 }
 
 /// Opaque reference to a Kitty graphics image.
@@ -62,13 +59,12 @@ pub struct PlacementIterator<'alloc> {
 #[derive(Debug)]
 pub struct PlacementIteration<'t, 'alloc> {
     iterator: &'t mut PlacementIterator<'alloc>,
-    /// The `Terminal::id` of the terminal whose storage is being iterated,
-    /// copied from [`Graphics`]. See [`PlacementIteration::rect`].
-    terminal: u64,
+    // See terminal field in `Graphics`
+    terminal: ffi::Terminal,
 }
 
 /// Methods related to the [Kitty graphics protocol](crate::kitty::graphics).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// The Kitty graphics image storage for the active screen.
     ///
     /// Returns a borrowed reference to the image storage.
@@ -81,7 +77,7 @@ impl Terminal<'_, '_> {
 
         Ok(Graphics {
             inner: Ref::new(inner)?,
-            terminal: self.id,
+            terminal: self.inner.as_raw(),
         })
     }
 
@@ -446,19 +442,6 @@ impl<'alloc> PlacementIterator<'alloc> {
 
     /// Update the placement iterator with the given graphics storage,
     /// returning a new placement iteration.
-    ///
-    /// The iteration walks the storage itself, so it borrows `graphics` (and
-    /// through it the terminal) as well as this iterator:
-    ///
-    /// ```compile_fail,E0505
-    /// # use libghostty_vt::{Terminal, kitty::graphics::PlacementIterator};
-    /// let terminal = Terminal::new(80, 24).unwrap();
-    /// let mut iterator = PlacementIterator::new().unwrap();
-    /// let graphics = terminal.kitty_graphics().unwrap().unwrap();
-    /// let mut placements = iterator.update(&graphics).unwrap();
-    /// drop(terminal);
-    /// placements.next();
-    /// ```
     pub fn update<'t>(
         &'t mut self,
         graphics: &'t Graphics<'_>,
@@ -554,11 +537,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// Takes into account the placement's source rectangle, specified
     /// columns/rows, and aspect ratio to calculate the final rendered pixel
     /// dimensions.
-    pub fn pixel_size(
-        &self,
-        image: &Image<'t>,
-        terminal: &'t Terminal<'_, '_>,
-    ) -> Result<PixelSize> {
+    pub fn pixel_size(&self, image: &Image<'t>, terminal: &'t Terminal<'_>) -> Result<PixelSize> {
         crate::sys::GATE.freeze();
         let mut size = PixelSize::default();
         let result = unsafe {
@@ -579,7 +558,7 @@ impl<'t> PlacementIteration<'t, '_> {
     /// Takes into account the placement's source rectangle, specified
     /// columns/rows, and aspect ratio to calculate the final rendered pixel
     /// dimensions.
-    pub fn grid_size(&self, image: &Image<'t>, terminal: &'t Terminal<'_, '_>) -> Result<GridSize> {
+    pub fn grid_size(&self, image: &Image<'t>, terminal: &'t Terminal<'_>) -> Result<GridSize> {
         crate::sys::GATE.freeze();
         let mut size = GridSize::default();
         let result = unsafe {
@@ -617,7 +596,7 @@ impl<'t> PlacementIteration<'t, '_> {
     pub fn viewport_pos(
         &self,
         image: &Image<'t>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<Option<ViewportPos>> {
         crate::sys::GATE.freeze();
         let mut pos = ViewportPos::default();
@@ -664,23 +643,14 @@ impl<'t> PlacementIteration<'t, '_> {
     ///
     /// Returns [`Error::InvalidValue`] if `terminal` isn't the terminal whose
     /// [`Graphics`] this placement came from.
-    pub fn rect(
-        &self,
-        image: &Image<'t>,
-        terminal: &'t Terminal<'_, '_>,
-    ) -> Result<Option<Selection<'t>>> {
-        // BUG: Upstream doesn't check if the given terminal is the same
-        // terminal as the one that created the graphics storage...
-        if self.terminal != terminal.id {
-            return Err(Error::InvalidValue);
-        }
+    pub fn rect(&self, image: &Image<'t>) -> Result<Option<Selection<'t>>> {
         crate::sys::GATE.freeze();
         let mut sel = ffi::Selection::default();
         let result = unsafe {
             ffi::ghostty_kitty_graphics_placement_rect(
                 self.iterator.inner.as_raw(),
                 image.inner.as_raw(),
-                terminal.inner.as_raw(),
+                self.terminal,
                 &raw mut sel,
             )
         };
@@ -691,7 +661,7 @@ impl<'t> PlacementIteration<'t, '_> {
 
         // SAFETY: Selection belongs to the correct terminal and should
         // share its lifetime with the given terminal.
-        Ok(sel.map(|sel| unsafe { Selection::from_raw(terminal.inner.as_raw(), sel) }))
+        Ok(sel.map(|sel| unsafe { Selection::from_raw(self.terminal, sel) }))
     }
 
     /// Get all of the geometry of the current placement in one call.
@@ -708,7 +678,7 @@ impl<'t> PlacementIteration<'t, '_> {
     pub fn render_info(
         &self,
         image: &Image<'t>,
-        terminal: &'t Terminal<'_, '_>,
+        terminal: &'t Terminal<'_>,
     ) -> Result<PlacementRenderInfo> {
         crate::sys::GATE.freeze();
         let mut info = ffi::sized!(ffi::KittyGraphicsPlacementRenderInfo);
@@ -951,8 +921,6 @@ pub enum Compression {
 
 #[cfg(all(test, not(miri)))]
 mod placement_tests {
-    use std::cell::Cell;
-
     use super::{Layer, PlacementIterator};
     use crate::{
         Terminal,
@@ -1019,7 +987,7 @@ mod placement_tests {
         let (mut normal, mut virtual_) = (0, 0);
         while let Some(placement) = placements.next() {
             let image = graphics.image(placement.image_id().unwrap()).unwrap();
-            let rect = placement.rect(&image, &terminal).unwrap();
+            let rect = placement.rect(&image).unwrap();
 
             if placement.is_virtual().unwrap() {
                 virtual_ += 1;
@@ -1042,83 +1010,6 @@ mod placement_tests {
         }
         assert_eq!((normal, virtual_), (1, 1));
     }
-
-    #[test]
-    fn rect_rejects_another_terminal() {
-        let narrow = narrow();
-        let mut wide = Terminal::new(80, 24).unwrap();
-        wide.resize(80, 24, 10, 20).unwrap();
-
-        let graphics = narrow.kitty_graphics().unwrap();
-        let mut iterator = PlacementIterator::new().unwrap();
-        let mut placements = iterator.update(&graphics).unwrap();
-        let placement = placements.next().unwrap();
-        let image = graphics.image(1).unwrap();
-
-        // Don't touch the refs of a mismatched call: if the check is missing,
-        // the end is at column 39 of a 10 column page. Matching on the
-        // variant is enough.
-        assert!(matches!(
-            placement.rect(&image, &wide),
-            Err(Error::InvalidValue)
-        ));
-        // With its own terminal, upstream clamps the end to column 9.
-        assert!(matches!(placement.rect(&image, &narrow), Ok(Some(_))));
-    }
-
-    #[test]
-    fn rect_rejects_another_terminal_in_callbacks() {
-        // Same as above, but every terminal is a view passed to a callback,
-        // and `wide`'s callback runs inside `narrow`'s. Views are built by
-        // the callback trampolines rather than `Terminal::new`, so this
-        // checks that they carry their own terminal's id too.
-        // Declared first so they outlive `narrow`, whose callback borrows
-        // them.
-        let (same, other) = (Cell::new(false), Cell::new(false));
-        let mut narrow = narrow();
-        narrow
-            .on_bell(|a| {
-                let graphics = a.kitty_graphics().unwrap();
-                let mut iterator = PlacementIterator::new().unwrap();
-                let mut placements = iterator.update(&graphics).unwrap();
-                let placement = placements.next().unwrap();
-                let image = graphics.image(1).unwrap();
-                same.set(matches!(placement.rect(&image, a), Ok(Some(_))));
-
-                let mut wide = Terminal::new(80, 24).unwrap();
-                wide.resize(80, 24, 10, 20).unwrap();
-                wide.on_bell(|b| {
-                    // Don't touch the refs, as above.
-                    other.set(matches!(
-                        placement.rect(&image, b),
-                        Err(Error::InvalidValue)
-                    ));
-                })
-                .unwrap();
-                wide.vt_write(b"\x07");
-            })
-            .unwrap();
-        narrow.vt_write(b"\x07");
-        assert!(same.get());
-        assert!(other.get());
-    }
-
-    /// A narrow terminal holding a placement wider than the terminal.
-    ///
-    /// Upstream clamps the end column of a rect to the width of the terminal
-    /// it is given, so asking with a wider terminal would give a grid ref
-    /// past the end of this terminal's page.
-    fn narrow<'cb>() -> Terminal<'static, 'cb> {
-        let mut narrow = Terminal::new(10, 24).unwrap();
-        narrow.resize(10, 24, 10, 20).unwrap();
-        narrow
-            .set_kitty_image_storage_limit(Some(64 * 1024 * 1024))
-            .unwrap();
-        // A 1x2 RGB image at the cursor (0,0), 40 columns wide and 1 row
-        // tall.
-        narrow.vt_write(b"\x1b_Ga=T,t=d,f=24,i=1,p=1,s=1,v=2,c=40,r=1;////////\x1b\\");
-        narrow
-    }
 }
 
 #[cfg(all(test, not(miri)))]
@@ -1128,7 +1019,7 @@ mod animation_tests {
     const RED: [u8; 4] = [255, 0, 0, 255];
     const BLUE: [u8; 4] = [0, 0, 255, 255];
 
-    fn terminal() -> Terminal<'static, 'static> {
+    fn terminal() -> Terminal<'static> {
         let mut terminal = Terminal::new(80, 24).unwrap();
         terminal
             .set_kitty_image_storage_limit(Some(64 * 1024 * 1024))
@@ -1137,7 +1028,7 @@ mod animation_tests {
     }
 
     /// The first pixel and the generation of image 1.
-    fn image(terminal: &Terminal<'_, '_>) -> ([u8; 4], u64) {
+    fn image(terminal: &Terminal<'_>) -> ([u8; 4], u64) {
         let graphics = terminal.kitty_graphics().unwrap();
         let image = graphics.image(1).unwrap();
         let pixels = image.data().unwrap().unwrap();

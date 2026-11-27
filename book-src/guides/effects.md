@@ -10,7 +10,7 @@ sound. So we tell you, and you decide what a bell is.
 
 By default, the VT write functions only process sequences that directly change
 terminal state. Anything with a side effect or a reply is ignored until you
-register a callback for it. That includes queries, so a program that asks a
+register a handler for it. That includes queries, so a program that asks a
 question gets no answer.
 
 If you're only feeding bytes into a terminal to read the result back, you can
@@ -18,65 +18,80 @@ skip this page. You need effects as soon as a real program runs in the terminal.
 
 ## Registering an effect {#guide-effects-registering}
 
-Each effect can be registered by passing a callback into a corresponding function on
-[`Terminal`], prefixed with `on_`:
+Each effect can be registered by implementing the corresponding **handler trait**
+(a trait under the [`effect`] module prefixed with `On`) on a handler type.
+Then install a handler object with the terminal with [`Terminal::register_effects`],
+and call the corresponding **register function**, prefixed with `with_on_`:
 
 ```rust,ignore
-terminal.on_bell(|_term| println!("Ring-a-ding-a-ding!"));
+use libghostty::{effect, Terminal};
+
+struct Handler;
+impl effect::OnBell for Handler {
+    fn on_bell(&mut self, _terminal: &Terminal<'_>) {
+        println!("Ring-a-ding-a-ding!");
+    }
+}
+
+terminal
+    .register_effects(Handler)?
+    .with_on_bell()?;
 ```
 
-The callbacks always receive a shared reference to the [`Terminal`] as their
+The handlers always receive a shared reference to the [`Terminal`] as their
 first parameter, as well as other parameters depending on the exact callback.
 
-## The rules for callbacks {#guide-effects-rules}
+## The rules for handlers {#guide-effects-rules}
 
-Callbacks run synchronously, in the middle of [`Terminal::vt_write()`] or
+Effect handlers run synchronously, in the middle of [`Terminal::vt_write()`] or
 [`Terminal::vt_write_until()`]. All of these rules come from that.
 
-You can't write to the same terminal from a callback. The terminal is still
-working through the first write, and it isn't reentrant. This applies to both
-[`vt_write()`] and [`vt_write_until()`]. For this reason, callbacks only
-receive a _shared_ reference to the terminal, which cannot call
+You can't write to the same terminal from an effect handler. The terminal is
+still working through the first write, and it isn't reentrant. This applies
+to both [`vt_write()`] and [`vt_write_until()`]. For this reason, callbacks
+only receive a _shared_ reference to the terminal, which cannot call
 mutating functions like [`vt_write()`].
 
 [`vt_write()`]: Terminal::vt_write
 [`vt_write_until()`]: Terminal::vt_write_until
 
 Don't block, and don't do anything expensive. Further IO processing waits until
-your callback returns, so a slow callback is a slow terminal.
+the handler function returns, so a slow handler is a slow terminal.
 
-Copy what you want to keep. Strings and buffers passed to a callback are
+Copy what you want to keep. Strings and buffers passed to a handler are
 borrowed, and they're only valid until it returns.
 
 ## The effects {#guide-effects-table}
 
 There are 19 effects:
 
-| Function | Callback type                        | Trigger                                                                 |
-| ------------------------------------------ | ------------------------------------ | ----------------------------------------------------------------------- |
-| [`on_pty_write`](Terminal::on_pty_write)            | [`PtyWriteFn`](effect::PtyWriteFn)            | VT query and mode reports written back to the pty                       |
-| [`on_bell`](Terminal::on_bell)                 | [`BellFn`](effect::BellFn)                | BEL character (0x07)                                                    |
-| [`on_title_changed`](Terminal::on_title_changed)        | [`TitleChangedFn`](effect::TitleChangedFn)        | Title change via OSC 0 / OSC 2                                          |
-| [`on_pwd_changed`](Terminal::on_pwd_changed)          | [`PwdChangedFn`](effect::PwdChangedFn)          | Pwd change via OSC 7 / OSC 9 / OSC 1337                                 |
-| [`on_enquiry`](Terminal::on_enquiry)              | [`EnquiryFn`](effect::EnquiryFn)             | ENQ character (0x05)                                                    |
-| [`on_xtversion`](Terminal::on_xtversion)            | [`XtversionFn`](effect::XtversionFn)           | XTVERSION query (`CSI > q`)                                             |
-| [`on_size`](Terminal::on_size)                 | [`SizeFn`](effect::SizeFn)                | XTWINOPS query (`CSI 14/16/18/19 t`) or mode 2048 enable                |
-| [`on_color_scheme`](Terminal::on_color_scheme)         | [`ColorSchemeFn`](effect::ColorSchemeFn)         | Color scheme query (`CSI ? 996 n`)                                      |
-| [`on_device_attributes`](Terminal::on_device_attributes)    | [`DeviceAttributesFn`](effect::DeviceAttributesFn)    | Device attributes query (`CSI c`, `CSI > c`, `CSI = c`)                 |
-| [`on_clipboard_write`](Terminal::on_clipboard_write)      | [`ClipboardWriteFn`](effect::ClipboardWriteFn)      | Clipboard write via OSC 52 / OSC 1337 / OSC 5522                        |
-| [`on_clipboard_read`](Terminal::on_clipboard_read)       | [`ClipboardReadFn`](effect::ClipboardReadFn)       | Clipboard read via OSC 52 `?` / OSC 5522                                |
-| [`on_desktop_notification`](Terminal::on_desktop_notification) | [`DesktopNotificationFn`](effect::DesktopNotificationFn) | Desktop notification via OSC 9 / OSC 777                                |
-| [`on_progress_report`](Terminal::on_progress_report)      | [`ProgressReportFn`](effect::ProgressReportFn)      | Progress report via OSC 9;4                                             |
-| [`on_program_status`](Terminal::on_program_status)       | [`ProgramStatusFn`](effect::ProgramStatusFn)       | Program status report via OSC 7501                                      |
-| [`on_unknown_sequence`](Terminal::on_unknown_sequence)     | [`UnknownSequenceFn`](effect::UnknownSequenceFn)     | APC or OSC sequence we don't implement. See [Custom Sequences](custom-sequences.md#guide-custom-sequences) |
-| [`on_render_hold`](Terminal::on_render_hold)          | [`RenderHoldFn`](effect::RenderHoldFn)          | Synchronized output (mode 2026) begins or ends                          |
-| [`on_semantic_prompt`](Terminal::on_semantic_prompt)      | [`SemanticPromptFn`](effect::SemanticPromptFn)      | Shell reports a prompt or command step via OSC 133                      |
-| [`on_reset`](Terminal::on_reset)                | [`ResetFn`](effect::ResetFn)               | Full reset (RIS, `ESC c`)                                               |
-| [`on_resize_window`](Terminal::on_resize_window)        | [`ResizeWindowFn`](effect::ResizeWindowFn)        | Window resize request (`CSI 8 t`)                                       |
+| Handler trait             | Trigger                                                             |
+| ------------------------- | ------------------------------------------------------------------- |
+| [`OnPtyWrite`]            | VT query and mode reports written back to the pty                   |
+| [`OnBell`]                | BEL character (0x07)                                                |
+| [`OnTitleChanged`]        | Title change via OSC 0 / OSC 2                                      |
+| [`OnPwdChanged`]          | Pwd change via OSC 7 / OSC 9 / OSC 1337                             |
+| [`OnEnquiry`]             | ENQ character (0x05)                                                |
+| [`OnXtversion`]           | XTVERSION query (`CSI > q`)                                         |
+| [`OnSize`]                | XTWINOPS query (`CSI 14/16/18/19 t`) or mode 2048 enable            |
+| [`OnColorScheme`]         | Color scheme query (`CSI ? 996 n`)                                  |
+| [`OnDeviceAttributes`]    | Device attributes query (`CSI c`, `CSI > c`, `CSI = c`)             |
+| [`OnClipboardWrite`]      | Clipboard write via OSC 52 / OSC 1337 / OSC 5522                    |
+| [`OnClipboardRead`]       | Clipboard read via OSC 52 `?` / OSC 5522                            |
+| [`OnDesktopNotification`] | Desktop notification via OSC 9 / OSC 777                            |
+| [`OnProgressReport`]      | Progress report via OSC 9;4                                         |
+| [`OnProgramStatus`]       | Program status report via OSC 7501                                  |
+| [`OnUnknownSequence`]     | APC or OSC sequence we don't implement. See [Custom Sequences].     |
+| [`OnRenderHold`]          | Synchronized output (mode 2026) begins or ends                      |
+| [`OnSemanticPrompt`]      | Shell reports a prompt or command step via OSC 133                  |
+| [`OnReset`]               | Full reset (RIS, `ESC c`)                                           |
+| [`OnResizeWindow`]        | Window resize request (`CSI 8 t`)                                   |
 
-## Common callbacks {#guide-effects-common}
+[Custom Sequences]: custom-sequences.md#guide-custom-sequences
 
-These are the callbacks most terminals start with. Each one is from the same
+## Common handlers {#guide-effects-common}
+
+These are the handlers most terminals start with. Each one is from the same
 example program, which prints what it receives.
 
 ### Replying to the program
@@ -110,8 +125,8 @@ Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs
 
 ### Title changes
 
-The callback tells you the title changed, but not what it changed to. You can
-read the new title with [`Terminal::title`] inside the callback.
+The handler tells you the title changed, but not what it changed to. You can
+read the new title with [`Terminal::title`] inside the handler.
 
 ```rust,ignore
 {{#include ../../example/rust-vt-effects/src/main.rs:effects-title-changed}}
@@ -122,7 +137,7 @@ Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs
 ### Clipboard writes
 
 A write is a request, not a command. You should ask the person using your
-terminal unless `granted` is set, and the stream waits until your callback
+terminal unless `granted` is set, and the stream waits until your handler
 returns while you do.
 
 Answer by calling `reply` before you return. If you return without replying, the
@@ -150,12 +165,12 @@ Full program: [rust-vt-effects/src/main.rs](/example/rust-vt-effects/src/main.rs
 
 ### Sequences we don't implement
 
-The callback for unknown sequences has more to it than the others, so it has its
+The handler for unknown sequences has more to it than the others, so it has its
 own guide. See [Custom Sequences](custom-sequences.md#guide-custom-sequences).
 
 ## Putting it together {#guide-effects-register}
 
-This registers the callbacks above, along with the unknown sequence callback,
+This registers the handlers above, along with the unknown sequence handler,
 and then writes a sequence for each one so you can watch them fire.
 
 ```rust,ignore

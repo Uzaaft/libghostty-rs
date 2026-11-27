@@ -167,7 +167,7 @@ impl<'alloc> Encoder<'alloc> {
     /// Note that the `macos_option_as_alt` option cannot be determined from
     /// terminal state and is reset to [`OptionAsAlt::False`] by this call.
     /// Use [`Encoder::set_macos_option_as_alt`] to set it afterward if needed.
-    pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_, '_>) -> &mut Self {
+    pub fn set_options_from_terminal(&mut self, terminal: &Terminal<'_>) -> &mut Self {
         crate::sys::GATE.freeze();
         unsafe {
             ffi::ghostty_key_encoder_set_from_terminal(self.0.as_raw(), terminal.inner.as_raw());

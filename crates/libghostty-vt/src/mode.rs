@@ -19,7 +19,7 @@ use crate::{
 };
 
 /// Methods related to [terminal modes](crate::mode).
-impl Terminal<'_, '_> {
+impl Terminal<'_> {
     /// Get the current value of a terminal mode.
     pub fn mode(&self, mode: Mode) -> Result<bool> {
         crate::sys::GATE.freeze();

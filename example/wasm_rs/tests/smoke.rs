@@ -1,12 +1,11 @@
 //! Integration checks, separate from the browser example.
 
 use std::{
-    cell::RefCell,
     ffi::CStr,
     mem::{align_of, offset_of, size_of},
 };
 
-use libghostty_vt::{RenderState, Terminal, alloc::Allocator, ffi, fmt::Formatter};
+use libghostty_vt::{alloc::Allocator, effect, ffi, fmt::Formatter, RenderState, Terminal};
 
 /// Exercise the same public Rust API used on native targets.
 /// A failed assertion traps, which makes the host runner fail as well.
@@ -35,7 +34,15 @@ pub extern "C" fn run() {
     let guard = vec![0x5au8; 256 * 1024];
     // Exercise both Zig's default heap and callbacks into Rust's allocator.
     for custom_allocator in [false, true] {
-        let response = RefCell::new(Vec::new());
+        struct Handler {
+            response: Vec<u8>,
+        }
+        impl effect::OnPtyWrite for Handler {
+            fn on_pty_write<'t>(&mut self, _terminal: &'t Terminal<'_>, data: &'t [u8]) {
+                self.response.extend_from_slice(data);
+            }
+        }
+
         let mut terminal = if custom_allocator {
             Terminal::new_in(&Allocator::GLOBAL, 13, 7)
         } else {
@@ -43,10 +50,14 @@ pub extern "C" fn run() {
         }
         .unwrap();
         terminal
-            .on_pty_write(|_, bytes: &[u8]| response.borrow_mut().extend_from_slice(bytes))
+            .register_effects(Handler { response: vec![] })
+            .unwrap()
+            .with_on_pty_write()
             .unwrap();
         terminal.vt_write(b"ab\x1b[31mC\x1b[0m\r\nxy\x1b[6n");
-        assert_eq!(*response.borrow(), b"\x1b[2;3R");
+
+        let handler = terminal.effect_handler::<Handler>().unwrap();
+        assert_eq!(handler.response, b"\x1b[2;3R");
         assert_eq!(terminal.cursor_x().unwrap(), 2);
         assert_eq!(terminal.cursor_y().unwrap(), 1);
         let mut state = RenderState::new().unwrap();
