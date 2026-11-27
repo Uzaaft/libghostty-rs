@@ -646,9 +646,9 @@ mod tests {
                 &mut self,
                 _terminal: &'t Terminal<'_>,
                 request: effect::ClipboardRead<'t>,
-            ) {
+            ) -> effect::ClipboardReadReply<'t> {
                 self.granted.push(request.granted());
-                request.reply(Err(ClipboardReadError::Denied)).finish();
+                request.reply(Err(ClipboardReadError::Denied))
             }
         }
 

@@ -460,10 +460,17 @@ effects! {
         const OPTION = CLIPBOARD_WRITE;
         type Raw = TerminalClipboardWriteFn(write: *const ffi::ClipboardWrite);
 
-        fn on_clipboard_write<'t>(write: ClipboardWrite<'t>) |h, term| {
+        fn on_clipboard_write<'t>(write: ClipboardWrite<'t>) -> ClipboardWriteReply<'t> |h, term| {
             // SAFETY: The request is only borrowed for the callback duration,
             // which `ClipboardWrite`'s lifetime enforces.
-            h.on_clipboard_write(term, unsafe { ClipboardWrite::from_raw(write) });
+            let reply = h.on_clipboard_write(term, unsafe { ClipboardWrite::from_raw(write) });
+
+            // SAFETY: The request lives for the callback duration.
+            if let Some(callback) = unsafe { (*reply.write.ptr).reply } {
+                // SAFETY: The reply only needs to outlive this synchronous call.
+                unsafe { callback(reply.write.ptr, &raw const reply.raw) };
+            }
+
         }
         fn with_on_clipboard_write();
     }
@@ -498,10 +505,17 @@ effects! {
         const OPTION = CLIPBOARD_READ;
         type Raw = TerminalClipboardReadFn(read: *const ffi::ClipboardRead);
 
-        fn on_clipboard_read<'t>(read: ClipboardRead<'t>) |h, term| {
+        fn on_clipboard_read<'t>(read: ClipboardRead<'t>) -> ClipboardReadReply<'t> |h, term| {
             // SAFETY: The request is only borrowed for the callback duration,
             // which `ClipboardRead`'s lifetime enforces.
-            h.on_clipboard_read(term, unsafe { ClipboardRead::from_raw(read) });
+            let reply = h.on_clipboard_read(term, unsafe { ClipboardRead::from_raw(read) });
+
+            // SAFETY: The request lives for the callback duration.
+            if let Some(callback) = unsafe { (*reply.read.ptr).reply } {
+                // SAFETY: The reply and the buffers it points to only need to
+                // outlive this synchronous call.
+                unsafe { callback(reply.read.ptr, &raw const reply.reply) };
+            }
         }
         fn with_on_clipboard_read();
     }
@@ -1043,15 +1057,6 @@ impl ClipboardWriteReply<'_> {
         self.raw.remember = v;
         self
     }
-
-    /// Finish the reply.
-    pub fn finish(self) {
-        // SAFETY: The request lives for the callback duration.
-        if let Some(callback) = unsafe { (*self.write.ptr).reply } {
-            // SAFETY: The reply only needs to outlive this synchronous call.
-            unsafe { callback(self.write.ptr, &raw const self.raw) };
-        }
-    }
 }
 
 /// One MIME representation in a clipboard write.
@@ -1297,14 +1302,7 @@ impl ClipboardReadReply<'_> {
         self
     }
     /// Finish the reply.
-    pub fn finish(self) {
-        // SAFETY: The request lives for the callback duration.
-        if let Some(callback) = unsafe { (*self.read.ptr).reply } {
-            // SAFETY: The reply and the buffers it points to only need to
-            // outlive this synchronous call.
-            unsafe { callback(self.read.ptr, &raw const self.reply) };
-        }
-    }
+    pub fn finish(self) {}
 }
 
 /// One MIME representation in a [`ClipboardRead::reply`].
@@ -2276,7 +2274,7 @@ mod tests {
     /// abort the whole test binary instead of failing the test.
     fn clipboard_read<F>(input: &[u8], answer: F) -> (Vec<SeenRead>, Vec<u8>)
     where
-        F: Fn(ClipboardRead<'_>) + 'static,
+        F: for<'t> Fn(ClipboardRead<'t>) -> ClipboardReadReply<'t> + 'static,
     {
         struct Handler<F: 'static> {
             answer: F,
@@ -2290,13 +2288,13 @@ mod tests {
         }
         impl<F> OnClipboardRead for Handler<F>
         where
-            F: Fn(ClipboardRead<'_>),
+            F: for<'t> Fn(ClipboardRead<'t>) -> ClipboardReadReply<'t>,
         {
             fn on_clipboard_read<'t>(
                 &mut self,
                 _terminal: &'t Terminal<'_>,
                 request: ClipboardRead<'t>,
-            ) {
+            ) -> ClipboardReadReply<'t> {
                 self.seen.push(SeenRead {
                     location: Some(request.location()),
                     mimes: request.mimes().map(<[u8]>::to_vec).collect(),
@@ -2305,7 +2303,7 @@ mod tests {
                     granted: request.granted(),
                     can_remember: request.can_remember(),
                 });
-                (self.answer)(request);
+                (self.answer)(request)
             }
         }
 
@@ -2332,9 +2330,7 @@ mod tests {
     #[test]
     fn osc52_clipboard_read() {
         let (seen, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request
-                .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
-                .finish();
+            request.reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
         });
         assert_eq!(
             seen,
@@ -2346,12 +2342,10 @@ mod tests {
         );
         assert_eq!(output, b"\x1b]52;c;aGVsbG8=\x1b\\");
 
-        // Errors and missing replies both answer with an empty clipboard.
+        // Errors answer with an empty clipboard.
         let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request.reply(Err(ClipboardReadError::Denied)).finish();
+            request.reply(Err(ClipboardReadError::Denied))
         });
-        assert_eq!(output, b"\x1b]52;c;\x1b\\");
-        let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |_request| {});
         assert_eq!(output, b"\x1b]52;c;\x1b\\");
     }
 
@@ -2375,7 +2369,6 @@ mod tests {
                         // so this must reach the program unchanged.
                         ClipboardMime::new(b"\xFF"),
                     ])
-                    .finish();
             },
         );
         assert_eq!(
@@ -2400,17 +2393,12 @@ mod tests {
             .as_bytes()
         );
 
-        // Errors map to protocol statuses, and a missing reply is EPERM.
+        // Errors map to protocol statuses.
         let (_, output) = clipboard_read(
             b"\x1b]5522;type=read:id=r2;dGV4dC9wbGFpbg==\x1b\\",
-            |request| request.reply(Err(ClipboardReadError::Busy)).finish(),
+            |request| request.reply(Err(ClipboardReadError::Busy)),
         );
         assert_eq!(output, b"\x1b]5522;type=read:status=EBUSY:id=r2\x1b\\");
-        let (_, output) = clipboard_read(
-            b"\x1b]5522;type=read:id=r3;dGV4dC9wbGFpbg==\x1b\\",
-            |_request| {},
-        );
-        assert_eq!(output, b"\x1b]5522;type=read:status=EPERM:id=r3\x1b\\");
     }
 
     #[test]
@@ -2423,7 +2411,6 @@ mod tests {
             request
                 .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hi")]))
                 .with_remember(true)
-                .finish();
         });
         let grants: Vec<_> = seen.iter().map(|s| (s.can_remember, s.granted)).collect();
         assert_eq!(grants, [(true, false), (true, true)]);
@@ -2443,7 +2430,6 @@ mod tests {
                         ClipboardReplyContent::new(b"text/plain", b""),
                     ]))
                     .with_available_mimes(&[ClipboardMime::new(b"")])
-                    .finish();
             },
         );
         assert_eq!(
@@ -2457,9 +2443,7 @@ mod tests {
 
         // OSC 52 has no text representation to use, so the clipboard is empty.
         let (_, output) = clipboard_read(b"\x1b]52;c;?\x1b\\", |request| {
-            request
-                .reply(Ok(&[ClipboardReplyContent::new(b"", b"")]))
-                .finish();
+            request.reply(Ok(&[ClipboardReplyContent::new(b"", b"")]))
         });
         assert_eq!(output, b"\x1b]52;c;\x1b\\");
     }
@@ -2474,7 +2458,7 @@ mod tests {
         ] {
             let (_, output) = clipboard_read(
                 b"\x1b]5522;type=read:id=x;dGV4dC9wbGFpbg==\x1b\\",
-                move |request| request.reply(Err(error)).finish(),
+                move |request| request.reply(Err(error)),
             );
             let expected = format!("\x1b]5522;type=read:status={status}:id=x\x1b\\");
             assert_eq!(output, expected.as_bytes(), "{error:?}");
@@ -2483,11 +2467,9 @@ mod tests {
 
     #[test]
     fn clipboard_read_primary_location() {
-        let reply = |request: ClipboardRead<'_>| {
-            request
-                .reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
-                .finish();
-        };
+        fn reply<'t>(request: ClipboardRead<'t>) -> ClipboardReadReply<'t> {
+            request.reply(Ok(&[ClipboardReplyContent::new(b"text/plain", b"hello")]))
+        }
 
         let (seen, output) = clipboard_read(b"\x1b]52;p;?\x1b\\", reply);
         assert_eq!(seen[0].location, Some(ClipboardLocation::Primary));
@@ -2523,13 +2505,13 @@ mod tests {
                 &mut self,
                 _terminal: &'t Terminal<'_>,
                 write: ClipboardWrite<'t>,
-            ) {
+            ) -> ClipboardWriteReply<'t> {
                 // Record rather than assert here: a panic in a callback
                 // aborts the whole test binary.
                 for content in write.contents() {
                     self.written.push(content.data.to_vec());
                 }
-                write.reply(Ok(())).finish();
+                write.reply(Ok(()))
             }
         }
 
@@ -2558,7 +2540,7 @@ mod tests {
         let input = [remember, list, remember].concat();
         let (seen, output) = clipboard_read(input.as_bytes(), |request| {
             // Empty slices hand C dangling non-null pointers with length 0.
-            request.reply(Ok(&[])).with_remember(true).finish();
+            request.reply(Ok(&[])).with_remember(true)
         });
         let observed: Vec<_> = seen
             .iter()
@@ -2612,10 +2594,10 @@ mod tests {
                     &mut self,
                     _terminal: &'t Terminal<'_>,
                     write: ClipboardWrite<'t>,
-                ) {
+                ) -> ClipboardWriteReply<'t> {
                     self.written
                         .extend(write.contents().map(|c| c.data.to_vec()));
-                    write.reply(Ok(())).finish();
+                    write.reply(Ok(()))
                 }
             }
 

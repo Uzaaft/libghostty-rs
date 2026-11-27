@@ -57,8 +57,8 @@ fn paste_event() -> (Result<bool, Error>, Vec<u8>) {
             &mut self,
             _terminal: &'t Terminal<'_>,
             read: effect::ClipboardRead<'t>,
-        ) {
-            read.reply(Err(ClipboardReadError::Denied)).finish()
+        ) -> effect::ClipboardReadReply<'t> {
+            read.reply(Err(ClipboardReadError::Denied))
         }
     }
 
